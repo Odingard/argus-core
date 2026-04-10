@@ -102,7 +102,7 @@ class TargetRepository:
 
     def update(self, target_id: str, **kwargs: Any) -> dict[str, Any] | None:
         target = self._session.get(DBTarget, target_id)
-        if target is None:
+        if target is None or not target.is_active:
             return None
         for key, value in kwargs.items():
             if key == "mcp_server_urls":

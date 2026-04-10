@@ -63,52 +63,66 @@ class ScanPersistence:
         )
         logger.info("Persisted scan record: %s", scan_result.scan_id[:8])
 
-        # 2. Save agent results
-        for ar in scan_result.agent_results:
-            self._repo.save_agent_result(
-                scan_id=scan_result.scan_id,
-                agent_type=ar.agent_type.value if hasattr(ar.agent_type, "value") else str(ar.agent_type),
-                instance_id=ar.instance_id,
-                status=ar.status.value if hasattr(ar.status, "value") else str(ar.status),
-                started_at=ar.started_at,
-                completed_at=ar.completed_at,
-                duration_seconds=ar.duration_seconds,
-                findings_count=ar.findings_count,
-                validated_count=ar.validated_count,
-                techniques_attempted=ar.techniques_attempted,
-                techniques_succeeded=ar.techniques_succeeded,
-                requests_made=ar.requests_made,
-                signals_emitted=ar.signals_emitted,
-                errors=ar.errors,
+        # 2-4. Save agent results, findings, and compound paths.
+        # Wrapped in try/except so a partial failure marks the scan as
+        # "failed" instead of leaving it stuck as "running" forever.
+        try:
+            for ar in scan_result.agent_results:
+                self._repo.save_agent_result(
+                    scan_id=scan_result.scan_id,
+                    agent_type=ar.agent_type.value if hasattr(ar.agent_type, "value") else str(ar.agent_type),
+                    instance_id=ar.instance_id,
+                    status=ar.status.value if hasattr(ar.status, "value") else str(ar.status),
+                    started_at=ar.started_at,
+                    completed_at=ar.completed_at,
+                    duration_seconds=ar.duration_seconds,
+                    findings_count=ar.findings_count,
+                    validated_count=ar.validated_count,
+                    techniques_attempted=ar.techniques_attempted,
+                    techniques_succeeded=ar.techniques_succeeded,
+                    requests_made=ar.requests_made,
+                    signals_emitted=ar.signals_emitted,
+                    errors=ar.errors,
+                )
+            logger.info("Persisted %d agent results", len(scan_result.agent_results))
+
+            for finding in scan_result.findings:
+                finding_dict = finding.model_dump()
+                if hasattr(finding.severity, "value"):
+                    finding_dict["severity"] = finding.severity.value
+                if hasattr(finding.status, "value"):
+                    finding_dict["status"] = finding.status.value
+                if finding.owasp_agentic and hasattr(finding.owasp_agentic, "value"):
+                    finding_dict["owasp_agentic"] = finding.owasp_agentic.value
+                if finding.owasp_llm and hasattr(finding.owasp_llm, "value"):
+                    finding_dict["owasp_llm"] = finding.owasp_llm.value
+                self._repo.save_finding(scan_result.scan_id, finding_dict)
+            logger.info("Persisted %d findings", len(scan_result.findings))
+
+            for path in scan_result.compound_paths:
+                path_dict = path.model_dump()
+                if hasattr(path.severity, "value"):
+                    path_dict["severity"] = path.severity.value
+                if path.owasp_agentic:
+                    path_dict["owasp_agentic"] = [
+                        cat.value if hasattr(cat, "value") else str(cat) for cat in path.owasp_agentic
+                    ]
+                self._repo.save_compound_path(scan_result.scan_id, path_dict)
+            logger.info("Persisted %d compound attack paths", len(scan_result.compound_paths))
+
+        except Exception:
+            # Mark the scan as failed so it doesn't stay "running" forever
+            logger.exception(
+                "Partial failure persisting scan %s — marking as failed",
+                scan_result.scan_id[:8],
             )
-        logger.info("Persisted %d agent results", len(scan_result.agent_results))
-
-        # 3. Save findings
-        for finding in scan_result.findings:
-            finding_dict = finding.model_dump()
-            # Convert enum values to strings for JSON storage
-            if hasattr(finding.severity, "value"):
-                finding_dict["severity"] = finding.severity.value
-            if hasattr(finding.status, "value"):
-                finding_dict["status"] = finding.status.value
-            if finding.owasp_agentic and hasattr(finding.owasp_agentic, "value"):
-                finding_dict["owasp_agentic"] = finding.owasp_agentic.value
-            if finding.owasp_llm and hasattr(finding.owasp_llm, "value"):
-                finding_dict["owasp_llm"] = finding.owasp_llm.value
-            self._repo.save_finding(scan_result.scan_id, finding_dict)
-        logger.info("Persisted %d findings", len(scan_result.findings))
-
-        # 4. Save compound attack paths
-        for path in scan_result.compound_paths:
-            path_dict = path.model_dump()
-            if hasattr(path.severity, "value"):
-                path_dict["severity"] = path.severity.value
-            if path.owasp_agentic:
-                path_dict["owasp_agentic"] = [
-                    cat.value if hasattr(cat, "value") else str(cat) for cat in path.owasp_agentic
-                ]
-            self._repo.save_compound_path(scan_result.scan_id, path_dict)
-        logger.info("Persisted %d compound attack paths", len(scan_result.compound_paths))
+            self._repo.complete_scan(
+                scan_id=scan_result.scan_id,
+                status="failed",
+                report_json=report_json,
+                report_html=report_html,
+            )
+            raise
 
         # 5. Complete scan with aggregate stats and reports
         self._repo.complete_scan(

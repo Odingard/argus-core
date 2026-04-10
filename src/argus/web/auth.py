@@ -91,8 +91,10 @@ async def authenticate(
         from argus.db.repository import APIKeyRepository
 
         repo = APIKeyRepository()
-        key_info = repo.authenticate(token)
-        repo.close()
+        try:
+            key_info = repo.authenticate(token)
+        finally:
+            repo.close()
         if key_info:
             return AuthContext(
                 authenticated=True,
