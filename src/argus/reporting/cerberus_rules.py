@@ -26,6 +26,8 @@ _AGENT_PREFIXES: dict[str, str] = {
     "privilege_escalation": "PE",
     "race_condition": "RC",
     "model_extraction": "ME",
+    "persona_hijacking": "PH",
+    "memory_boundary_collapse": "MB",
 }
 
 # Detection templates keyed by agent type.
@@ -209,6 +211,44 @@ _DETECTION_TEMPLATES: dict[str, dict[str, Any]] = {
         "recommended_action": (
             "Block extraction attempts, enforce output filtering for system "
             "internals, and log the probe sequence for threat intelligence."
+        ),
+    },
+    "persona_hijacking": {
+        "detection_logic": (
+            "Monitor for gradual identity drift in agent responses. Track "
+            "persona consistency metrics across conversation turns and flag "
+            "when the agent's behavioral fingerprint deviates from its "
+            "established baseline beyond a configurable threshold."
+        ),
+        "indicators": [
+            "Agent adopting roles or identities not in its system prompt",
+            "Gradual shift in response style or authority claims over turns",
+            "Agent referencing instructions not present in its original context",
+            "Persona consistency score dropping below baseline threshold",
+            "Agent resisting correction when persona drift is challenged",
+        ],
+        "recommended_action": (
+            "Reset the agent's context to its original system prompt, terminate "
+            "the session, and audit the conversation history for injection vectors."
+        ),
+    },
+    "memory_boundary_collapse": {
+        "detection_logic": (
+            "Monitor memory store boundaries between agents and sessions. "
+            "Detect when data from one agent's memory is accessible to another "
+            "agent or when session-scoped data persists beyond its intended "
+            "lifecycle. Track canary tokens planted in isolated memory stores."
+        ),
+        "indicators": [
+            "Cross-agent memory reads returning data from a different agent's store",
+            "Session-scoped data persisting after session termination",
+            "Canary tokens from one memory boundary appearing in another",
+            "Memory isolation violations between trust levels",
+            "Contradictory instructions surviving across session boundaries",
+        ],
+        "recommended_action": (
+            "Enforce strict memory isolation between agents, purge leaked data, "
+            "audit memory store access controls, and verify session cleanup."
         ),
     },
 }

@@ -303,8 +303,10 @@ def scan(
     # Persist scan results to database
     try:
         persistence = ScanPersistence()
-        persistence.save(scan_result=result, target_name=target_name, initiated_by="cli")
-        persistence.close()
+        try:
+            persistence.save(scan_result=result, target_name=target_name, initiated_by="cli")
+        finally:
+            persistence.close()
         console.print("[dim]Scan persisted to database[/]")
     except Exception as exc:
         console.print(f"[yellow]Warning: Could not persist scan: {type(exc).__name__}[/]")
