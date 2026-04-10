@@ -47,9 +47,14 @@ from pydantic import BaseModel, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from argus.agents import (
+    ContextWindowAgent,
+    CrossAgentExfilAgent,
     IdentitySpoofAgent,
     MemoryPoisoningAgent,
+    ModelExtractionAgent,
+    PrivilegeEscalationAgent,
     PromptInjectionHunter,
+    RaceConditionAgent,
     SupplyChainAgent,
     ToolPoisoningAgent,
 )
@@ -85,11 +90,13 @@ MAX_RECENT_FINDINGS_RETURNED = 50
 ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 # Blocked SSRF host patterns when ALLOW_PRIVATE_RANGES is False
-SSRF_BLOCKED_EXACT_HOSTS = frozenset({
-    "localhost",
-    "metadata.google.internal",
-    "metadata",
-})
+SSRF_BLOCKED_EXACT_HOSTS = frozenset(
+    {
+        "localhost",
+        "metadata.google.internal",
+        "metadata",
+    }
+)
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -134,6 +141,7 @@ def _validate_url_for_scan(url: str) -> None:
     # validate the resolved address at request time, since DNS responses
     # can change between this check and the actual connect.
     import socket as _socket
+
     try:
         infos = _socket.getaddrinfo(host, None)
     except OSError as exc:
@@ -350,7 +358,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allow_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -368,6 +376,17 @@ def create_app() -> FastAPI:
             "ARGUS_WEB_ALLOW_PRIVATE=1 — ScanRequest URLs to private/loopback ranges WILL be accepted. "
             "Only use this for local benchmark testing."
         )
+
+    # Initialize database and mount production API routes
+    try:
+        from argus.db.session import init_db
+        from argus.web.api_routes import create_production_router
+
+        init_db()
+        app.include_router(create_production_router())
+        logger.info("Production API routes mounted (targets, scans, auth, reports)")
+    except Exception as exc:
+        logger.warning("Could not initialize production routes: %s", type(exc).__name__)
 
     # Mount static assets
     if STATIC_DIR.exists():
@@ -399,6 +418,7 @@ def create_app() -> FastAPI:
             # operator-supplied ARGUS_WEB_TOKEN containing quotes would
             # otherwise break out of the attribute and enable stored XSS.
             from html import escape as _html_escape
+
             safe_token = _html_escape(WEB_TOKEN, quote=True)
             token_meta = f'<meta name="argus-token" content="{safe_token}">'
             html = html.replace("</head>", f"  {token_meta}\n</head>", 1)
@@ -446,11 +466,20 @@ def create_app() -> FastAPI:
         )
 
         orchestrator = Orchestrator()
+        # Phase 1
         orchestrator.register_agent(AgentType.PROMPT_INJECTION, PromptInjectionHunter)
         orchestrator.register_agent(AgentType.TOOL_POISONING, ToolPoisoningAgent)
         orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
+        # Phase 2
         orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
         orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+        # Phase 3
+        orchestrator.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
+        orchestrator.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
+        orchestrator.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
+        orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+        # Phase 4
+        orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
         state.orchestrator = orchestrator
 
         # Initialize agent state cards
@@ -529,8 +558,25 @@ def create_app() -> FastAPI:
                     demo_pace_seconds=request.demo_pace_seconds,
                 )
                 state.last_result = result
+                state.scan_id = result.scan_id
                 state.status = "completed"
                 state.completed_at = time.monotonic()
+
+                # Persist scan results to database
+                try:
+                    from argus.db.scan_persistence import ScanPersistence
+
+                    persistence = ScanPersistence()
+                    persistence.save(
+                        scan_result=result,
+                        target_name=request.target_name,
+                        initiated_by="web_dashboard",
+                    )
+                    persistence.close()
+                    logger.info("Scan %s persisted to database", result.scan_id[:8])
+                except Exception as persist_exc:
+                    logger.warning("Failed to persist scan: %s", type(persist_exc).__name__)
+
                 await state.broadcast("complete", state.snapshot())
             except Exception as exc:
                 logger.exception("Scan failed: %s", type(exc).__name__)

@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]>=0.34.0,<1.0",
     "sse-starlette>=2.1.0,<3.0",
     "verdict-weight>=1.0.0,<2.0",
+    "sqlalchemy>=2.0.0,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +63,9 @@ ignore = [
 "src/argus/corpus/manager.py" = ["E501"]  # attack patterns are long strings by nature
 "src/argus/agents/*.py" = ["E501"]  # attack payloads are long strings by nature
 "src/argus/web/server.py" = ["B008"]  # Depends() in defaults is FastAPI's standard pattern
+"src/argus/web/api_routes.py" = ["B008"]  # Depends() in defaults is FastAPI's standard pattern
+"src/argus/web/auth.py" = ["B008"]  # Depends() in defaults is FastAPI's standard pattern
+"src/argus/reporting/html_report.py" = ["E501"]  # inline CSS in HTML template strings
 "src/argus/prometheus/modules_lib/*.py" = ["E501"]  # attack module payloads are long strings
 
 [tool.pytest.ini_options]
