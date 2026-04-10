@@ -34,9 +34,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install with audit tool
-        run: pip install -e ".[dev]"
+        run: pip install ".[dev]"
       - name: Run pip-audit
-        run: pip-audit --strict --desc --skip-editable
+        run: pip-audit --strict --desc
 
   test:
     name: Test (Python ${{ matrix.python-version }})
