@@ -205,7 +205,12 @@ class APIKeyRepository:
         if active_only:
             query = query.filter(DBAPIKey.is_active.is_(True))
         query = query.order_by(desc(DBAPIKey.created_at))
-        return [_to_dict(k) for k in query.all()]
+        results = []
+        for k in query.all():
+            d = _to_dict(k)
+            d.pop("key_hash", None)
+            results.append(d)
+        return results
 
     def revoke(self, key_id: str) -> bool:
         api_key = self._session.get(DBAPIKey, key_id)
@@ -239,13 +244,14 @@ class ScanRepository:
         timeout_seconds: float = 600.0,
         non_destructive: bool = True,
         initiated_by: str = "cli",
+        started_at: datetime | None = None,
     ) -> dict[str, Any]:
         scan = DBScan(
             id=scan_id,
             target_id=target_id,
             target_name=target_name,
             status="running",
-            started_at=datetime.now(UTC),
+            started_at=started_at or datetime.now(UTC),
             timeout_seconds=timeout_seconds,
             non_destructive=non_destructive,
             initiated_by=initiated_by,
@@ -267,6 +273,8 @@ class ScanRepository:
         signals_exchanged: int = 0,
         report_json: str | None = None,
         report_html: str | None = None,
+        completed_at: datetime | None = None,
+        duration_seconds: float | None = None,
     ) -> dict[str, Any] | None:
         scan = self._session.get(DBScan, scan_id)
         if scan is None:
@@ -274,9 +282,11 @@ class ScanRepository:
 
         now = datetime.now(UTC)
         scan.status = status
-        scan.completed_at = now
-        if scan.started_at:
-            scan.duration_seconds = (now - scan.started_at).total_seconds()
+        scan.completed_at = completed_at or now
+        if duration_seconds is not None:
+            scan.duration_seconds = duration_seconds
+        elif scan.started_at:
+            scan.duration_seconds = (scan.completed_at - scan.started_at).total_seconds()
         scan.agents_deployed = agents_deployed
         scan.agents_completed = agents_completed
         scan.agents_failed = agents_failed

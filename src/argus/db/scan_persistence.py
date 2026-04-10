@@ -54,12 +54,13 @@ class ScanPersistence:
         html_gen = HTMLReportGenerator()
         report_html = html_gen.generate(scan_result, target_name=target_name)
 
-        # 1. Create scan record
+        # 1. Create scan record (use actual scan timestamps, not persistence time)
         scan_record = self._repo.create_scan(
             scan_id=scan_result.scan_id,
             target_name=target_name,
             target_id=target_id,
             initiated_by=initiated_by,
+            started_at=scan_result.started_at,
         )
         logger.info("Persisted scan record: %s", scan_result.scan_id[:8])
 
@@ -137,6 +138,8 @@ class ScanPersistence:
             signals_exchanged=summary["signals_exchanged"],
             report_json=report_json,
             report_html=report_html,
+            completed_at=scan_result.completed_at,
+            duration_seconds=scan_result.duration_seconds,
         )
         logger.info(
             "Scan %s fully persisted — %d findings, %d compound paths",
