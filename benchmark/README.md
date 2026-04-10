@@ -12,14 +12,17 @@ The same scenarios can also be scored by the community submission rubric in [`be
 
 ```
 benchmark/
-├── scenarios/              ← 7 deliberately-vulnerable Docker scenarios (test targets)
+├── scenarios/              ← 10 deliberately-vulnerable Docker scenarios (test targets)
 │   ├── 01-tool-poisoning/      Poisoned MCP server with hidden instructions
 │   ├── 02-memory-poisoning/    Cross-session memory attack
 │   ├── 03-identity-spoof/      Orchestrator impersonation
 │   ├── 04-privilege-chain/     Tool chain privilege escalation
 │   ├── 05-injection-gauntlet/  Prompt injection across 10 surfaces
 │   ├── 06-supply-chain/        Malicious MCP package trust
-│   └── 07-race-condition/      Parallel-execution race / double-spend
+│   ├── 07-race-condition/      Parallel-execution race / double-spend
+│   ├── 08-context-window/      Context window manipulation attacks
+│   ├── 09-cross-agent-exfil/   Multi-agent trust boundary violation
+│   └── 10-model-extraction/    System prompt & config extraction
 ├── scoring/                ← ARGUS internal scoring (VERDICT WEIGHT certified)
 │   ├── rubric.json         ← Maps Findings → 7 scenarios via Consequence Weight
 │   └── score.py            ← Reads ARGUS findings.json, produces score report
@@ -33,7 +36,7 @@ benchmark/
 ├── run_baseline.py         ← Run ARGUS Phase 1 agents against all 7 scenarios
 ├── run_cinematic.py        ← Same, with the cinematic terminal dashboard
 ├── run_live.py             ← Same, with the live multi-panel dashboard
-├── docker-compose.yml      ← Spin up all 7 scenarios at once
+├── docker-compose.yml      ← Spin up all 10 scenarios at once
 └── assets/                 ← Demo GIFs
 ```
 
@@ -46,14 +49,14 @@ benchmark/
 | **ARGUS internal** (VERDICT WEIGHT) | ARGUS scores its own findings honestly. CW thresholds determine tier passage. The score is what ARGUS earns through generic technique application. | `benchmark/scoring/` |
 | **Community public** (Andre's rubric) | External tools (anyone) submit findings in a fixed JSON format and get scored against the public rubric, then submit a PR to LEADERBOARD.md | `benchmark/official/` |
 
-The 7 scenarios in `benchmark/scenarios/` are **shared infrastructure**. Both consumers attack the same targets.
+The 10 scenarios in `benchmark/scenarios/` are **shared infrastructure**. Both consumers attack the same targets.
 
 ---
 
 ## Quick start
 
 ```bash
-# Spin up all 7 scenarios
+# Spin up all 10 scenarios
 docker compose -f benchmark/docker-compose.yml up -d
 
 # Run ARGUS against the benchmark
@@ -78,7 +81,7 @@ Each scenario is scored on three tiers (max 6 points per scenario):
 | **Validation** | 2 | At least N findings with CW ≥ 0.70 (validated by VERDICT WEIGHT) matching this scenario |
 | **Chaining** | 3 | At least 1 compound attack path (Correlation Agent v1+) matching this scenario's chain indicators |
 
-**Total max: 42 points** (7 scenarios × 6 points each).
+**Total max: 60 points** (10 scenarios × 6 points each).
 
 ---
 
@@ -93,8 +96,11 @@ Each scenario is scored on three tiers (max 6 points per scenario):
 | 05 — Injection Gauntlet | Easy | Phase 1 ✓ |
 | 06 — Supply Chain | Medium | Phase 1 ✓ |
 | 07 — Race Condition | Expert | Phase 3 |
+| 08 — Context Window | Hard | Phase 3 |
+| 09 — Cross-Agent Exfil | Expert | Phase 4 |
+| 10 — Model Extraction | Medium | Phase 4 |
 
-Phase 1 covers scenarios 01, 05, 06. Phase 2/3 will close the remaining gaps.
+Phase 1 covers scenarios 01, 05, 06. Phase 2 covers 02, 03. Phase 3 covers 04, 07, 08. Phase 4 covers 09, 10.
 
 ---
 

@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  cross-agent-exfil:
+    build: .
+    command: python3 cross_agent_exfil.py
+    ports:
+      - "8017:8017"
+    environment:
+      - AGENT_PORT=8017

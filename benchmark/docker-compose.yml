@@ -1,6 +1,6 @@
 # ARGUS Gauntlet — All Scenarios
 #
-# Spins up all 7 official scenario test targets at once. Each scenario also
+# Spins up all 10 official scenario test targets at once. Each scenario also
 # has its own docker-compose.yml in scenarios/<id>/ — this top-level file
 # is a convenience aggregator using `extends`.
 #
@@ -10,7 +10,7 @@
 # Then run ARGUS against the full benchmark:
 #   python benchmark/run_baseline.py
 #
-# The 7 scenarios live at:
+# The 10 scenarios live at:
 #   01-tool-poisoning      → http://localhost:8001 (mcp), http://localhost:8002 (target agent)
 #   02-memory-poisoning    → http://localhost:8003
 #   03-identity-spoof      → http://localhost:8005
@@ -18,6 +18,9 @@
 #   05-injection-gauntlet  → http://localhost:8009
 #   06-supply-chain        → http://localhost:8011
 #   07-race-condition      → http://localhost:8013
+#   08-context-window      → http://localhost:8015
+#   09-cross-agent-exfil   → http://localhost:8017
+#   10-model-extraction    → http://localhost:8019
 
 services:
   scenario-01-mcp:
@@ -94,3 +97,30 @@ services:
       - "8013:8013"
     environment:
       - AGENT_PORT=8013
+
+  scenario-08-context-window:
+    build: ./scenarios/08-context-window
+    command: python3 context_window_agent.py
+    container_name: argus-bench-08
+    ports:
+      - "8015:8015"
+    environment:
+      - AGENT_PORT=8015
+
+  scenario-09-cross-agent-exfil:
+    build: ./scenarios/09-cross-agent-exfil
+    command: python3 cross_agent_exfil.py
+    container_name: argus-bench-09
+    ports:
+      - "8017:8017"
+    environment:
+      - AGENT_PORT=8017
+
+  scenario-10-model-extraction:
+    build: ./scenarios/10-model-extraction
+    command: python3 model_extraction_agent.py
+    container_name: argus-bench-10
+    ports:
+      - "8019:8019"
+    environment:
+      - AGENT_PORT=8019

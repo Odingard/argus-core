@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  context-window-agent:
+    build: .
+    command: python3 context_window_agent.py
+    ports:
+      - "8015:8015"
+    environment:
+      - AGENT_PORT=8015

@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  model-extraction-agent:
+    build: .
+    command: python3 model_extraction_agent.py
+    ports:
+      - "8019:8019"
+    environment:
+      - AGENT_PORT=8019
