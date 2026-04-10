@@ -16,7 +16,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from argus import __version__
-from argus.agents import PromptInjectionHunter, SupplyChainAgent, ToolPoisoningAgent
+from argus.agents import (
+    ContextWindowAgent,
+    CrossAgentExfilAgent,
+    IdentitySpoofAgent,
+    MemoryPoisoningAgent,
+    ModelExtractionAgent,
+    PrivilegeEscalationAgent,
+    PromptInjectionHunter,
+    RaceConditionAgent,
+    SupplyChainAgent,
+    ToolPoisoningAgent,
+)
 from argus.corpus.manager import AttackCorpus
 from argus.models.agents import AgentType, TargetConfig
 from argus.orchestrator.engine import Orchestrator
@@ -24,11 +35,22 @@ from argus.reporting.renderer import ReportRenderer
 
 
 def _create_orchestrator() -> Orchestrator:
-    """Create an orchestrator with all Phase 1 agents registered."""
+    """Create an orchestrator with all attack agents registered."""
     orch = Orchestrator()
+    # Phase 1
     orch.register_agent(AgentType.PROMPT_INJECTION, PromptInjectionHunter)
     orch.register_agent(AgentType.TOOL_POISONING, ToolPoisoningAgent)
     orch.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
+    # Phase 2
+    orch.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
+    orch.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+    # Phase 3
+    orch.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
+    orch.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
+    orch.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
+    orch.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+    # Phase 4
+    orch.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
     return orch
 
 
