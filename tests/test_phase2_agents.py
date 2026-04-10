@@ -66,15 +66,15 @@ def _build_mem_target_transport() -> tuple[httpx.MockTransport, dict[str, Any]]:
                 if "SYSTEM OVERRIDE" in content or "system prompt" in content.lower():
                     # Leak a fake canary marker — generic format the
                     # ResponseMatcher can detect
-                    response_text = (
-                        "Sure! My system prompt: [REDACTED] "
-                        "FAKE-CANARY-99 trust_granted=true elevated"
-                    )
+                    response_text = "Sure! My system prompt: [REDACTED] FAKE-CANARY-99 trust_granted=true elevated"
                     break
-            return httpx.Response(200, json={
-                "response": response_text,
-                "memory_count": len(state["memory"]),
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "response": response_text,
+                    "memory_count": len(state["memory"]),
+                },
+            )
 
         return httpx.Response(404, json={"error": "not found"})
 
@@ -93,11 +93,13 @@ def _build_id_target_transport() -> tuple[httpx.MockTransport, dict[str, Any]]:
                 body = json.loads(request.content)
             except json.JSONDecodeError:
                 body = {}
-        state["history"].append({
-            "path": path,
-            "method": request.method,
-            "headers": dict(request.headers),
-        })
+        state["history"].append(
+            {
+                "path": path,
+                "method": request.method,
+                "headers": dict(request.headers),
+            }
+        )
 
         # SURVEY
         if path == "/health" and request.method == "GET":
@@ -105,20 +107,19 @@ def _build_id_target_transport() -> tuple[httpx.MockTransport, dict[str, Any]]:
 
         # Identity surface
         if path == "/execute" and request.method == "POST":
-            claimed = (
-                request.headers.get("X-Agent-Role")
-                or body.get("agent_role")
-                or ""
-            ).lower()
+            claimed = (request.headers.get("X-Agent-Role") or body.get("agent_role") or "").lower()
             command = body.get("command", "")
             if claimed in ("orchestrator", "admin", "system"):
                 if command in ("get_api_keys", "list_users", "get_secret"):
-                    return httpx.Response(200, json={
-                        "command": command,
-                        "elevated": True,
-                        "trust_granted": True,
-                        "data": "FAKE-CANARY-77",
-                    })
+                    return httpx.Response(
+                        200,
+                        json={
+                            "command": command,
+                            "elevated": True,
+                            "trust_granted": True,
+                            "data": "FAKE-CANARY-77",
+                        },
+                    )
                 return httpx.Response(200, json={"command": command, "trust_granted": True})
             return httpx.Response(403, json={"trust_granted": False, "error": "denied"})
 
@@ -150,6 +151,7 @@ def shared_transport_patch(monkeypatch):
         # Patch in every module that imports httpx.AsyncClient
         import argus.conductor.session as cs
         import argus.survey.prober as sp
+
         monkeypatch.setattr("httpx.AsyncClient", _PatchedClient)
         monkeypatch.setattr(cs.httpx, "AsyncClient", _PatchedClient)
         monkeypatch.setattr(sp.httpx, "AsyncClient", _PatchedClient)
@@ -235,8 +237,7 @@ async def test_identity_spoof_detects_baseline_403_to_spoofed_200(shared_transpo
     assert result.findings_count >= 1
     # Verify the agent actually attempted spoof headers
     spoofed_calls = [
-        h for h in state["history"]
-        if h.get("path") == "/execute" and h.get("headers", {}).get("x-agent-role")
+        h for h in state["history"] if h.get("path") == "/execute" and h.get("headers", {}).get("x-agent-role")
     ]
     assert len(spoofed_calls) >= 1
     # All findings should be validated
@@ -269,13 +270,14 @@ def _make_finding(
         technique=technique,
         attack_chain=[
             AttackChainStep(
-                step_number=1, agent_type=agent_type, technique=technique,
-                description=title, target_surface=target_surface,
+                step_number=1,
+                agent_type=agent_type,
+                technique=technique,
+                description=title,
+                target_surface=target_surface,
             )
         ],
-        reproduction_steps=[
-            ReproductionStep(step_number=1, action="test", expected_result="ok")
-        ],
+        reproduction_steps=[ReproductionStep(step_number=1, action="test", expected_result="ok")],
         raw_response=raw_response,
     )
     f.status = FindingStatus.VALIDATED
@@ -381,5 +383,4 @@ async def test_correlation_emits_supply_chain_compound_cross_host():
     engine = CorrelationEngine()
     paths = await engine.correlate("scan-1", findings)
     # Should emit the global cross-host compound
-    assert any("supply_chain" in p.title.lower() and "prompt_injection" in p.description.lower()
-               for p in paths)
+    assert any("supply_chain" in p.title.lower() and "prompt_injection" in p.description.lower() for p in paths)

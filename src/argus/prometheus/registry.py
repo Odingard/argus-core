@@ -104,7 +104,9 @@ class ModuleRegistry:
             if not obj.__module__.startswith(ALLOWED_MODULE_PREFIX):
                 logger.warning(
                     "Refusing to register class %s.%s — outside allowed prefix %s",
-                    obj.__module__, obj.__name__, ALLOWED_MODULE_PREFIX,
+                    obj.__module__,
+                    obj.__name__,
+                    ALLOWED_MODULE_PREFIX,
                 )
                 continue
             self.register(obj)

@@ -177,11 +177,9 @@ async def test_corroboration_increases_cw():
 async def test_concurrent_corroboration_is_safe():
     """Concurrent score_finding calls must not lose corroboration counts."""
     import asyncio
+
     adapter = VerdictAdapter()
-    findings = [
-        _make_finding(technique="role_hijack_classic", direct_evidence=True)
-        for _ in range(20)
-    ]
+    findings = [_make_finding(technique="role_hijack_classic", direct_evidence=True) for _ in range(20)]
     # Fire all 20 concurrently — race condition would lose increments
     scores = await asyncio.gather(*[adapter.score_finding(f) for f in findings])
     # Final corroboration count must be exactly 20 (no lost increments)

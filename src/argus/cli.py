@@ -790,9 +790,7 @@ def db_status() -> None:
 
     console.print(
         Panel.fit(
-            f"[bold]Targets:[/] {len(targets)}\n"
-            f"[bold]Scans:[/] {scan_count}\n"
-            f"[bold]Database:[/] SQLite (WAL mode)",
+            f"[bold]Targets:[/] {len(targets)}\n[bold]Scans:[/] {scan_count}\n[bold]Database:[/] SQLite (WAL mode)",
             title="Database Status",
         )
     )
@@ -832,7 +830,7 @@ def test_target_start(host: str, port: int, reload: bool) -> None:
     console.print("[bold red]DO NOT expose to the internet.[/]\n")
     console.print("[dim]To scan against it:[/]")
     console.print(
-        f"[dim]  ARGUS_WEB_ALLOW_PRIVATE=1 argus scan mock-target " f"--agent-endpoint http://{host}:{port}/chat[/]\n"
+        f"[dim]  ARGUS_WEB_ALLOW_PRIVATE=1 argus scan mock-target --agent-endpoint http://{host}:{port}/chat[/]\n"
     )
 
     uvicorn.run(

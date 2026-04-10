@@ -107,15 +107,15 @@ class HTMLReportGenerator:
             <div class="header-meta">
                 <div class="meta-item"><strong>Target:</strong> {_esc(target)}</div>
                 <div class="meta-item"><strong>Generated:</strong> {_esc(generated_at)}</div>
-                <div class="meta-item"><strong>Scan ID:</strong> {_esc(summary.get('scan_id', 'N/A'))}</div>
-                <div class="meta-item"><strong>Duration:</strong> {summary.get('duration_seconds') or 0:.1f}s</div>
+                <div class="meta-item"><strong>Scan ID:</strong> {_esc(summary.get("scan_id", "N/A"))}</div>
+                <div class="meta-item"><strong>Duration:</strong> {summary.get("duration_seconds") or 0:.1f}s</div>
             </div>
         </div>
         <div class="risk-banner" style="border-left-color: {risk_color};">
             <div class="risk-score" style="color: {risk_color};">{risk_score}</div>
             <div class="risk-label">
                 <strong>Overall Risk Score</strong>
-                <span>{'CRITICAL' if risk_score >= 70 else 'ELEVATED' if risk_score >= 40 else 'LOW'} RISK</span>
+                <span>{"CRITICAL" if risk_score >= 70 else "ELEVATED" if risk_score >= 40 else "LOW"} RISK</span>
             </div>
         </div>
         """
@@ -126,27 +126,27 @@ class HTMLReportGenerator:
             <h2>Executive Summary</h2>
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-value">{summary.get('agents_deployed', 0)}</div>
+                    <div class="stat-value">{summary.get("agents_deployed", 0)}</div>
                     <div class="stat-label">Agents Deployed</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value">{summary.get('total_findings', 0)}</div>
+                    <div class="stat-value">{summary.get("total_findings", 0)}</div>
                     <div class="stat-label">Total Findings</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" style="color: #16a34a;">{summary.get('validated_findings', 0)}</div>
+                    <div class="stat-value" style="color: #16a34a;">{summary.get("validated_findings", 0)}</div>
                     <div class="stat-label">Validated</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" style="color: #7c3aed;">{summary.get('compound_attack_paths', 0)}</div>
+                    <div class="stat-value" style="color: #7c3aed;">{summary.get("compound_attack_paths", 0)}</div>
                     <div class="stat-label">Attack Paths</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value">{summary.get('signals_exchanged', 0)}</div>
+                    <div class="stat-value">{summary.get("signals_exchanged", 0)}</div>
                     <div class="stat-label">Signals</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" style="color: {'#dc2626' if risk_score >= 70 else '#d97706' if risk_score >= 40 else '#16a34a'};">{risk_score}/100</div>
+                    <div class="stat-value" style="color: {"#dc2626" if risk_score >= 70 else "#d97706" if risk_score >= 40 else "#16a34a"};">{risk_score}/100</div>
                     <div class="stat-label">Risk Score</div>
                 </div>
             </div>
@@ -289,7 +289,7 @@ class HTMLReportGenerator:
                     <span>Exploitability: {path.exploitability_score}/10</span>
                     <span>Detectability: {path.detectability_score}/10</span>
                 </div>
-                {'<div class="finding-owasp">' + _esc(owasp_tags) + '</div>' if owasp_tags else ''}
+                {'<div class="finding-owasp">' + _esc(owasp_tags) + "</div>" if owasp_tags else ""}
                 <ol>{steps}</ol>
             </div>
             """

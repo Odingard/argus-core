@@ -344,10 +344,10 @@ class ToolPoisoningAgent(LLMAttackAgent):
     # matches any [PREFIX]-CANARY-\d pattern, CONFIDENTIAL prefix, SECRET-
     # prefix, etc. Catches benchmark canaries AND real customer-planted ones.
     _SENSITIVE_MARKER_PATTERNS: list[str] = [
-        r"[A-Z][A-Z0-9_]+-CANARY-\d+",       # X-CANARY-NN style
-        r"[A-Z][A-Z0-9_]+_CANARY_[A-Z0-9]+", # X_CANARY_xxx style
-        r"CONFIDENTIAL[-_:]\s*\S+",          # "CONFIDENTIAL: ..."
-        r"SECRET[-_]\w+",                    # "SECRET-key", "SECRET_TOKEN"
+        r"[A-Z][A-Z0-9_]+-CANARY-\d+",  # X-CANARY-NN style
+        r"[A-Z][A-Z0-9_]+_CANARY_[A-Z0-9]+",  # X_CANARY_xxx style
+        r"CONFIDENTIAL[-_:]\s*\S+",  # "CONFIDENTIAL: ..."
+        r"SECRET[-_]\w+",  # "SECRET-key", "SECRET_TOKEN"
         r"PRIVATE_KEY[-_:]",
         r"BEGIN [A-Z ]*PRIVATE KEY",
     ]

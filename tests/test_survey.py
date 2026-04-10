@@ -127,12 +127,18 @@ def test_survey_report_filtering():
 
     report.discovered = [
         DiscoveredEndpoint(
-            base_url="http://t.test", path="/chat", method="POST",
-            surface_class=SurfaceClass.CHAT, status_code=200,
+            base_url="http://t.test",
+            path="/chat",
+            method="POST",
+            surface_class=SurfaceClass.CHAT,
+            status_code=200,
         ),
         DiscoveredEndpoint(
-            base_url="http://t.test", path="/admin", method="GET",
-            surface_class=SurfaceClass.ADMIN, status_code=404,
+            base_url="http://t.test",
+            path="/admin",
+            method="GET",
+            surface_class=SurfaceClass.ADMIN,
+            status_code=404,
         ),
     ]
     assert len(report.endpoints_for(SurfaceClass.CHAT)) == 1
