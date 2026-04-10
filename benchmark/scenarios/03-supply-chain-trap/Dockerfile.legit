@@ -1,6 +1,0 @@
-FROM python:3.12-slim
-WORKDIR /app
-COPY legitimate_server.py .
-EXPOSE 8003
-ENV PORT=8003
-CMD ["python", "legitimate_server.py"]

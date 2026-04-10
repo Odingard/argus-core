@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  sub-agent:
+    build: .
+    command: python3 sub_agent.py
+    ports:
+      - "8005:8005"
+    environment:
+      - AGENT_PORT=8005

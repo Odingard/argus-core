@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  race-agent:
+    build: .
+    command: python3 race_agent.py
+    ports:
+      - "8013:8013"
+    environment:
+      - AGENT_PORT=8013

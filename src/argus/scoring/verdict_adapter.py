@@ -21,6 +21,7 @@ findings against the same target surface.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -194,6 +195,8 @@ class VerdictAdapter:
         self._context = context or vw.ContextType.CYBERSECURITY_GENERAL
         # Track per-(target_surface, technique_family) corroboration counts
         self._corroboration: dict[tuple[str, str], int] = {}
+        # Async lock to protect corroboration dict from concurrent agent updates
+        self._lock = asyncio.Lock()
 
     def _technique_family(self, technique: str) -> str:
         """Group related techniques into a single family for corroboration counting.
@@ -226,7 +229,7 @@ class VerdictAdapter:
         # Default neutral prior
         return (50, 100)
 
-    def register_for_corroboration(
+    async def register_for_corroboration(
         self,
         target_surface: str,
         technique: str,
@@ -234,13 +237,15 @@ class VerdictAdapter:
         """Increment corroboration count for this target/technique-family pair.
 
         Returns the new count (1 if this is the first observation).
+        Lock-protected so concurrent agent updates produce correct counts.
         """
         family = self._technique_family(technique)
         key = (target_surface or "unknown", family)
-        self._corroboration[key] = self._corroboration.get(key, 0) + 1
-        return self._corroboration[key]
+        async with self._lock:
+            self._corroboration[key] = self._corroboration.get(key, 0) + 1
+            return self._corroboration[key]
 
-    def score_finding(
+    async def score_finding(
         self,
         finding: Finding,
         age_value: float = 0.0,
@@ -263,7 +268,7 @@ class VerdictAdapter:
         if n_corroborating_override is not None:
             n_corroborating = n_corroborating_override
         else:
-            n_corroborating = self.register_for_corroboration(target_surface, technique)
+            n_corroborating = await self.register_for_corroboration(target_surface, technique)
 
         # If the finding is already marked as direct evidence (canary observed,
         # zero-width chars present, etc.), bump SR upward — direct observation

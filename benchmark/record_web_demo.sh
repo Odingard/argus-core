@@ -85,7 +85,12 @@ for port in 8001 8002 8003 8004; do
 done
 
 # ----- Step 2: Start web server -----
+# Generate a fresh demo token and pass it to the server.
+# ARGUS_WEB_ALLOW_PRIVATE=1 enables scanning the local benchmark containers.
+ARGUS_WEB_TOKEN_DEMO="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 log "Starting ARGUS web server on port ${PORT}..."
+ARGUS_WEB_TOKEN="$ARGUS_WEB_TOKEN_DEMO" \
+ARGUS_WEB_ALLOW_PRIVATE=1 \
 "${PROJECT_ROOT}/.venv/bin/python" -m uvicorn argus.web.server:create_app \
     --host 127.0.0.1 --port "${PORT}" --factory --log-level warning >/tmp/argus-web.log 2>&1 &
 echo $! > "$WEB_PID_FILE"
@@ -107,6 +112,7 @@ log "Web server up: http://127.0.0.1:${PORT}/"
 log "Triggering scan with demo pacing (1.5s/event for ~30s total runtime)..."
 curl -sX POST "http://127.0.0.1:${PORT}/api/scan/start" \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${ARGUS_WEB_TOKEN_DEMO}" \
     -d '{
         "target_name": "ARGUS Gauntlet",
         "mcp_urls": ["http://localhost:8001", "http://localhost:8003", "http://localhost:8004"],

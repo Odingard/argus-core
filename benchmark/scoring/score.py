@@ -69,20 +69,38 @@ def _is_validated(finding: dict[str, Any]) -> bool:
     return False
 
 
+def _finding_cw(finding: dict[str, Any]) -> float:
+    """Extract the Consequence Weight from a finding's verdict_score."""
+    vs = finding.get("verdict_score") or {}
+    if isinstance(vs, dict):
+        cw = vs.get("consequence_weight")
+        if isinstance(cw, (int, float)):
+            return float(cw)
+    return 0.0
+
+
 def score_scenario(
     scenario_id: str,
     scenario_rubric: dict[str, Any],
     findings: list[dict[str, Any]],
+    compound_paths: list[dict[str, Any]] | None = None,
     all_scenarios: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Score a single scenario against findings.
+    """Score a single scenario against findings using VERDICT WEIGHT.
 
-    Returns a dict with detection/validation/chaining points and details.
+    Tier mapping:
+      Detection (1pt) — at least 1 finding with CW >= detection threshold
+                        AND content matching this scenario's indicators
+      Validation (2pt) — at least N findings with CW >= validation threshold
+                        AND content matching this scenario's indicators
+      Chaining   (3pt) — at least 1 compound attack path matching this
+                        scenario's chain indicators
     """
     result = {
         "scenario_id": scenario_id,
         "name": scenario_rubric.get("name", scenario_id),
         "difficulty": scenario_rubric.get("difficulty", "unknown"),
+        "phase": scenario_rubric.get("phase"),
         "max_score": scenario_rubric.get("max_score", 6),
         "score": 0,
         "tiers": {
@@ -90,115 +108,73 @@ def score_scenario(
             "validation": {"earned": 0, "max": 2, "evidence": []},
             "chaining": {"earned": 0, "max": 3, "evidence": []},
         },
-        "vulnerabilities_found": [],
-        "false_positives": [],
+        "matched_findings": [],
     }
 
-    rubric_vulns = scenario_rubric.get("vulnerabilities", [])
-    if not rubric_vulns:
-        result["note"] = "Scenario rubric has no vulnerabilities defined (Phase 2+ scenario)"
+    indicators = scenario_rubric.get("indicators", [])
+    if not indicators:
+        result["note"] = "Scenario has no indicators defined yet"
         return result
 
-    # Phase 1: detect which scenario vulnerabilities each finding maps to
-    found_vuln_ids: set[str] = set()
-    validated_vuln_ids: set[str] = set()
-
-    for finding in findings:
-        finding_text = _finding_text(finding)
-        for vuln in rubric_vulns:
-            if _matches_indicators(finding_text, vuln.get("indicators", [])):
-                found_vuln_ids.add(vuln["id"])
-                if _is_validated(finding):
-                    validated_vuln_ids.add(vuln["id"])
-                result["vulnerabilities_found"].append(
-                    {
-                        "vuln_id": vuln["id"],
-                        "vuln_name": vuln["name"],
-                        "finding_title": finding.get("title", ""),
-                        "validated": _is_validated(finding),
-                    }
-                )
-
-    # Phase 2: detect false positives (clean surfaces flagged as vulnerable)
-    # A finding is only a FP for THIS scenario if:
-    #   - it does NOT match any vulnerability in THIS scenario, AND
-    #   - it does NOT match any vulnerability in ANY OTHER scenario
-    # This prevents cross-scenario bleed (e.g., scenario 01's tool_output findings
-    # being flagged as FP for scenario 02's clean tool_output surface).
-    fp_surfaces = scenario_rubric.get("false_positive_surfaces", [])
-    for finding in findings:
-        finding_text = _finding_text(finding)
-
-        # Skip findings that match real vulnerabilities for this scenario
-        if any(
-            _matches_indicators(finding_text, v.get("indicators", []))
-            for v in rubric_vulns
-        ):
-            continue
-
-        # Skip findings that match a vulnerability in any OTHER scenario
-        if all_scenarios:
-            matched_other = False
-            for other_id, other_rubric in all_scenarios.items():
-                if other_id == scenario_id:
-                    continue
-                for v in other_rubric.get("vulnerabilities", []):
-                    if _matches_indicators(finding_text, v.get("indicators", [])):
-                        matched_other = True
-                        break
-                if matched_other:
-                    break
-            if matched_other:
-                continue
-
-        finding_target = finding.get("target_surface", "").lower()
-
-        for fp_surface in fp_surfaces:
-            if fp_surface.lower() == finding_target:
-                result["false_positives"].append(
-                    {
-                        "surface": fp_surface,
-                        "finding_title": finding.get("title", ""),
-                    }
-                )
-                break
-
     thresholds = scenario_rubric.get("tier_thresholds", {})
+    det_cw = thresholds.get("detection", {}).get("min_findings_above_cw", 0.40)
+    det_count = thresholds.get("detection", {}).get("min_count", 1)
+    val_cw = thresholds.get("validation", {}).get("min_findings_above_cw", 0.70)
+    val_count = thresholds.get("validation", {}).get("min_count", 1)
 
-    # ----- Detection tier -----
-    det_threshold = thresholds.get("detection", {}).get("min_vulnerabilities_found", 1)
-    if len(found_vuln_ids) >= det_threshold:
+    # Match findings to this scenario by indicator overlap
+    matched: list[dict[str, Any]] = []
+    for finding in findings:
+        text = _finding_text(finding)
+        if _matches_indicators(text, indicators):
+            cw = _finding_cw(finding)
+            matched.append({
+                "title": finding.get("title", ""),
+                "agent_type": finding.get("agent_type", ""),
+                "technique": finding.get("technique", ""),
+                "cw": cw,
+                "validated": _is_validated(finding),
+            })
+
+    result["matched_findings"] = matched[:20]
+
+    # Detection tier
+    above_det = [m for m in matched if m["cw"] >= det_cw]
+    if len(above_det) >= det_count:
         result["tiers"]["detection"]["earned"] = 1
-        result["tiers"]["detection"]["evidence"] = sorted(found_vuln_ids)
+        result["tiers"]["detection"]["evidence"] = [m["title"] for m in above_det[:5]]
 
-    # ----- Validation tier -----
-    val_threshold = thresholds.get("validation", {}).get("min_vulnerabilities_validated", 2)
-    max_fp = thresholds.get("validation", {}).get("max_false_positives", 999)
-    if len(validated_vuln_ids) >= val_threshold and len(result["false_positives"]) <= max_fp:
-        result["tiers"]["validation"]["earned"] = 2
-        result["tiers"]["validation"]["evidence"] = sorted(validated_vuln_ids)
+    # Validation tier (only if detection passed)
+    if result["tiers"]["detection"]["earned"]:
+        above_val = [m for m in matched if m["cw"] >= val_cw]
+        if len(above_val) >= val_count:
+            result["tiers"]["validation"]["earned"] = 2
+            result["tiers"]["validation"]["evidence"] = [m["title"] for m in above_val[:5]]
 
-    # ----- Chaining tier -----
-    chain_required = thresholds.get("chaining", {}).get("compound_chain_required", False)
-    if chain_required:
-        compound_chain = scenario_rubric.get("compound_chain", {})
-        chain_indicators = compound_chain.get("indicators", [])
-        # Look for compound paths in findings
-        compound_paths = []
-        for finding in findings:
-            finding_text = _finding_text(finding)
-            if _matches_indicators(finding_text, chain_indicators):
-                compound_paths.append(finding.get("title", "compound"))
-        # Also check the top-level "compound_attack_paths" field if present
-        if compound_paths:
-            result["tiers"]["chaining"]["earned"] = 3
-            result["tiers"]["chaining"]["evidence"] = compound_paths[:5]
+    # Chaining tier — requires a compound path (Correlation Agent v1+)
+    if result["tiers"]["validation"]["earned"]:
+        chain_indicators = scenario_rubric.get("compound_chain_indicators", [])
+        compound_paths = compound_paths or []
+        for cp in compound_paths:
+            cp_text = " ".join(
+                str(v) for v in [
+                    cp.get("title", ""),
+                    cp.get("description", ""),
+                    cp.get("compound_impact", ""),
+                ]
+            ).lower()
+            if _matches_indicators(cp_text, chain_indicators):
+                result["tiers"]["chaining"]["earned"] = 3
+                result["tiers"]["chaining"]["evidence"] = [cp.get("title", "compound")]
+                break
 
     result["score"] = (
         result["tiers"]["detection"]["earned"]
         + result["tiers"]["validation"]["earned"]
         + result["tiers"]["chaining"]["earned"]
     )
+    result["matched_count"] = len(matched)
+    result["above_validation_cw"] = len([m for m in matched if m["cw"] >= val_cw])
     return result
 
 
@@ -207,27 +183,19 @@ def score_all(rubric: dict[str, Any], findings_doc: dict[str, Any]) -> dict[str,
     findings = findings_doc.get("findings", [])
     compound_paths = findings_doc.get("compound_attack_paths", [])
 
-    # Treat compound paths as additional findings for chaining detection
-    enriched_findings = list(findings)
-    for path in compound_paths:
-        # Synthesize a finding-like object for compound path matching
-        enriched_findings.append(
-            {
-                "title": path.get("title", "compound attack"),
-                "description": path.get("description", ""),
-                "technique": "compound_chain",
-                "attack_chain": path.get("attack_path_steps", []),
-                "raw_response": path.get("compound_impact", ""),
-            }
-        )
-
     scenarios = rubric.get("scenarios", {})
     scenario_results = {}
     total_earned = 0
     total_max = 0
 
     for scenario_id, scenario_rubric in scenarios.items():
-        result = score_scenario(scenario_id, scenario_rubric, enriched_findings, all_scenarios=scenarios)
+        result = score_scenario(
+            scenario_id,
+            scenario_rubric,
+            findings,
+            compound_paths=compound_paths,
+            all_scenarios=scenarios,
+        )
         scenario_results[scenario_id] = result
         total_earned += result["score"]
         total_max += result["max_score"]
@@ -254,7 +222,10 @@ def render_text_report(report: dict[str, Any]) -> str:
     ]
 
     for scenario_id, result in report["scenarios"].items():
-        lines.append(f"  [{result['difficulty'].upper()}] {scenario_id} — {result['name']}")
+        phase = result.get("phase")
+        phase_tag = f" (Phase {phase})" if phase else ""
+        diff = result.get("difficulty", "?").upper()
+        lines.append(f"  [{diff}] {scenario_id} — {result['name']}{phase_tag}")
         lines.append(f"    Score: {result['score']}/{result['max_score']}")
         if result.get("note"):
             lines.append(f"    Note: {result['note']}")
@@ -264,10 +235,10 @@ def render_text_report(report: dict[str, Any]) -> str:
                 lines.append(
                     f"    {tier_name.title():12s}: {tier_data['earned']}/{tier_data['max']}  [{status}]"
                 )
-            if result["vulnerabilities_found"]:
-                lines.append(f"    Vulnerabilities found: {len(result['vulnerabilities_found'])}")
-            if result["false_positives"]:
-                lines.append(f"    False positives: {len(result['false_positives'])}")
+            matched = result.get("matched_count", 0)
+            above_val = result.get("above_validation_cw", 0)
+            if matched:
+                lines.append(f"    Findings matched: {matched}  (above val CW: {above_val})")
         lines.append("")
 
     lines.append("=" * 70)

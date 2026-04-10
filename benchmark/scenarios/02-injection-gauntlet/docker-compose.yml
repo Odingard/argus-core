@@ -1,8 +1,0 @@
-services:
-  injection-gauntlet:
-    build: .
-    container_name: argus-bench-02-injection-gauntlet
-    ports:
-      - "8002:8002"
-    environment:
-      - PORT=8002

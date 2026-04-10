@@ -35,6 +35,10 @@ argus = "argus.cli:main"
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+extend-exclude = [
+    "benchmark/scenarios",  # deliberately-vulnerable third-party test target fixtures
+    "benchmark/official",   # community submission sidecar (third-party reference scoring)
+]
 
 [tool.ruff.lint]
 select = [
@@ -57,6 +61,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "src/argus/corpus/manager.py" = ["E501"]  # attack patterns are long strings by nature
 "src/argus/agents/*.py" = ["E501"]  # attack payloads are long strings by nature
+"src/argus/web/server.py" = ["B008"]  # Depends() in defaults is FastAPI's standard pattern
+"src/argus/prometheus/modules_lib/*.py" = ["E501"]  # attack module payloads are long strings
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

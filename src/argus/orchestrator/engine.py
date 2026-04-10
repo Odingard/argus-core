@@ -67,10 +67,10 @@ class BaseAttackAgent:
         # Score via VERDICT WEIGHT before emission
         if self._verdict is not None:
             try:
-                score = self._verdict.score_finding(finding)
+                score = await self._verdict.score_finding(finding)
                 finding.verdict_score = score.to_dict()
             except Exception as exc:
-                logger.warning("VERDICT WEIGHT scoring failed: %s", exc)
+                logger.warning("VERDICT WEIGHT scoring failed: %s", type(exc).__name__)
 
         self.findings.append(finding)
         await self.signal_bus.emit(

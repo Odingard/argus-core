@@ -27,11 +27,15 @@ async def main() -> int:
     target = TargetConfig(
         name="ARGUS Gauntlet",
         mcp_server_urls=[
-            "http://localhost:8001",  # Scenario 01 — Poisoned MCP
-            "http://localhost:8003",  # Scenario 03 — Legitimate
-            "http://localhost:8004",  # Scenario 03 — Malicious lookalike
+            "http://localhost:8001",  # Scenario 01 — Tool Poisoning MCP
+            "http://localhost:8003",  # Scenario 02 — Memory Poisoning
+            "http://localhost:8005",  # Scenario 03 — Identity Spoof
+            "http://localhost:8007",  # Scenario 04 — Privilege Chain
+            "http://localhost:8009",  # Scenario 05 — Injection Gauntlet
+            "http://localhost:8011",  # Scenario 06 — Supply Chain
+            "http://localhost:8013",  # Scenario 07 — Race Condition
         ],
-        agent_endpoint="http://localhost:8002/chat",  # Scenario 02 — Injection Gauntlet
+        agent_endpoint="http://localhost:8002/chat",  # Scenario 01 — Target agent
         non_destructive=True,
         max_requests_per_minute=120,
     )

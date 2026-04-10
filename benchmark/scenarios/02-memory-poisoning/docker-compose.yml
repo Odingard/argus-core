@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  memory-agent:
+    build: .
+    command: python3 memory_agent.py
+    ports:
+      - "8003:8003"
+    environment:
+      - AGENT_PORT=8003

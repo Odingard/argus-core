@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  priv-chain-agent:
+    build: .
+    command: python3 priv_chain_agent.py
+    ports:
+      - "8007:8007"
+    environment:
+      - AGENT_PORT=8007

@@ -1,47 +1,96 @@
 # ARGUS Gauntlet — All Scenarios
 #
+# Spins up all 7 official scenario test targets at once. Each scenario also
+# has its own docker-compose.yml in scenarios/<id>/ — this top-level file
+# is a convenience aggregator using `extends`.
+#
 # Spin up every benchmark scenario simultaneously:
-#   docker compose -f benchmark/docker-compose.yml up
+#   docker compose -f benchmark/docker-compose.yml up -d
 #
 # Then run ARGUS against the full benchmark:
-#   argus scan argus-bench --mcp-url http://localhost:8001 \
-#                          --agent-endpoint http://localhost:8002/chat \
-#                          --mcp-url http://localhost:8003 \
-#                          --mcp-url http://localhost:8004
+#   python benchmark/run_baseline.py
+#
+# The 7 scenarios live at:
+#   01-tool-poisoning      → http://localhost:8001 (mcp), http://localhost:8002 (target agent)
+#   02-memory-poisoning    → http://localhost:8003
+#   03-identity-spoof      → http://localhost:8005
+#   04-privilege-chain     → http://localhost:8007
+#   05-injection-gauntlet  → http://localhost:8009
+#   06-supply-chain        → http://localhost:8011
+#   07-race-condition      → http://localhost:8013
 
 services:
-  scenario-01-poisoned-mcp:
-    build: ./scenarios/01-poisoned-mcp
-    container_name: argus-bench-01
+  scenario-01-mcp:
+    build: ./scenarios/01-tool-poisoning
+    command: python3 mcp_server.py
+    container_name: argus-bench-01-mcp
     ports:
       - "8001:8001"
     environment:
-      - PORT=8001
+      - MCP_PORT=8001
 
-  scenario-02-injection-gauntlet:
-    build: ./scenarios/02-injection-gauntlet
-    container_name: argus-bench-02
+  scenario-01-target:
+    build: ./scenarios/01-tool-poisoning
+    command: python3 target_agent.py
+    container_name: argus-bench-01-target
     ports:
       - "8002:8002"
     environment:
-      - PORT=8002
+      - MCP_URL=http://scenario-01-mcp:8001
+      - AGENT_PORT=8002
+    depends_on:
+      - scenario-01-mcp
 
-  scenario-03-supply-chain-legitimate:
-    build:
-      context: ./scenarios/03-supply-chain-trap
-      dockerfile: Dockerfile.legit
-    container_name: argus-bench-03-legit
+  scenario-02-memory:
+    build: ./scenarios/02-memory-poisoning
+    command: python3 memory_agent.py
+    container_name: argus-bench-02
     ports:
       - "8003:8003"
     environment:
-      - PORT=8003
+      - AGENT_PORT=8003
 
-  scenario-03-supply-chain-malicious:
-    build:
-      context: ./scenarios/03-supply-chain-trap
-      dockerfile: Dockerfile.malicious
-    container_name: argus-bench-03-malicious
+  scenario-03-identity:
+    build: ./scenarios/03-identity-spoof
+    command: python3 sub_agent.py
+    container_name: argus-bench-03
     ports:
-      - "8004:8004"
+      - "8005:8005"
     environment:
-      - PORT=8004
+      - AGENT_PORT=8005
+
+  scenario-04-priv-chain:
+    build: ./scenarios/04-privilege-chain
+    command: python3 priv_chain_agent.py
+    container_name: argus-bench-04
+    ports:
+      - "8007:8007"
+    environment:
+      - AGENT_PORT=8007
+
+  scenario-05-injection:
+    build: ./scenarios/05-injection-gauntlet
+    command: python3 gauntlet_agent.py
+    container_name: argus-bench-05
+    ports:
+      - "8009:8009"
+    environment:
+      - AGENT_PORT=8009
+
+  scenario-06-supply-chain:
+    build: ./scenarios/06-supply-chain
+    command: python3 supply_chain_agent.py
+    container_name: argus-bench-06
+    ports:
+      - "8011:8011"
+    environment:
+      - AGENT_PORT=8011
+
+  scenario-07-race:
+    build: ./scenarios/07-race-condition
+    command: python3 race_agent.py
+    container_name: argus-bench-07
+    ports:
+      - "8013:8013"
+    environment:
+      - AGENT_PORT=8013

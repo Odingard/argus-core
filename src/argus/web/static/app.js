@@ -2,6 +2,17 @@
 // ARGUS Web Dashboard — frontend SSE client + UI updater
 // ============================================================
 
+// Auth token injected by the server into a meta tag for loopback requests.
+// For non-loopback access, the operator must set it manually before page load.
+const ARGUS_TOKEN = (() => {
+  const meta = document.querySelector('meta[name="argus-token"]');
+  return meta ? meta.getAttribute('content') : '';
+})();
+
+function authHeaders() {
+  return ARGUS_TOKEN ? { 'Authorization': `Bearer ${ARGUS_TOKEN}` } : {};
+}
+
 const AGENT_DISPLAY = {
   prompt_injection_hunter: {
     name: 'Prompt Injection Hunter',
@@ -44,13 +55,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Pull current state immediately so headless screenshots and reloads
   // see live data before SSE begins streaming.
   try {
-    const res = await fetch('/api/status');
+    const res = await fetch('/api/status', { headers: authHeaders() });
     if (res.ok) {
       const snap = await res.json();
       applySnapshot(snap);
 
       // Also pull all findings to populate the stream from history
-      const fres = await fetch('/api/findings');
+      const fres = await fetch('/api/findings', { headers: authHeaders() });
       if (fres.ok) {
         const data = await fres.json();
         const findings = data.findings || [];
@@ -74,7 +85,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ============================================================
 
 function connectEventStream() {
-  const source = new EventSource('/api/events');
+  // EventSource cannot send custom headers — pass token via query param
+  const url = ARGUS_TOKEN
+    ? `/api/events?token=${encodeURIComponent(ARGUS_TOKEN)}`
+    : '/api/events';
+  const source = new EventSource(url);
 
   source.addEventListener('snapshot', (e) => {
     const snap = JSON.parse(e.data);
@@ -258,20 +273,21 @@ function appendTerminalLine(agentType, text) {
   else if (text.includes('CRITICAL') || text.includes('[ CRIT')) lineClass = 'crit';
   else if (text.includes('WARN') || text.includes('[ HIGH')) lineClass = 'warn';
 
-  state.agentTerminalLines[agentType].push({ text, cls: lineClass });
+  // Atomic replacement: build the new array, then assign in one shot.
+  // Prevents read/write races between concurrent SSE callbacks.
+  const next = [...state.agentTerminalLines[agentType], { text, cls: lineClass }];
+  state.agentTerminalLines[agentType] = next.slice(-5);
 
-  // Keep last 5 lines for the preview
-  if (state.agentTerminalLines[agentType].length > 5) {
-    state.agentTerminalLines[agentType].shift();
-  }
-
-  const lines = state.agentTerminalLines[agentType]
-    .map((l) => `<div class="terminal-line ${l.cls}">${escapeHtml(l.text.slice(0, 60))}</div>`)
+  const linesHtml = state.agentTerminalLines[agentType]
+    .map((l) => `<div class="terminal-line ${escapeHtml(l.cls)}">${escapeHtml(l.text.slice(0, 60))}</div>`)
     .join('');
 
+  // agentType is from the signal bus (server-controlled) but escape it anyway —
+  // defense in depth against future code paths that pass arbitrary values.
+  const safeAgent = escapeHtml(agentType);
   terminal.innerHTML = `
-    <div class="terminal-line cmd">$ argus-agent ${agentType} --target gauntlet</div>
-    ${lines}
+    <div class="terminal-line cmd">$ argus-agent ${safeAgent} --target gauntlet</div>
+    ${linesHtml}
     <div class="terminal-line out">                      <span class="terminal-cursor"></span></div>
   `;
 }
@@ -291,17 +307,22 @@ function addFinding(finding) {
   const row = document.createElement('div');
   row.className = 'finding-row';
   const sev = (finding.severity || 'info').toLowerCase();
+  const sevClass = escapeHtml(sev);
   const validated = finding.status === 'validated';
   const verdict = finding.verdict_score || {};
   const cw = verdict.consequence_weight;
-  const tier = verdict.action_tier || '';
-  const cwBadge = (cw !== undefined && cw !== null)
-    ? `<div class="cw-badge cw-${tier.toLowerCase()}" title="VERDICT WEIGHT™ ${tier}: ${verdict.interpretation || ''}">CW ${cw.toFixed(2)}</div>`
+  // Sanitize tier to alphanumeric only — used as a CSS class suffix
+  const tierRaw = String(verdict.action_tier || '');
+  const tierClass = tierRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const tierLabel = escapeHtml(tierRaw);
+  const interp = escapeHtml(verdict.interpretation || '');
+  const cwBadge = (cw !== undefined && cw !== null && typeof cw === 'number')
+    ? `<div class="cw-badge cw-${tierClass}" title="VERDICT WEIGHT ${tierLabel}: ${interp}">CW ${cw.toFixed(2)}</div>`
     : '';
 
   row.innerHTML = `
-    <div class="severity-badge severity-${sev}">${sev}</div>
-    <div class="finding-agent">${finding.agent_type || 'unknown'}</div>
+    <div class="severity-badge severity-${sevClass}">${sevClass}</div>
+    <div class="finding-agent">${escapeHtml(finding.agent_type || 'unknown')}</div>
     <div class="finding-title">${escapeHtml(finding.title || '')}</div>
     ${cwBadge}
     <div class="finding-status ${validated ? 'finding-validated' : 'finding-unvalidated'}">
@@ -351,7 +372,7 @@ async function startScan() {
   try {
     const res = await fetch('/api/scan/start', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -364,7 +385,7 @@ async function startScan() {
 }
 
 async function stopScan() {
-  await fetch('/api/scan/stop', { method: 'POST' });
+  await fetch('/api/scan/stop', { method: 'POST', headers: authHeaders() });
 }
 
 // ============================================================
@@ -372,9 +393,13 @@ async function stopScan() {
 // ============================================================
 
 function escapeHtml(str) {
+  // Escapes &, <, >, ", ', / — safe for both element content and attribute values.
+  // Escaping the slash defends against scripts that try to break out via </script>.
   return String(str || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\//g, '&#x2F;');
 }

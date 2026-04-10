@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  gauntlet-agent:
+    build: .
+    command: python3 gauntlet_agent.py
+    ports:
+      - "8009:8009"
+    environment:
+      - AGENT_PORT=8009

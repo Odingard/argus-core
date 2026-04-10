@@ -10,9 +10,32 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+# Regex patterns that scrub API key fragments from exception strings
+_KEY_PATTERNS = [
+    re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}"),     # Anthropic
+    re.compile(r"sk-proj-[a-zA-Z0-9_-]{20,}"),    # OpenAI project keys
+    re.compile(r"sk-[a-zA-Z0-9]{20,}"),           # OpenAI legacy
+    re.compile(r"Bearer\s+[a-zA-Z0-9._-]{10,}", re.IGNORECASE),
+    re.compile(r"x-api-key\s*[:=]\s*\S+", re.IGNORECASE),
+]
+
+
+def _sanitize_exception_message(msg: str, max_length: int = 200) -> str:
+    """Strip API key fragments from an exception message and cap length."""
+    if not msg:
+        return ""
+    sanitized = msg
+    for pattern in _KEY_PATTERNS:
+        sanitized = pattern.sub("[REDACTED]", sanitized)
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+    return sanitized
 
 
 class LLMMode(str, Enum):
@@ -145,11 +168,16 @@ class LLMClient:
                 return response.choices[0].message.content or ""
 
         except Exception as exc:
+            # Log only the exception type by default. Sanitize and DEBUG-log
+            # the message if a developer needs more detail.
             logger.warning(
                 "LLM generation failed (%s): %s — agent will fall back to deterministic path",
                 self._provider,
                 type(exc).__name__,
             )
+            sanitized = _sanitize_exception_message(str(exc))
+            if sanitized:
+                logger.debug("LLM error detail (sanitized): %s", sanitized)
             return None
 
         return None

@@ -1,6 +1,0 @@
-FROM python:3.12-slim
-WORKDIR /app
-COPY malicious_server.py .
-EXPOSE 8004
-ENV PORT=8004
-CMD ["python", "malicious_server.py"]

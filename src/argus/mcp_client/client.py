@@ -340,9 +340,13 @@ class MCPAttackClient:
         )
 
     async def _connect_http(self) -> None:
-        """Connect via HTTP transport (SSE or streamable-http).
+        """Connect via HTTP transport (SSE / streamable-http / REST).
 
         Security: validates URL scheme and enforces HTTPS for authenticated connections.
+
+        Auto-detects whether the server speaks JSON-RPC (POST / with jsonrpc envelope)
+        or REST (GET /tools/list, POST /tools/call). Many real MCP servers in the wild
+        use REST-style endpoints rather than JSON-RPC.
         """
         if not self.config.url:
             raise ValueError("HTTP transport requires 'url' in config")
@@ -360,22 +364,86 @@ class MCPAttackClient:
             timeout=self.config.timeout_seconds,
         )
 
+        # Auto-detect transport style. Default to JSON-RPC; if the REST endpoint
+        # responds 200 to GET /tools/list, mark this server as REST-style.
+        self._http_style = "json_rpc"
+        try:
+            probe = await self._http_client.get("/tools/list")
+            if probe.status_code == 200:
+                data = probe.json()
+                if isinstance(data, dict) and "tools" in data:
+                    self._http_style = "rest"
+                    logger.debug("MCP server %s uses REST transport", self.config.url)
+        except Exception as exc:
+            # Probe failed — server doesn't support REST GET /tools/list,
+            # fall back to JSON-RPC. Common for production MCP servers.
+            logger.debug("REST probe failed for %s: %s", self.config.url, type(exc).__name__)
+
     async def _send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON-RPC request to the MCP server."""
+        """Send a request to the MCP server.
+
+        For HTTP transport, routes through JSON-RPC or REST based on detected style.
+        """
         self._request_id += 1
+
+        if self._process and self._process.stdin and self._process.stdout:
+            request = {
+                "jsonrpc": "2.0",
+                "id": self._request_id,
+                "method": method,
+                "params": params,
+            }
+            return await self._send_stdio(request)
+
+        if not self._http_client:
+            raise RuntimeError("Not connected to MCP server")
+
+        if getattr(self, "_http_style", "json_rpc") == "rest":
+            return await self._send_http_rest(method, params)
+
         request = {
             "jsonrpc": "2.0",
             "id": self._request_id,
             "method": method,
             "params": params,
         }
+        return await self._send_http(request)
 
-        if self._process and self._process.stdin and self._process.stdout:
-            return await self._send_stdio(request)
-        elif self._http_client:
-            return await self._send_http(request)
-        else:
-            raise RuntimeError("Not connected to MCP server")
+    async def _send_http_rest(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a request to a REST-style MCP server.
+
+        Maps JSON-RPC method names to REST endpoints:
+          tools/list  -> GET  /tools/list
+          tools/call  -> POST /tools/call  with {name, arguments}
+          initialize  -> handled implicitly during connect
+        """
+        assert self._http_client
+
+        if method == "tools/list":
+            response = await self._http_client.get("/tools/list")
+            response.raise_for_status()
+            return response.json()
+
+        if method == "tools/call":
+            response = await self._http_client.post(
+                "/tools/call",
+                json={
+                    "name": params.get("name"),
+                    "arguments": params.get("arguments", {}),
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            # REST-style servers return {"result": {...}} or just {...}
+            if isinstance(data, dict) and "result" in data:
+                return {"content": [{"type": "text", "text": json.dumps(data["result"])}]}
+            return {"content": [{"type": "text", "text": json.dumps(data)}]}
+
+        if method == "initialize":
+            # REST servers don't need initialization — return empty result
+            return {}
+
+        raise RuntimeError(f"REST transport does not support method: {method}")
 
     async def _send_stdio(self, request: dict[str, Any]) -> dict[str, Any]:
         """Send request via stdio transport."""

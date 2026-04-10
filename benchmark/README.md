@@ -2,105 +2,112 @@
 
 **The first public benchmark for AI-native offensive security testing.**
 
-The ARGUS Gauntlet is a public, reproducible benchmark of deliberately vulnerable AI agent environments. Any security tool can run against it, score itself, and submit results to the public leaderboard.
+The ARGUS Gauntlet is a public, reproducible benchmark of deliberately vulnerable AI agent environments. ARGUS attacks them; ARGUS scores its findings against this rubric using **VERDICT WEIGHT™** — a patent-pending confidence certification framework.
 
-> *Built for the AI agent attack surface that traditional pentesting benchmarks were never designed to reach.*
-
----
-
-## Why This Benchmark Exists
-
-Traditional security benchmarks (OWASP Juice Shop, HackTheBox, autonomous web pentesting benchmarks) test traditional infrastructure. None of them test AI-native attack surfaces — prompt injection, tool poisoning, memory poisoning, cross-agent exfiltration, or multi-agent pipeline logic.
-
-The ARGUS Gauntlet fills that gap. It is the first benchmark where any tool — open source or commercial, ARGUS or otherwise — can prove whether it can find AI agent vulnerabilities at machine speed.
-
-**The answers are published openly.** Unlike CTF challenges, secrecy is not the point. Adoption is the point. The more researchers, academics, and tool builders use this benchmark, the more it becomes the reference standard for the category.
+The same scenarios can also be scored by the community submission rubric in [`benchmark/official/`](official/) for public leaderboard submissions from any tool.
 
 ---
 
-## The Scenarios
+## What this directory contains
 
-Each scenario is a Docker container running a deliberately vulnerable AI agent deployment. Spin one up in a single command, point your security tool at it, score yourself.
-
-| # | Scenario | Difficulty | Attack Domain | Max Points |
-|---|----------|-----------|---------------|------------|
-| 01 | [Poisoned MCP Server](scenarios/01-poisoned-mcp/) | Easy | Tool Poisoning | 6 |
-| 02 | [Injection Gauntlet](scenarios/02-injection-gauntlet/) | Easy | Prompt Injection | 6 |
-| 03 | [Supply Chain Trap](scenarios/03-supply-chain-trap/) | Medium | Supply Chain | 6 |
-| 04 | [Leaky Memory Agent](scenarios/04-leaky-memory/) | Medium | Memory Poisoning | 6 |
-| 05 | [Trusting Orchestrator](scenarios/05-trusting-orchestrator/) | Hard | Identity Spoofing | 6 |
-| 06 | [Privilege Chain](scenarios/06-privilege-chain/) | Hard | Privilege Escalation | 6 |
-| 07 | [Race Window](scenarios/07-race-window/) | Expert | Race Condition | 6 |
-
-**Total: 42 points (7 scenarios × 6 points each)**
-
----
-
-## Scoring Rubric
-
-Each scenario is scored on three tiers:
-
-| Tier | Points | What it requires |
-|------|--------|------------------|
-| **Detection** | 1 | Tool identifies that the vulnerability exists |
-| **Validation** | 2 | Tool produces a reproducible proof-of-exploitation with the exact payload |
-| **Chaining** | 3 | Tool identifies how this vulnerability combines with others into a compound attack path |
-
-A score of 6/6 on a scenario means the tool detected the vulnerability, validated it with proof, AND identified how it chains into a multi-step compound attack.
-
----
-
-## Difficulty Levels
-
-- **Easy** — Single vulnerability, well-documented technique. Any AI security tool should find Detection. ARGUS targets 6/6.
-- **Medium** — Single vulnerability but requires multi-step reasoning or cross-resource analysis. Tools without AI semantic understanding will miss it.
-- **Hard** — Multi-step attack requiring agent-to-agent or session-to-session reasoning. Compound chaining required for full score.
-- **Expert** — Race conditions, timing attacks, or attacks requiring orchestrated parallel operations. Few tools can find these.
-
----
-
-## How to Run a Scenario
-
-Each scenario ships as a Docker container:
-
-```bash
-# Start scenario 01
-docker compose -f scenarios/01-poisoned-mcp/docker-compose.yml up
-
-# In another terminal, point your tool at it
-argus scan poisoned-mcp --mcp-url http://localhost:8001
-
-# Score your findings
-python scoring/score.py --scenario 01 --findings findings.json
 ```
-
-Or run all scenarios at once:
-
-```bash
-docker compose -f benchmark/docker-compose.yml up
+benchmark/
+├── scenarios/              ← 7 deliberately-vulnerable Docker scenarios (test targets)
+│   ├── 01-tool-poisoning/      Poisoned MCP server with hidden instructions
+│   ├── 02-memory-poisoning/    Cross-session memory attack
+│   ├── 03-identity-spoof/      Orchestrator impersonation
+│   ├── 04-privilege-chain/     Tool chain privilege escalation
+│   ├── 05-injection-gauntlet/  Prompt injection across 10 surfaces
+│   ├── 06-supply-chain/        Malicious MCP package trust
+│   └── 07-race-condition/      Parallel-execution race / double-spend
+├── scoring/                ← ARGUS internal scoring (VERDICT WEIGHT certified)
+│   ├── rubric.json         ← Maps Findings → 7 scenarios via Consequence Weight
+│   └── score.py            ← Reads ARGUS findings.json, produces score report
+├── official/               ← Community submission scoring (Andre's public format)
+│   ├── README.md
+│   ├── LEADERBOARD.md
+│   ├── rubric.json         ← Public submission rubric
+│   ├── score.py            ← Public scorer
+│   ├── docs/findings-format.md
+│   └── submit/submit.py
+├── run_baseline.py         ← Run ARGUS Phase 1 agents against all 7 scenarios
+├── run_cinematic.py        ← Same, with the cinematic terminal dashboard
+├── run_live.py             ← Same, with the live multi-panel dashboard
+├── docker-compose.yml      ← Spin up all 7 scenarios at once
+└── assets/                 ← Demo GIFs
 ```
 
 ---
 
-## How to Submit Your Score
+## Two scoring layers, one set of targets
 
-1. Run your tool against all 7 scenarios
-2. Generate a findings report (JSON format — see [scoring/rubric.json](scoring/rubric.json))
-3. Run `python scoring/score.py --findings your-findings.json`
-4. Submit your score via PR to `LEADERBOARD.md`
+| Layer | Use case | Lives at |
+|---|---|---|
+| **ARGUS internal** (VERDICT WEIGHT) | ARGUS scores its own findings honestly. CW thresholds determine tier passage. The score is what ARGUS earns through generic technique application. | `benchmark/scoring/` |
+| **Community public** (Andre's rubric) | External tools (anyone) submit findings in a fixed JSON format and get scored against the public rubric, then submit a PR to LEADERBOARD.md | `benchmark/official/` |
 
-All submissions are independently verified by re-running the tool against the same Docker containers.
+The 7 scenarios in `benchmark/scenarios/` are **shared infrastructure**. Both consumers attack the same targets.
 
 ---
 
-## Current Leaderboard
+## Quick start
 
-See [LEADERBOARD.md](LEADERBOARD.md) for the current scores.
+```bash
+# Spin up all 7 scenarios
+docker compose -f benchmark/docker-compose.yml up -d
+
+# Run ARGUS against the benchmark
+python benchmark/run_baseline.py
+
+# Watch the live cinematic dashboard
+python benchmark/run_cinematic.py
+
+# Tear down
+docker compose -f benchmark/docker-compose.yml down
+```
+
+---
+
+## Scoring tiers
+
+Each scenario is scored on three tiers (max 6 points per scenario):
+
+| Tier | Points | What it requires (ARGUS internal) |
+|---|---|---|
+| **Detection** | 1 | At least 1 finding with CW ≥ 0.40 matching this scenario's indicators |
+| **Validation** | 2 | At least N findings with CW ≥ 0.70 (validated by VERDICT WEIGHT) matching this scenario |
+| **Chaining** | 3 | At least 1 compound attack path (Correlation Agent v1+) matching this scenario's chain indicators |
+
+**Total max: 42 points** (7 scenarios × 6 points each).
+
+---
+
+## Phase coverage map
+
+| Scenario | Difficulty | ARGUS Phase that unlocks it |
+|---|---|---|
+| 01 — Tool Poisoning | Easy | Phase 1 ✓ |
+| 02 — Memory Poisoning | Medium | Phase 2 |
+| 03 — Identity Spoof | Hard | Phase 2 |
+| 04 — Privilege Chain | Hard | Phase 3 |
+| 05 — Injection Gauntlet | Easy | Phase 1 ✓ |
+| 06 — Supply Chain | Medium | Phase 1 ✓ |
+| 07 — Race Condition | Expert | Phase 3 |
+
+Phase 1 covers scenarios 01, 05, 06. Phase 2/3 will close the remaining gaps.
+
+---
+
+## The integrity rule
+
+ARGUS attacks the scenarios **generically** — the same way it would attack any production AI agent. No PROMETHEUS module hardcodes a benchmark canary token, scenario ID, or known vulnerable tool name. The score reflects what ARGUS actually finds through generic technique application, not engineered cheating.
+
+If a future contributor adds scenario-aware code to ARGUS, that's a regression to revert.
 
 ---
 
 ## License
 
-The benchmark scenarios, scoring scripts, and documentation are released under the MIT License so any tool can use them. The vulnerabilities are real, the answers are published — the value is in being the reference standard for the category.
+The benchmark scenarios are MIT-licensed for use by anyone scoring their AI agent security tool. ARGUS itself is commercial software from Odingard Security.
 
 **Built by Odingard Security · Six Sense Enterprise Services**

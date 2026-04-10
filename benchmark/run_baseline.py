@@ -29,7 +29,12 @@ SCORE_OUT = BENCHMARK_DIR / "baseline-score.json"
 
 
 async def run_benchmark() -> dict:
-    """Run all Phase 1 agents against the deployed benchmark scenarios."""
+    """Run all Phase 1 agents against the deployed benchmark scenarios.
+
+    Targets all 7 official benchmark scenarios. Phase 1 agents will only
+    detect vulnerabilities in scenarios their techniques cover (01, 05, 06).
+    Scenarios 02-04 and 07 will score 0 honestly until Phase 2/3 ships.
+    """
     print("=" * 70)
     print("  ARGUS Gauntlet — Baseline Run")
     print("=" * 70)
@@ -38,11 +43,15 @@ async def run_benchmark() -> dict:
     target = TargetConfig(
         name="ARGUS Gauntlet",
         mcp_server_urls=[
-            "http://localhost:8001",  # Scenario 01 — Poisoned MCP
-            "http://localhost:8003",  # Scenario 03 — Legitimate
-            "http://localhost:8004",  # Scenario 03 — Malicious
+            "http://localhost:8001",  # Scenario 01 — Tool Poisoning MCP
+            "http://localhost:8003",  # Scenario 02 — Memory Poisoning
+            "http://localhost:8005",  # Scenario 03 — Identity Spoof
+            "http://localhost:8007",  # Scenario 04 — Privilege Chain
+            "http://localhost:8009",  # Scenario 05 — Injection Gauntlet
+            "http://localhost:8011",  # Scenario 06 — Supply Chain
+            "http://localhost:8013",  # Scenario 07 — Race Condition
         ],
-        agent_endpoint="http://localhost:8002/chat",  # Scenario 02 — Injection Gauntlet
+        agent_endpoint="http://localhost:8002/chat",  # Scenario 01 — Target agent
         non_destructive=True,
         max_requests_per_minute=120,
     )

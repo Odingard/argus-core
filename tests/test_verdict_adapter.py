@@ -1,5 +1,7 @@
 """Tests for the VERDICT WEIGHT adapter."""
 
+import pytest
+
 from argus.models.findings import (
     AttackChainStep,
     Finding,
@@ -115,7 +117,8 @@ def test_get_historical_accuracy_unknown_returns_neutral():
 # ============================================================
 
 
-def test_score_high_confidence_finding():
+@pytest.mark.asyncio
+async def test_score_high_confidence_finding():
     """A direct-evidence Tool Poisoning finding should get high CW."""
     adapter = VerdictAdapter()
     finding = _make_finding(
@@ -123,7 +126,7 @@ def test_score_high_confidence_finding():
         technique="param_desc_scan_zero_width",
         direct_evidence=True,
     )
-    score = adapter.score_finding(finding)
+    score = await adapter.score_finding(finding)
 
     assert isinstance(score, VerdictScore)
     assert score.consequence_weight > 0.0
@@ -135,7 +138,8 @@ def test_score_high_confidence_finding():
     assert "HA" in score.streams
 
 
-def test_score_low_confidence_finding():
+@pytest.mark.asyncio
+async def test_score_low_confidence_finding():
     """An LLM-generated novel variant with no track record should get lower CW."""
     adapter = VerdictAdapter()
     finding = _make_finding(
@@ -143,21 +147,22 @@ def test_score_low_confidence_finding():
         technique="totally_unknown_novel_technique",
         direct_evidence=False,
     )
-    score = adapter.score_finding(finding)
+    score = await adapter.score_finding(finding)
     # Single technique, no track record, no direct evidence → low CW expected
     assert score.consequence_weight < 0.7
 
 
-def test_corroboration_increases_cw():
+@pytest.mark.asyncio
+async def test_corroboration_increases_cw():
     """When the same family of techniques accumulates corroborations, CW rises."""
     adapter = VerdictAdapter()
     f1 = _make_finding(technique="role_hijack_classic", direct_evidence=True)
     f2 = _make_finding(technique="role_hijack_lowercase", direct_evidence=True)
     f3 = _make_finding(technique="role_hijack_debug_mode", direct_evidence=True)
 
-    score1 = adapter.score_finding(f1)
-    score2 = adapter.score_finding(f2)
-    score3 = adapter.score_finding(f3)
+    score1 = await adapter.score_finding(f1)
+    score2 = await adapter.score_finding(f2)
+    score3 = await adapter.score_finding(f3)
 
     # Corroboration count should increase
     assert score1.n_corroborating == 1
@@ -168,35 +173,54 @@ def test_corroboration_increases_cw():
     assert score3.consequence_weight >= score2.consequence_weight
 
 
-def test_direct_evidence_boosts_sr():
+@pytest.mark.asyncio
+async def test_concurrent_corroboration_is_safe():
+    """Concurrent score_finding calls must not lose corroboration counts."""
+    import asyncio
+    adapter = VerdictAdapter()
+    findings = [
+        _make_finding(technique="role_hijack_classic", direct_evidence=True)
+        for _ in range(20)
+    ]
+    # Fire all 20 concurrently — race condition would lose increments
+    scores = await asyncio.gather(*[adapter.score_finding(f) for f in findings])
+    # Final corroboration count must be exactly 20 (no lost increments)
+    counts = sorted(s.n_corroborating for s in scores)
+    assert counts == list(range(1, 21))
+
+
+@pytest.mark.asyncio
+async def test_direct_evidence_boosts_sr():
     """Findings with validation_method=direct_observation get SR boost."""
     adapter = VerdictAdapter()
     no_evidence = _make_finding(direct_evidence=False)
     with_evidence = _make_finding(direct_evidence=True)
 
-    s1 = adapter.score_finding(no_evidence, n_corroborating_override=1)
-    s2 = adapter.score_finding(with_evidence, n_corroborating_override=1)
+    s1 = await adapter.score_finding(no_evidence, n_corroborating_override=1)
+    s2 = await adapter.score_finding(with_evidence, n_corroborating_override=1)
 
     # Direct evidence should produce a higher SR
     assert s2.source_reliability > s1.source_reliability
 
 
-def test_classification_thresholds():
+@pytest.mark.asyncio
+async def test_classification_thresholds():
     """VerdictScore.is_validated/is_low_confidence/is_suppressed are mutually exclusive."""
     adapter = VerdictAdapter()
     finding = _make_finding(direct_evidence=True)
-    score = adapter.score_finding(finding, n_corroborating_override=10)
+    score = await adapter.score_finding(finding, n_corroborating_override=10)
 
     classifications = sum([score.is_validated, score.is_low_confidence, score.is_suppressed])
     assert classifications == 1
 
 
-def test_to_dict_serializable():
+@pytest.mark.asyncio
+async def test_to_dict_serializable():
     """VerdictScore.to_dict() should be JSON-serializable."""
     import json
 
     adapter = VerdictAdapter()
-    score = adapter.score_finding(_make_finding())
+    score = await adapter.score_finding(_make_finding())
     d = score.to_dict()
     # Should not raise
     json.dumps(d)
@@ -205,11 +229,12 @@ def test_to_dict_serializable():
     assert d["framework"] == "VERDICT WEIGHT"
 
 
-def test_reset_corroboration():
+@pytest.mark.asyncio
+async def test_reset_corroboration():
     adapter = VerdictAdapter()
     finding = _make_finding(technique="role_hijack_classic")
-    adapter.score_finding(finding)
-    adapter.score_finding(finding)
+    await adapter.score_finding(finding)
+    await adapter.score_finding(finding)
     assert adapter._corroboration  # has entries
 
     adapter.reset_corroboration()
