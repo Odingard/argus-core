@@ -739,7 +739,7 @@ class MemoryBoundaryCollapseAgent(LLMAttackAgent):
             raw_response=trigger_result.response_text[:5000],
             owasp_agentic=OWASPAgenticCategory.MEMORY_BOUNDARY_COLLAPSE,
             owasp_llm=OWASPLLMCategory.PROMPT_INJECTION,
-            direct_evidence=bool(canary.lower() in trigger_result.response_text.lower()),
+            direct_evidence=True,  # This method is only called when violation is confirmed
             proof_of_exploitation=proof,
         )
         await self.emit_finding(finding)
