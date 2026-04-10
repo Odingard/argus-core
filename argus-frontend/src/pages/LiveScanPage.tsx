@@ -75,7 +75,14 @@ export function LiveScanPage() {
           if (step < delay) return a;
           const elapsed = step - delay;
           const progress = Math.min(elapsed * 8, 100);
-          const findings = progress > 50 ? Math.floor(Math.random() * 4) : 0;
+          const prevProgress = a.progress;
+          let findings = a.findings;
+          // Add findings at 25% thresholds instead of random each tick
+          for (const threshold of [25, 50, 75, 100]) {
+            if (prevProgress < threshold && progress >= threshold) {
+              findings += Math.floor(Math.random() * 3);
+            }
+          }
           return {
             ...a,
             status: progress >= 100 ? "completed" : "running",
