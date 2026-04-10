@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -44,7 +44,7 @@ class AgentConfig(BaseModel):
 
     # Execution
     timeout_seconds: int = 300
-    max_techniques: Optional[int] = None
+    max_techniques: int | None = None
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-4-20250514"
 
@@ -58,21 +58,21 @@ class AgentConfig(BaseModel):
 class TargetConfig(BaseModel):
     """Configuration describing the target AI system under test."""
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
     # MCP targets
     mcp_server_urls: list[str] = Field(default_factory=list)
     mcp_server_configs: list[dict[str, Any]] = Field(default_factory=list)
 
     # Agent targets
-    agent_endpoint: Optional[str] = None
-    agent_api_key: Optional[str] = None
+    agent_endpoint: str | None = None
+    agent_api_key: str | None = None
 
     # Multi-agent targets
     agent_endpoints: list[str] = Field(default_factory=list)
 
     # Context
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     available_tools: list[dict[str, Any]] = Field(default_factory=list)
 
     # Constraints
@@ -92,9 +92,9 @@ class AgentResult(BaseModel):
     status: AgentStatus
 
     # Timing
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
-    duration_seconds: Optional[float] = None
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
+    duration_seconds: float | None = None
 
     # Findings
     findings: list[str] = Field(default_factory=list, description="Finding IDs")

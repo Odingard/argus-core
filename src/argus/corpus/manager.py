@@ -12,7 +12,7 @@ import json
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -65,7 +65,7 @@ class AttackPattern(BaseModel):
     agent_types: list[str] = Field(default_factory=list)
 
     # Metadata
-    source: Optional[str] = None  # paper, CVE, real-world incident
+    source: str | None = None  # paper, CVE, real-world incident
     severity: str = "high"
     tags: list[str] = Field(default_factory=list)
 
@@ -87,29 +87,51 @@ class AttackCorpus:
     target surface, and agent type. Tracks effectiveness over time.
     """
 
-    def __init__(self, corpus_dir: Optional[Path] = None) -> None:
+    # Maximum corpus file size to prevent resource exhaustion
+    MAX_CORPUS_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+    def __init__(self, corpus_dir: Path | None = None) -> None:
         self._corpus_dir = corpus_dir or Path(__file__).parent / "data"
         self._patterns: dict[str, AttackPattern] = {}
         self._loaded = False
 
     def load(self) -> int:
-        """Load all attack patterns from the corpus directory."""
+        """Load all attack patterns from the corpus directory.
+
+        Security: validates file size, validates JSON structure through
+        Pydantic models, and catches all parse errors per-file.
+        """
         if not self._corpus_dir.exists():
             self._corpus_dir.mkdir(parents=True, exist_ok=True)
             self._seed_corpus()
 
-        for file_path in self._corpus_dir.glob("*.json"):
+        # Resolve to prevent symlink attacks
+        corpus_resolved = self._corpus_dir.resolve()
+
+        for file_path in corpus_resolved.glob("*.json"):
             try:
-                data = json.loads(file_path.read_text())
+                # Enforce file size limit
+                if file_path.stat().st_size > self.MAX_CORPUS_FILE_SIZE:
+                    logger.warning("Corpus file too large, skipping: %s", file_path.name)
+                    continue
+
+                # Reject symlinks
+                if file_path.is_symlink():
+                    logger.warning("Symlink in corpus directory, skipping: %s", file_path.name)
+                    continue
+
+                data = json.loads(file_path.read_text(encoding="utf-8"))
                 if isinstance(data, list):
                     for item in data:
-                        pattern = AttackPattern(**item)
+                        pattern = AttackPattern.model_validate(item)
                         self._patterns[pattern.id] = pattern
-                else:
-                    pattern = AttackPattern(**data)
+                elif isinstance(data, dict):
+                    pattern = AttackPattern.model_validate(data)
                     self._patterns[pattern.id] = pattern
+                else:
+                    logger.warning("Unexpected JSON type in %s, skipping", file_path.name)
             except Exception as exc:
-                logger.warning("Failed to load corpus file %s: %s", file_path, exc)
+                logger.warning("Failed to load corpus file %s: %s", file_path.name, exc)
 
         self._loaded = True
         logger.info("Loaded %d attack patterns from corpus", len(self._patterns))
@@ -117,10 +139,10 @@ class AttackCorpus:
 
     def get_patterns(
         self,
-        category: Optional[AttackCategory] = None,
-        agent_type: Optional[str] = None,
-        target_surface: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        category: AttackCategory | None = None,
+        agent_type: str | None = None,
+        target_surface: str | None = None,
+        tags: list[str] | None = None,
         min_success_rate: float = 0.0,
     ) -> list[AttackPattern]:
         """Query patterns with filters."""
@@ -142,7 +164,7 @@ class AttackCorpus:
 
         return results
 
-    def get_pattern(self, pattern_id: str) -> Optional[AttackPattern]:
+    def get_pattern(self, pattern_id: str) -> AttackPattern | None:
         if not self._loaded:
             self.load()
         return self._patterns.get(pattern_id)

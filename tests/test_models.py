@@ -1,5 +1,6 @@
 """Tests for ARGUS data models."""
 
+from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
 from argus.models.findings import (
     AttackChainStep,
     CompoundAttackPath,
@@ -10,7 +11,6 @@ from argus.models.findings import (
     ReproductionStep,
     ValidationResult,
 )
-from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
 
 
 def test_finding_creation():

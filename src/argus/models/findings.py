@@ -7,9 +7,8 @@ severity, validation status, and CERBERUS detection rule recommendations.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -61,9 +60,9 @@ class ReproductionStep(BaseModel):
     """A single step in reproducing a finding."""
     step_number: int
     action: str
-    input_data: Optional[str] = None
+    input_data: str | None = None
     expected_result: str
-    actual_result: Optional[str] = None
+    actual_result: str | None = None
 
 
 class AttackChainStep(BaseModel):
@@ -72,8 +71,8 @@ class AttackChainStep(BaseModel):
     agent_type: str
     technique: str
     description: str
-    input_payload: Optional[str] = None
-    output_observed: Optional[str] = None
+    input_payload: str | None = None
+    output_observed: str | None = None
     target_surface: str
 
 
@@ -84,14 +83,14 @@ class ValidationResult(BaseModel):
     proof_of_exploitation: str
     reproducible: bool
     attempts: int = 1
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RemediationGuidance(BaseModel):
     """Remediation recommendation for a finding."""
     summary: str
     detailed_steps: list[str]
-    cerberus_detection_rule: Optional[str] = None
+    cerberus_detection_rule: str | None = None
     references: list[str] = Field(default_factory=list)
 
 
@@ -102,7 +101,7 @@ class Finding(BaseModel):
     been validated with reproducible proof-of-exploitation.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Source
     agent_type: str
@@ -122,18 +121,18 @@ class Finding(BaseModel):
     reproduction_steps: list[ReproductionStep]
 
     # OWASP mapping
-    owasp_agentic: Optional[OWASPAgenticCategory] = None
-    owasp_llm: Optional[OWASPLLMCategory] = None
+    owasp_agentic: OWASPAgenticCategory | None = None
+    owasp_llm: OWASPLLMCategory | None = None
 
     # Validation
-    validation: Optional[ValidationResult] = None
+    validation: ValidationResult | None = None
 
     # Remediation
-    remediation: Optional[RemediationGuidance] = None
+    remediation: RemediationGuidance | None = None
 
-    # Raw evidence
-    raw_request: Optional[str] = None
-    raw_response: Optional[str] = None
+    # Raw evidence — bounded to prevent memory exhaustion
+    raw_request: str | None = Field(None, max_length=50_000)
+    raw_response: str | None = Field(None, max_length=50_000)
 
     def is_validated(self) -> bool:
         return self.status == FindingStatus.VALIDATED and self.validation is not None and self.validation.validated
@@ -146,7 +145,7 @@ class CompoundAttackPath(BaseModel):
     attack agents can be combined into a higher-severity exploit chain.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scan_id: str
 
     title: str
@@ -168,8 +167,8 @@ class CompoundAttackPath(BaseModel):
     owasp_agentic: list[OWASPAgenticCategory] = Field(default_factory=list)
 
     # Validation
-    validation: Optional[ValidationResult] = None
+    validation: ValidationResult | None = None
 
     # Remediation
-    remediation: Optional[RemediationGuidance] = None
+    remediation: RemediationGuidance | None = None
     cerberus_detection_rules: list[str] = Field(default_factory=list)

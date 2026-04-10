@@ -1,10 +1,14 @@
-"""ARGUS CLI — command-line interface for the autonomous AI red team platform."""
+"""ARGUS CLI — command-line interface for the autonomous AI red team platform.
+
+Security: validates all user input (URLs, file paths) before use.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 import click
 from rich.console import Console
@@ -18,6 +22,8 @@ from argus.orchestrator.engine import Orchestrator
 from argus.reporting.renderer import ReportRenderer
 
 console = Console()
+
+ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
 BANNER = r"""
@@ -35,6 +41,34 @@ BANNER = r"""
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
 """
+
+
+def _validate_url(url: str) -> None:
+    """Validate URL has allowed scheme and valid hostname. Prevents SSRF."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        raise click.BadParameter(
+            f"URL scheme '{parsed.scheme}' not allowed. Use http:// or https://"
+        )
+    if not parsed.netloc:
+        raise click.BadParameter("URL must have a valid hostname")
+
+
+def _validate_output_path(path_str: str) -> Path:
+    """Validate output file path — must be within CWD, no symlink attacks."""
+    output_path = Path(path_str).resolve()
+    cwd = Path.cwd().resolve()
+
+    if not str(output_path).startswith(str(cwd)):
+        raise click.BadParameter(
+            f"Output path must be within current directory ({cwd})"
+        )
+
+    # Reject if parent directory is a symlink
+    if output_path.parent.is_symlink():
+        raise click.BadParameter("Output path parent is a symlink")
+
+    return output_path
 
 
 @click.group()
@@ -59,13 +93,15 @@ def banner() -> None:
 @main.command()
 def status() -> None:
     """Show ARGUS system status."""
-    console.print(Panel.fit(
-        f"[bold red]ARGUS[/] v{__version__}\n\n"
-        "[bold]Phase:[/] 0 — Orchestration Foundation\n"
-        "[bold]Agents Registered:[/] 0 (Phase 1 builds first 3)\n"
-        "[bold]Corpus Status:[/] Checking...",
-        title="System Status",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold red]ARGUS[/] v{__version__}\n\n"
+            "[bold]Phase:[/] 0 — Orchestration Foundation\n"
+            "[bold]Agents Registered:[/] 0 (Phase 1 builds first 3)\n"
+            "[bold]Corpus Status:[/] Checking...",
+            title="System Status",
+        )
+    )
 
     corpus = AttackCorpus()
     corpus.load()
@@ -94,6 +130,17 @@ def scan(
     output: str | None,
 ) -> None:
     """Run an ARGUS scan against a target AI system."""
+    # Validate all URLs
+    for url in mcp_url:
+        _validate_url(url)
+    if agent_endpoint:
+        _validate_url(agent_endpoint)
+
+    # Validate output path
+    output_path = None
+    if output:
+        output_path = _validate_output_path(output)
+
     console.print(BANNER, style="bold red")
     console.print(f"\n[bold]Target:[/] {target_name}")
     console.print(f"[bold]MCP URLs:[/] {', '.join(mcp_url) if mcp_url else 'None'}")
@@ -125,9 +172,10 @@ def scan(
     renderer = ReportRenderer()
     console.print(renderer.render_summary(result))
 
-    if output:
-        Path(output).write_text(renderer.render_json(result))
-        console.print(f"\n[green]Full report written to {output}[/]")
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(renderer.render_json(result))
+        console.print(f"\n[green]Full report written to {output_path}[/]")
 
 
 @main.command()
@@ -137,11 +185,13 @@ def corpus() -> None:
     c.load()
     stats = c.stats()
 
-    console.print(Panel.fit(
-        f"[bold]Total Patterns:[/] {stats['total_patterns']}\n"
-        f"[bold]With Usage Data:[/] {stats['patterns_with_usage']}",
-        title="Attack Corpus v0.1",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Total Patterns:[/] {stats['total_patterns']}\n"
+            f"[bold]With Usage Data:[/] {stats['patterns_with_usage']}",
+            title="Attack Corpus v0.1",
+        )
+    )
 
     table = Table(title="Patterns by Category")
     table.add_column("Category", style="cyan")
@@ -155,6 +205,8 @@ def corpus() -> None:
 @click.argument("mcp_url")
 def probe(mcp_url: str) -> None:
     """Probe an MCP server — enumerate tools and scan for hidden content."""
+    _validate_url(mcp_url)
+
     from argus.mcp_client import MCPAttackClient, MCPServerConfig
 
     config = MCPServerConfig(
@@ -180,16 +232,16 @@ def probe(mcp_url: str) -> None:
                     tool.name,
                     (tool.description or "")[:50],
                     str(len(tool.parameters)),
-                    "⚠ YES" if tool.hidden_content_detected else "—",
+                    "YES" if tool.hidden_content_detected else "-",
                 )
 
             console.print(table)
 
             hidden = [t for t in tools if t.hidden_content_detected]
             if hidden:
-                console.print(f"\n[bold red]⚠ {len(hidden)} tool(s) with hidden content detected![/]")
+                console.print(f"\n[bold red]{len(hidden)} tool(s) with hidden content detected![/]")
                 for t in hidden:
-                    console.print(f"  • {t.name}: {t.hidden_content}")
+                    console.print(f"  - {t.name}: {t.hidden_content}")
 
         finally:
             await client.disconnect()

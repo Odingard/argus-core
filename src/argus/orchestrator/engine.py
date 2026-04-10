@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional, Type
+from datetime import UTC, datetime
+from typing import Any
 
 from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
 from argus.models.findings import CompoundAttackPath, Finding
@@ -65,7 +65,7 @@ class BaseAttackAgent:
         self._signals_emitted += 1
 
     def build_result(self, status: AgentStatus, started_at: datetime, errors: list[str] | None = None) -> AgentResult:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return AgentResult(
             agent_type=self.agent_type,
             instance_id=self.config.instance_id,
@@ -90,15 +90,15 @@ class ScanResult:
 
     def __init__(self, scan_id: str) -> None:
         self.scan_id = scan_id
-        self.started_at: Optional[datetime] = None
-        self.completed_at: Optional[datetime] = None
+        self.started_at: datetime | None = None
+        self.completed_at: datetime | None = None
         self.agent_results: list[AgentResult] = []
         self.findings: list[Finding] = []
         self.compound_paths: list[CompoundAttackPath] = []
         self.signals: list[Signal] = []
 
     @property
-    def duration_seconds(self) -> Optional[float]:
+    def duration_seconds(self) -> float | None:
         if self.started_at and self.completed_at:
             return (self.completed_at - self.started_at).total_seconds()
         return None
@@ -131,14 +131,14 @@ class Orchestrator:
 
     def __init__(
         self,
-        validation_engine: Optional[ValidationEngine] = None,
+        validation_engine: ValidationEngine | None = None,
     ) -> None:
         self.signal_bus = SignalBus()
         self.validation_engine = validation_engine or ValidationEngine()
-        self._agent_registry: dict[AgentType, Type[BaseAttackAgent]] = {}
+        self._agent_registry: dict[AgentType, type[BaseAttackAgent]] = {}
         self._active_agents: dict[str, BaseAttackAgent] = {}
 
-    def register_agent(self, agent_type: AgentType, agent_class: Type[BaseAttackAgent]) -> None:
+    def register_agent(self, agent_type: AgentType, agent_class: type[BaseAttackAgent]) -> None:
         """Register an attack agent class for deployment."""
         self._agent_registry[agent_type] = agent_class
         logger.info("Registered agent: %s", agent_type.value)
@@ -149,8 +149,8 @@ class Orchestrator:
     async def run_scan(
         self,
         target: TargetConfig,
-        agent_types: Optional[list[AgentType]] = None,
-        scan_id: Optional[str] = None,
+        agent_types: list[AgentType] | None = None,
+        scan_id: str | None = None,
         timeout: float = 600.0,
     ) -> ScanResult:
         """Execute a full ARGUS scan against a target.
@@ -161,7 +161,7 @@ class Orchestrator:
         """
         scan_id = scan_id or str(uuid.uuid4())
         result = ScanResult(scan_id=scan_id)
-        result.started_at = datetime.now(timezone.utc)
+        result.started_at = datetime.now(UTC)
 
         # Determine which agents to deploy
         types_to_deploy = agent_types or list(self._agent_registry.keys())
@@ -169,7 +169,7 @@ class Orchestrator:
 
         if not types_to_deploy:
             logger.warning("No agents registered or selected for scan %s", scan_id)
-            result.completed_at = datetime.now(timezone.utc)
+            result.completed_at = datetime.now(UTC)
             return result
 
         logger.info(
@@ -228,13 +228,13 @@ class Orchestrator:
             result.findings.append(finding)
 
         # Collect signal history
-        result.signals = self.signal_bus.get_history()
+        result.signals = await self.signal_bus.get_history()
 
         # Cleanup
         self._active_agents.clear()
-        self.signal_bus.clear()
+        await self.signal_bus.clear()
 
-        result.completed_at = datetime.now(timezone.utc)
+        result.completed_at = datetime.now(UTC)
 
         summary = result.summary()
         logger.info(
@@ -253,7 +253,7 @@ class Orchestrator:
         self, agent: BaseAttackAgent, timeout: float
     ) -> AgentResult:
         """Run an agent with a timeout. Returns AgentResult regardless."""
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
 
         # Notify signal bus of agent start
         await self.signal_bus.emit(Signal(
@@ -276,7 +276,7 @@ class Orchestrator:
 
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Agent %s timed out after %.0fs",
                 agent.agent_type.value, timeout,

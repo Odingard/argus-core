@@ -1,7 +1,7 @@
 """Tests for ARGUS Orchestrator."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +21,7 @@ class MockInjectionAgent(BaseAttackAgent):
     agent_type = AgentType.PROMPT_INJECTION
 
     async def run(self) -> AgentResult:
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
 
         # Simulate finding a vulnerability
         finding = Finding(
@@ -63,7 +63,7 @@ class MockToolPoisonAgent(BaseAttackAgent):
     agent_type = AgentType.TOOL_POISONING
 
     async def run(self) -> AgentResult:
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         self._techniques_attempted = 8
         self._techniques_succeeded = 0
         return self.build_result(AgentStatus.COMPLETED, started)
@@ -107,7 +107,7 @@ async def test_orchestrator_handles_agent_timeout():
         agent_type = AgentType.SUPPLY_CHAIN
         async def run(self) -> AgentResult:
             await asyncio.sleep(100)  # Will be timed out
-            return self.build_result(AgentStatus.COMPLETED, datetime.now(timezone.utc))
+            return self.build_result(AgentStatus.COMPLETED, datetime.now(UTC))
 
     orch = Orchestrator()
     orch.register_agent(AgentType.SUPPLY_CHAIN, SlowAgent)
@@ -137,17 +137,19 @@ async def test_signal_bus():
 
     assert len(received) == 1
     assert received[0].data["test"] is True
-    assert len(bus.get_history()) == 1
+    history = await bus.get_history()
+    assert len(history) == 1
 
 
 @pytest.mark.asyncio
 async def test_signal_bus_targeted():
     bus = SignalBus()
     agent_a_received = []
-    agent_b_received = []
 
-    await bus.subscribe("agent-a", lambda s: agent_a_received.append(s))
-    await bus.subscribe("agent-b", lambda s: agent_b_received.append(s))
+    async def handler_a(signal):
+        agent_a_received.append(signal)
+
+    await bus.subscribe("agent-a", handler_a)
 
     await bus.emit(Signal(
         signal_type=SignalType.PARTIAL_FINDING,
@@ -157,6 +159,6 @@ async def test_signal_bus_targeted():
         target_agent="agent-a",
     ))
 
-    # Targeted signals need async handlers — let's fix by making handlers async
-    # For now, the bus delivers to targeted handlers
-    assert len(bus.get_history()) == 1
+    assert len(agent_a_received) == 1
+    history = await bus.get_history()
+    assert len(history) == 1

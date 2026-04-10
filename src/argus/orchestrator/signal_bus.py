@@ -4,18 +4,24 @@ Agents signal partial findings to the Correlation Agent and to each other
 in real time. When Agent 1 finds a prompt injection that reaches the file
 system, Agent 7 is immediately notified to look for tool calls that write
 to external storage.
+
+Security: All shared state is protected by async lock. Handler lists are
+snapshot-copied before iteration to prevent race conditions.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+MAX_SIGNAL_HISTORY = 10_000
 
 
 class SignalType(str, Enum):
@@ -29,12 +35,13 @@ class SignalType(str, Enum):
 @dataclass
 class Signal:
     """A message on the inter-agent signal bus."""
+
     signal_type: SignalType
     source_agent: str
     source_instance: str
     data: dict[str, Any]
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    target_agent: Optional[str] = None  # None = broadcast to all
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    target_agent: str | None = None  # None = broadcast to all
 
 
 class SignalBus:
@@ -42,6 +49,10 @@ class SignalBus:
 
     All 10 attack agents and the Correlation Agent share this bus.
     Signals are delivered in real time as they are produced.
+
+    Thread safety: all mutations and reads of shared state are protected
+    by an async lock. Handler lists are snapshot-copied under the lock
+    before delivery to prevent race conditions during iteration.
     """
 
     def __init__(self) -> None:
@@ -63,36 +74,54 @@ class SignalBus:
             self._broadcast_subscribers.append(handler)
 
     async def emit(self, signal: Signal) -> None:
-        """Emit a signal to targeted agent(s) or broadcast."""
+        """Emit a signal to targeted agent(s) or broadcast.
+
+        Snapshot-copies handler lists under the lock to prevent race
+        conditions if subscriptions change during delivery.
+        """
         async with self._lock:
             self._history.append(signal)
+            # Enforce history size limit to prevent unbounded memory growth
+            if len(self._history) > MAX_SIGNAL_HISTORY:
+                self._history = self._history[-MAX_SIGNAL_HISTORY:]
+
+            # Snapshot handler lists under the lock
+            broadcast_handlers = list(self._broadcast_subscribers)
+            targeted_handlers = (
+                list(self._subscribers[signal.target_agent])
+                if signal.target_agent and signal.target_agent in self._subscribers
+                else []
+            )
 
         logger.debug(
-            "Signal [%s] from %s → %s",
+            "Signal [%s] from %s -> %s",
             signal.signal_type.value,
             signal.source_agent,
             signal.target_agent or "BROADCAST",
         )
 
-        # Deliver to broadcast subscribers (Correlation Agent)
-        for handler in self._broadcast_subscribers:
+        # Deliver to broadcast subscribers (Correlation Agent) — outside lock
+        for handler in broadcast_handlers:
             try:
                 await handler(signal)
             except Exception as exc:
                 logger.error("Broadcast handler error: %s", exc)
 
-        # Deliver to targeted agent
-        if signal.target_agent and signal.target_agent in self._subscribers:
-            for handler in self._subscribers[signal.target_agent]:
-                try:
-                    await handler(signal)
-                except Exception as exc:
-                    logger.error("Targeted handler error for %s: %s", signal.target_agent, exc)
+        # Deliver to targeted agent — outside lock
+        for handler in targeted_handlers:
+            try:
+                await handler(signal)
+            except Exception as exc:
+                logger.error("Targeted handler error for %s: %s", signal.target_agent, exc)
 
-    def get_history(self) -> list[Signal]:
-        return list(self._history)
+    async def get_history(self) -> list[Signal]:
+        """Return a copy of signal history (thread-safe)."""
+        async with self._lock:
+            return list(self._history)
 
-    def clear(self) -> None:
-        self._subscribers.clear()
-        self._broadcast_subscribers.clear()
-        self._history.clear()
+    async def clear(self) -> None:
+        """Clear all subscriptions and history (thread-safe)."""
+        async with self._lock:
+            self._subscribers.clear()
+            self._broadcast_subscribers.clear()
+            self._history.clear()

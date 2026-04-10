@@ -1,5 +1,6 @@
 """ARGUS data models — findings, attack chains, agent results."""
 
+from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType
 from argus.models.findings import (
     AttackChainStep,
     CompoundAttackPath,
@@ -12,7 +13,6 @@ from argus.models.findings import (
     ReproductionStep,
     ValidationResult,
 )
-from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType
 
 __all__ = [
     "AttackChainStep",

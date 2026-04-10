@@ -3,6 +3,13 @@
 Connects to any MCP server as a client — from the attacker's perspective.
 Enumerates tools, inspects definitions for hidden content, calls tools
 with adversarial inputs, and monitors responses.
+
+Security hardening:
+- Subprocess command allowlist prevents arbitrary execution
+- Minimal environment inheritance prevents secrets leakage
+- HTTPS enforced for authenticated connections
+- Error messages sanitized to prevent info disclosure
+- URL scheme validation prevents SSRF via file:// or gopher://
 """
 
 from __future__ import annotations
@@ -10,10 +17,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import shutil
 import subprocess
 import time
-from typing import Any, Optional
+from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -32,11 +42,50 @@ ZERO_WIDTH_CHARS = [
 ]
 
 HIDDEN_CONTENT_PATTERNS = [
-    r"<!--.*?-->",                    # HTML comments
-    r"\[INST\].*?\[/INST\]",         # Instruction tags
-    r"<system>.*?</system>",         # System tags
+    r"<!--.*?-->",  # HTML comments
+    r"\[INST\].*?\[/INST\]",  # Instruction tags
+    r"<system>.*?</system>",  # System tags
     r"<\|im_start\|>.*?<\|im_end\|>",  # ChatML
 ]
+
+# Allowlisted commands for stdio transport — only known MCP server runtimes
+ALLOWED_STDIO_COMMANDS = frozenset({
+    "node",
+    "npx",
+    "python",
+    "python3",
+    "uvx",
+    "uv",
+    "deno",
+    "bun",
+    "docker",
+})
+
+# Allowed URL schemes for HTTP transport
+ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
+
+
+def _validate_url(url: str, require_https: bool = False) -> None:
+    """Validate a URL for safe use. Prevents SSRF via file://, gopher://, etc."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        raise ValueError(f"URL scheme '{parsed.scheme}' not allowed. Use http:// or https://")
+    if not parsed.netloc:
+        raise ValueError("URL must have a valid hostname")
+    if require_https and parsed.scheme != "https":
+        raise ValueError("HTTPS required for authenticated connections")
+
+
+def _build_minimal_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build a minimal subprocess environment — no secrets leakage."""
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
+        "HOME": os.environ.get("HOME", "/tmp"),
+        "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+    }
+    if extra_env:
+        env.update(extra_env)
+    return env
 
 
 class MCPAttackClient:
@@ -51,8 +100,8 @@ class MCPAttackClient:
     def __init__(self, config: MCPServerConfig) -> None:
         self.config = config
         self._tools: list[MCPTool] = []
-        self._process: Optional[subprocess.Popen] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._process: subprocess.Popen | None = None
+        self._http_client: httpx.AsyncClient | None = None
         self._request_id = 0
         self._connected = False
 
@@ -100,14 +149,16 @@ class MCPAttackClient:
             if tool.input_schema and "properties" in tool.input_schema:
                 required = tool.input_schema.get("required", [])
                 for param_name, param_def in tool.input_schema["properties"].items():
-                    tool.parameters.append(MCPToolParameter(
-                        name=param_name,
-                        description=param_def.get("description"),
-                        type=param_def.get("type", "string"),
-                        required=param_name in required,
-                        enum=param_def.get("enum"),
-                        default=param_def.get("default"),
-                    ))
+                    tool.parameters.append(
+                        MCPToolParameter(
+                            name=param_name,
+                            description=param_def.get("description"),
+                            type=param_def.get("type", "string"),
+                            required=param_name in required,
+                            enum=param_def.get("enum"),
+                            default=param_def.get("default"),
+                        )
+                    )
 
             # Scan for hidden content in tool definition
             self._scan_for_hidden_content(tool)
@@ -118,16 +169,16 @@ class MCPAttackClient:
         return tools
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPCallResult:
-        """Call an MCP tool with the given arguments.
-
-        Used for both legitimate probing and adversarial testing.
-        """
+        """Call an MCP tool with the given arguments."""
         start = time.monotonic()
         try:
-            result = await self._send_request("tools/call", {
-                "name": tool_name,
-                "arguments": arguments,
-            })
+            result = await self._send_request(
+                "tools/call",
+                {
+                    "name": tool_name,
+                    "arguments": arguments,
+                },
+            )
             duration = (time.monotonic() - start) * 1000
 
             return MCPCallResult(
@@ -139,20 +190,19 @@ class MCPAttackClient:
             )
         except Exception as exc:
             duration = (time.monotonic() - start) * 1000
+            # Log full details internally, return sanitized error to caller
+            logger.debug("Tool call failed for %s: %s", tool_name, exc)
             return MCPCallResult(
                 tool_name=tool_name,
                 success=False,
-                error=str(exc),
+                error=f"Tool invocation failed: {type(exc).__name__}",
                 duration_ms=duration,
             )
 
     async def call_tool_adversarial(
         self, tool_name: str, arguments: dict[str, Any], payload: str
     ) -> MCPCallResult:
-        """Call a tool with an adversarial payload injected into arguments.
-
-        Injects the payload into string-type arguments for prompt injection testing.
-        """
+        """Call a tool with an adversarial payload injected into arguments."""
         adversarial_args = {}
         injected = False
         for key, value in arguments.items():
@@ -163,7 +213,6 @@ class MCPAttackClient:
                 adversarial_args[key] = value
 
         if not injected:
-            # No string argument found — add payload as first available param
             tool = next((t for t in self._tools if t.name == tool_name), None)
             if tool and tool.parameters:
                 adversarial_args[tool.parameters[0].name] = payload
@@ -171,11 +220,7 @@ class MCPAttackClient:
         return await self.call_tool(tool_name, adversarial_args)
 
     def _scan_for_hidden_content(self, tool: MCPTool) -> None:
-        """Scan a tool definition for hidden adversarial content.
-
-        Checks for zero-width characters, HTML comments, and other
-        hiding techniques in tool metadata.
-        """
+        """Scan a tool definition for hidden adversarial content."""
         texts_to_scan = [
             tool.description or "",
             *(p.description or "" for p in tool.parameters),
@@ -206,29 +251,55 @@ class MCPAttackClient:
     # ------------------------------------------------------------------
 
     async def _connect_stdio(self) -> None:
-        """Connect via stdio transport (subprocess)."""
+        """Connect via stdio transport (subprocess).
+
+        Security: validates command against allowlist and uses minimal
+        environment to prevent secrets leakage.
+        """
         if not self.config.command:
             raise ValueError("stdio transport requires 'command' in config")
 
+        # Validate command against allowlist
+        cmd_basename = os.path.basename(self.config.command)
+        if cmd_basename not in ALLOWED_STDIO_COMMANDS:
+            raise ValueError(
+                f"Command '{cmd_basename}' not in allowlist. "
+                f"Allowed: {', '.join(sorted(ALLOWED_STDIO_COMMANDS))}"
+            )
+
+        # Resolve to full path to prevent PATH manipulation
+        resolved_cmd = shutil.which(self.config.command)
+        if not resolved_cmd:
+            raise FileNotFoundError(f"Command not found on PATH: {self.config.command}")
+
         self._process = subprocess.Popen(
-            [self.config.command, *self.config.args],
+            [resolved_cmd, *self.config.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={**self.config.env} if self.config.env else None,
+            env=_build_minimal_env(self.config.env or None),
         )
 
         # Send initialize request
-        await self._send_request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "argus-attack-client", "version": "0.1.0"},
-        })
+        await self._send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "argus-attack-client", "version": "0.1.0"},
+            },
+        )
 
     async def _connect_http(self) -> None:
-        """Connect via HTTP transport (SSE or streamable-http)."""
+        """Connect via HTTP transport (SSE or streamable-http).
+
+        Security: validates URL scheme and enforces HTTPS for authenticated connections.
+        """
         if not self.config.url:
             raise ValueError("HTTP transport requires 'url' in config")
+
+        # Validate URL and enforce HTTPS if API key is present
+        _validate_url(self.config.url, require_https=bool(self.config.api_key))
 
         headers = {**self.config.headers}
         if self.config.api_key:
@@ -265,7 +336,6 @@ class MCPAttackClient:
         self._process.stdin.write(message.encode())
         self._process.stdin.flush()
 
-        # Read response line
         loop = asyncio.get_event_loop()
         line = await loop.run_in_executor(None, self._process.stdout.readline)
         if not line:

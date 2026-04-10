@@ -8,7 +8,7 @@ detection rule recommendations.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from argus.models.findings import Finding, FindingSeverity
@@ -49,7 +49,8 @@ class ReportRenderer:
             lines.append("  " + "-" * 66)
 
             by_severity = self._group_by_severity(validated)
-            for severity in [FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM, FindingSeverity.LOW]:
+            sev_order = [FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM, FindingSeverity.LOW]
+            for severity in sev_order:
                 findings = by_severity.get(severity, [])
                 if findings:
                     lines.append(f"\n  [{severity.value.upper()}] — {len(findings)} finding(s)")
@@ -78,7 +79,7 @@ class ReportRenderer:
     def _build_report(self, scan_result: ScanResult) -> dict[str, Any]:
         return {
             "argus_version": "0.1.0",
-            "report_generated": datetime.now(timezone.utc).isoformat(),
+            "report_generated": datetime.now(UTC).isoformat(),
             "scan": scan_result.summary(),
             "findings": [f.model_dump() for f in scan_result.findings],
             "compound_attack_paths": [p.model_dump() for p in scan_result.compound_paths],

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from argus.models.findings import (
     CompoundAttackPath,
@@ -69,7 +70,7 @@ class ValidationEngine:
         self,
         finding: Finding,
         replay_fn: Callable[..., Any],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> Finding:
         """Validate a single finding by replaying the attack.
 
@@ -110,7 +111,7 @@ class ValidationEngine:
                         "Finding %s — replay %d/%d did not reproduce",
                         finding.id[:8], attempt, self._replay_attempts,
                     )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "Finding %s — replay %d/%d timed out",
                     finding.id[:8], attempt, self._replay_attempts,
@@ -146,7 +147,7 @@ class ValidationEngine:
         path: CompoundAttackPath,
         findings: list[Finding],
         replay_fn: Callable[..., Any],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> CompoundAttackPath:
         """Validate a compound attack path by replaying the full chain.
 
@@ -170,7 +171,7 @@ class ValidationEngine:
                 )
                 if result:
                     successes += 1
-            except (asyncio.TimeoutError, Exception) as exc:
+            except (TimeoutError, Exception) as exc:
                 logger.warning(
                     "Compound path %s — replay %d/%d error: %s",
                     path.id[:8], attempt, self._compound_replay_attempts, exc,

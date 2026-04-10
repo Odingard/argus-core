@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -10,24 +10,24 @@ from pydantic import BaseModel, Field
 class MCPToolParameter(BaseModel):
     """A parameter definition for an MCP tool."""
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     type: str = "string"
     required: bool = False
-    enum: Optional[list[str]] = None
-    default: Optional[Any] = None
+    enum: list[str] | None = None
+    default: Any | None = None
 
 
 class MCPTool(BaseModel):
     """An MCP tool definition as seen by the attacker client."""
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     parameters: list[MCPToolParameter] = Field(default_factory=list)
-    input_schema: Optional[dict[str, Any]] = None
+    input_schema: dict[str, Any] | None = None
 
     # Attack-relevant metadata
-    raw_definition: Optional[dict[str, Any]] = None
+    raw_definition: dict[str, Any] | None = None
     hidden_content_detected: bool = False
-    hidden_content: Optional[str] = None
+    hidden_content: str | None = None
 
 
 class MCPServerConfig(BaseModel):
@@ -36,16 +36,16 @@ class MCPServerConfig(BaseModel):
     transport: str = "stdio"  # stdio, sse, streamable-http
 
     # stdio transport
-    command: Optional[str] = None
+    command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
 
     # HTTP transports
-    url: Optional[str] = None
+    url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
     # Auth
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Testing constraints
     timeout_seconds: int = 30
@@ -56,7 +56,7 @@ class MCPCallResult(BaseModel):
     """Result from calling an MCP tool."""
     tool_name: str
     success: bool
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    raw_response: Optional[dict[str, Any]] = None
-    duration_ms: Optional[float] = None
+    result: Any | None = None
+    error: str | None = None
+    raw_response: dict[str, Any] | None = None
+    duration_ms: float | None = None

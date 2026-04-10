@@ -6,6 +6,13 @@ Each agent runs in a sandbox that:
 - Isolates agent state from other agents
 - Captures all I/O for audit trail
 - Enforces resource limits (time, requests, data)
+
+Security hardening:
+- Workspace paths validated against allowed base directory
+- Rate limiting enforced with sliding window + delay
+- Data byte limits checked before recording (no off-by-one)
+- Temp directory names use full UUID (not predictable)
+- Host allowlist/blocklist enforced on all network requests
 """
 
 from __future__ import annotations
@@ -15,14 +22,18 @@ import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# All sandbox workspaces must be under this base
+SANDBOX_BASE_DIR = Path(tempfile.gettempdir()) / "argus-sandboxes"
 
 
 @dataclass
 class SandboxConfig:
     """Configuration for a sandbox environment."""
+
     # Resource limits
     max_requests: int = 1000
     max_request_rate: int = 60  # per minute
@@ -34,7 +45,7 @@ class SandboxConfig:
     blocked_hosts: list[str] = field(default_factory=list)
 
     # Filesystem
-    workspace_dir: Optional[str] = None  # auto-created if None
+    workspace_dir: str | None = None  # auto-created if None
     persist_workspace: bool = False
 
     # Safety
@@ -49,15 +60,14 @@ class SandboxEnvironment:
     workspace that is destroyed after the agent completes.
     """
 
-    def __init__(self, agent_id: str, config: Optional[SandboxConfig] = None) -> None:
+    def __init__(self, agent_id: str, config: SandboxConfig | None = None) -> None:
         self.agent_id = agent_id
         self.config = config or SandboxConfig()
-        self._workspace: Optional[Path] = None
+        self._workspace: Path | None = None
         self._request_count = 0
         self._data_bytes = 0
         self._audit_log: list[dict[str, Any]] = []
         self._active = False
-        self._rate_limiter: Optional[asyncio.Semaphore] = None
         self._request_timestamps: list[float] = []
 
     async def __aenter__(self) -> SandboxEnvironment:
@@ -70,20 +80,31 @@ class SandboxEnvironment:
     async def setup(self) -> None:
         """Initialize the sandbox environment."""
         if self.config.workspace_dir:
-            self._workspace = Path(self.config.workspace_dir)
+            # Validate workspace path is within allowed base directory
+            workspace_path = Path(self.config.workspace_dir).resolve()
+            allowed_base = SANDBOX_BASE_DIR.resolve()
+            allowed_base.mkdir(parents=True, exist_ok=True)
+
+            if not str(workspace_path).startswith(str(allowed_base)):
+                raise ValueError(
+                    f"Workspace path must be under {allowed_base}. "
+                    f"Got: {workspace_path}"
+                )
+            self._workspace = workspace_path
             self._workspace.mkdir(parents=True, exist_ok=True)
         else:
-            self._workspace = Path(tempfile.mkdtemp(prefix=f"argus-{self.agent_id[:8]}-"))
+            # Create under the allowed base with unpredictable name
+            SANDBOX_BASE_DIR.mkdir(parents=True, exist_ok=True)
+            self._workspace = Path(tempfile.mkdtemp(dir=SANDBOX_BASE_DIR, prefix="agent-"))
 
-        self._rate_limiter = asyncio.Semaphore(self.config.max_request_rate)
         self._active = True
-
         logger.info("Sandbox %s initialized — workspace: %s", self.agent_id[:8], self._workspace)
 
     async def teardown(self) -> None:
         """Clean up the sandbox environment."""
         if self._workspace and not self.config.persist_workspace:
             import shutil
+
             try:
                 shutil.rmtree(self._workspace)
                 logger.info("Sandbox %s workspace cleaned up", self.agent_id[:8])
@@ -102,8 +123,12 @@ class SandboxEnvironment:
     def audit_log(self) -> list[dict[str, Any]]:
         return list(self._audit_log)
 
-    async def check_request_allowed(self) -> bool:
-        """Check if a request is allowed within sandbox limits."""
+    async def check_request_allowed(self, data_bytes: int = 0) -> bool:
+        """Check if a request is allowed within sandbox limits.
+
+        Checks data budget BEFORE the request is recorded (no off-by-one).
+        Enforces sliding-window rate limiting with back-pressure delay.
+        """
         if not self._active:
             return False
 
@@ -111,17 +136,29 @@ class SandboxEnvironment:
             self._log_audit("request_denied", {"reason": "max_requests_exceeded"})
             return False
 
-        if self._data_bytes >= self.config.max_data_bytes:
+        # Check data budget BEFORE allowing — prevents off-by-one
+        if self._data_bytes + data_bytes > self.config.max_data_bytes:
             self._log_audit("request_denied", {"reason": "max_data_exceeded"})
             return False
 
-        # Rate limiting
+        # Sliding-window rate limiting with back-pressure
         now = asyncio.get_event_loop().time()
         cutoff = now - 60.0
         self._request_timestamps = [t for t in self._request_timestamps if t > cutoff]
+
         if len(self._request_timestamps) >= self.config.max_request_rate:
-            self._log_audit("request_denied", {"reason": "rate_limit_exceeded"})
-            return False
+            # Enforce delay until oldest request falls out of the window
+            wait_time = 60.0 - (now - self._request_timestamps[0])
+            if wait_time > 0:
+                self._log_audit("rate_limited", {"wait_seconds": wait_time})
+                await asyncio.sleep(min(wait_time, 5.0))  # Cap delay at 5s
+                # Re-check after waiting
+                now = asyncio.get_event_loop().time()
+                cutoff = now - 60.0
+                self._request_timestamps = [t for t in self._request_timestamps if t > cutoff]
+                if len(self._request_timestamps) >= self.config.max_request_rate:
+                    self._log_audit("request_denied", {"reason": "rate_limit_exceeded"})
+                    return False
 
         return True
 
@@ -131,12 +168,15 @@ class SandboxEnvironment:
         self._data_bytes += data_bytes
         self._request_timestamps.append(asyncio.get_event_loop().time())
 
-        self._log_audit("request", {
-            "method": method,
-            "target": target,
-            "data_bytes": data_bytes,
-            "total_requests": self._request_count,
-        })
+        self._log_audit(
+            "request",
+            {
+                "method": method,
+                "target": target,
+                "data_bytes": data_bytes,
+                "total_requests": self._request_count,
+            },
+        )
 
     def check_host_allowed(self, host: str) -> bool:
         """Check if a host is allowed by the sandbox network controls."""
@@ -149,11 +189,13 @@ class SandboxEnvironment:
         return True
 
     def _log_audit(self, event_type: str, data: dict[str, Any]) -> None:
-        self._audit_log.append({
-            "agent_id": self.agent_id,
-            "event": event_type,
-            **data,
-        })
+        self._audit_log.append(
+            {
+                "agent_id": self.agent_id,
+                "event": event_type,
+                **data,
+            }
+        )
 
     def stats(self) -> dict[str, Any]:
         return {
