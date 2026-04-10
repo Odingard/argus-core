@@ -36,6 +36,8 @@ const AGENT_DISPLAY = {
   privilege_escalation: { name: 'Privilege Escalation Agent', badge: 'PE-07', icon: '⬆' },
   race_condition: { name: 'Race Condition Agent', badge: 'RC-08', icon: '⏱' },
   model_extraction: { name: 'Model Extraction Agent', badge: 'ME-10', icon: '📤' },
+  persona_hijacking: { name: 'Persona Hijacking Agent', badge: 'PH-11', icon: '🎭' },
+  memory_boundary_collapse: { name: 'Memory Boundary Collapse', badge: 'MB-12', icon: '🧬' },
 };
 
 const state = {
@@ -211,6 +213,13 @@ function renderEmptyAttackerCards() {
     'supply_chain',
     'memory_poisoning',
     'identity_spoof',
+    'context_window',
+    'cross_agent_exfiltration',
+    'privilege_escalation',
+    'race_condition',
+    'model_extraction',
+    'persona_hijacking',
+    'memory_boundary_collapse',
   ];
 
   grid.innerHTML = '';

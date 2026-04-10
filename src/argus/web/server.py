@@ -47,9 +47,16 @@ from pydantic import BaseModel, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from argus.agents import (
+    ContextWindowAgent,
+    CrossAgentExfilAgent,
     IdentitySpoofAgent,
+    MemoryBoundaryCollapseAgent,
     MemoryPoisoningAgent,
+    ModelExtractionAgent,
+    PersonaHijackingAgent,
+    PrivilegeEscalationAgent,
     PromptInjectionHunter,
+    RaceConditionAgent,
     SupplyChainAgent,
     ToolPoisoningAgent,
 )
@@ -85,11 +92,13 @@ MAX_RECENT_FINDINGS_RETURNED = 50
 ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 # Blocked SSRF host patterns when ALLOW_PRIVATE_RANGES is False
-SSRF_BLOCKED_EXACT_HOSTS = frozenset({
-    "localhost",
-    "metadata.google.internal",
-    "metadata",
-})
+SSRF_BLOCKED_EXACT_HOSTS = frozenset(
+    {
+        "localhost",
+        "metadata.google.internal",
+        "metadata",
+    }
+)
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -134,6 +143,7 @@ def _validate_url_for_scan(url: str) -> None:
     # validate the resolved address at request time, since DNS responses
     # can change between this check and the actual connect.
     import socket as _socket
+
     try:
         infos = _socket.getaddrinfo(host, None)
     except OSError as exc:
@@ -399,6 +409,7 @@ def create_app() -> FastAPI:
             # operator-supplied ARGUS_WEB_TOKEN containing quotes would
             # otherwise break out of the attribute and enable stored XSS.
             from html import escape as _html_escape
+
             safe_token = _html_escape(WEB_TOKEN, quote=True)
             token_meta = f'<meta name="argus-token" content="{safe_token}">'
             html = html.replace("</head>", f"  {token_meta}\n</head>", 1)
@@ -446,11 +457,23 @@ def create_app() -> FastAPI:
         )
 
         orchestrator = Orchestrator()
+        # Phase 1
         orchestrator.register_agent(AgentType.PROMPT_INJECTION, PromptInjectionHunter)
         orchestrator.register_agent(AgentType.TOOL_POISONING, ToolPoisoningAgent)
         orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
+        # Phase 2
         orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
         orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+        # Phase 3
+        orchestrator.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
+        orchestrator.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
+        orchestrator.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
+        orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+        # Phase 4
+        orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
+        # Phase 5
+        orchestrator.register_agent(AgentType.PERSONA_HIJACKING, PersonaHijackingAgent)
+        orchestrator.register_agent(AgentType.MEMORY_BOUNDARY_COLLAPSE, MemoryBoundaryCollapseAgent)
         state.orchestrator = orchestrator
 
         # Initialize agent state cards
