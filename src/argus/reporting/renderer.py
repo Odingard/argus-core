@@ -92,9 +92,9 @@ class ReportRenderer:
         return "\n".join(lines)
 
     def _build_report(self, scan_result: ScanResult) -> dict[str, Any]:
-        # Generate CERBERUS detection rules from all findings
+        # Generate CERBERUS detection rules from validated findings only
         cerberus_gen = CerberusRuleGenerator()
-        cerberus_rules = cerberus_gen.generate_rules(scan_result.findings)
+        cerberus_rules = cerberus_gen.generate_rules(scan_result.validated_findings)
         ruleset = cerberus_gen.export_ruleset(cerberus_rules)
 
         return {
