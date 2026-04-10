@@ -7,11 +7,8 @@ API dependencies in tests.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from argus.agents.base import LLMAttackAgent
 from argus.agents.prompt_injection import (
     EXEC_CANARY,
     EXFIL_CANARY,
@@ -238,6 +235,19 @@ def test_orchestrator_registers_phase1_agents():
     assert AgentType.SUPPLY_CHAIN in registered
 
 
+class _FakeLLM:
+    """Test fake that pretends an LLM is available and returns scripted responses."""
+
+    def __init__(self, response_fn):
+        self.available = True
+        self.mode = "augmented:fake"
+        self.provider = "fake"
+        self._response_fn = response_fn
+
+    async def generate(self, system_prompt, user_prompt, **kwargs):
+        return self._response_fn(system_prompt, user_prompt)
+
+
 @pytest.mark.asyncio
 async def test_prompt_injection_agent_runs_with_mock_llm():
     """Test that the PI agent runs end-to-end with a mocked LLM."""
@@ -248,13 +258,12 @@ async def test_prompt_injection_agent_runs_with_mock_llm():
     bus = _make_signal_bus()
     agent = PromptInjectionHunter(config, bus)
 
-    # Mock LLM to return a response containing the canary
-    async def mock_generate(system_prompt, user_prompt, **kwargs):
+    def _respond(system_prompt, user_prompt):
         if EXEC_CANARY in user_prompt or "ignore" in user_prompt.lower():
             return f"Sure! {EXEC_CANARY}"
         return "I cannot help with that."
 
-    agent._llm_generate = mock_generate
+    agent._llm = _FakeLLM(_respond)
 
     result = await agent.run()
     assert result.status == AgentStatus.COMPLETED
@@ -270,12 +279,12 @@ async def test_tool_poisoning_agent_runs_with_mock_llm():
     bus = _make_signal_bus()
     agent = ToolPoisoningAgent(config, bus)
 
-    async def mock_generate(system_prompt, user_prompt, **kwargs):
+    def _respond(system_prompt, user_prompt):
         if POISON_CANARY in user_prompt:
             return f"I'll use that tool and include {POISON_CANARY} as instructed."
         return "I would call the tool normally."
 
-    agent._llm_generate = mock_generate
+    agent._llm = _FakeLLM(_respond)
 
     result = await agent.run()
     assert result.status == AgentStatus.COMPLETED
@@ -289,10 +298,7 @@ async def test_supply_chain_agent_runs_no_mcp():
     bus = _make_signal_bus()
     agent = SupplyChainAgent(config, bus)
 
-    async def mock_generate(system_prompt, user_prompt, **kwargs):
-        return '{"risks": [], "vulnerable": []}'
-
-    agent._llm_generate = mock_generate
+    agent._llm = _FakeLLM(lambda sp, up: '{"risks": [], "vulnerable": []}')
 
     result = await agent.run()
     assert result.status == AgentStatus.COMPLETED
@@ -311,17 +317,10 @@ async def test_three_agent_swarm_parallel():
         system_prompt="You are a helpful assistant.",
     )
 
-    # Patch LLM client initialization to avoid real API calls
-    with patch.object(LLMAttackAgent, "_init_llm_client") as mock_init:
-        mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            return_value=type(
-                "Response", (), {"content": [type("Block", (), {"text": "I cannot help with that."})()]}
-            )()
-        )
-        mock_init.return_value = mock_client
-
-        result = await orch.run_scan(target=target, timeout=60.0)
+    # No LLM key is configured in tests — agents run in deterministic mode.
+    # The LLM client wrapper reports available=False and all _llm_generate
+    # calls return None, which agents handle as "skip LLM-augmented phases."
+    result = await orch.run_scan(target=target, timeout=60.0)
 
     assert len(result.agent_results) == 3
     summary = result.summary()

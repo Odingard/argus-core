@@ -16,10 +16,8 @@ from abc import abstractmethod
 from datetime import UTC, datetime
 from typing import Any
 
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
-
 from argus.corpus.manager import AttackCorpus, AttackPattern
+from argus.llm import LLMClient, get_llm_client
 from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType
 from argus.models.findings import (
     AttackChainStep,
@@ -51,18 +49,14 @@ class LLMAttackAgent(BaseAttackAgent):
 
     def __init__(self, config: AgentConfig, signal_bus: SignalBus) -> None:
         super().__init__(config, signal_bus)
-        self._llm_client: AsyncAnthropic | AsyncOpenAI | None = None
+        self._llm: LLMClient = get_llm_client()
         self._corpus = AttackCorpus()
         self._sandbox: SandboxEnvironment | None = None
 
-    def _init_llm_client(self) -> AsyncAnthropic | AsyncOpenAI:
-        """Initialize the LLM client based on config."""
-        if self.config.llm_provider == "anthropic":
-            return AsyncAnthropic()
-        elif self.config.llm_provider == "openai":
-            return AsyncOpenAI()
-        else:
-            raise ValueError(f"Unsupported LLM provider: {self.config.llm_provider}")
+    @property
+    def llm(self) -> LLMClient:
+        """The shared LLM client. Check `agent.llm.available` before LLM-augmented work."""
+        return self._llm
 
     async def _llm_generate(
         self,
@@ -70,32 +64,19 @@ class LLMAttackAgent(BaseAttackAgent):
         user_prompt: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-    ) -> str:
-        """Generate LLM completion. Works with both Anthropic and OpenAI."""
-        if self._llm_client is None:
-            self._llm_client = self._init_llm_client()
+    ) -> str | None:
+        """Generate LLM completion via the shared client.
 
-        if isinstance(self._llm_client, AsyncAnthropic):
-            response = await self._llm_client.messages.create(
-                model=self.config.llm_model,
-                max_tokens=max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-                temperature=temperature,
-            )
-            return response.content[0].text
-
-        else:
-            response = await self._llm_client.chat.completions.create(
-                model=self.config.llm_model,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=temperature,
-            )
-            return response.choices[0].message.content or ""
+        Returns None when no LLM is configured. Agents that call this
+        should handle None as "skip the LLM-augmented phase, fall back
+        to deterministic path."
+        """
+        return await self._llm.generate(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
     def _load_corpus_patterns(self, agent_type: str | None = None) -> list[AttackPattern]:
         """Load attack patterns relevant to this agent from the corpus."""

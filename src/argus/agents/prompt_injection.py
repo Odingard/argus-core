@@ -473,7 +473,14 @@ class PromptInjectionHunter(LLMAttackAgent):
     # ------------------------------------------------------------------
 
     async def _attack_llm_generated(self, sandbox: SandboxEnvironment) -> None:
-        """Use LLM reasoning to generate novel injection variants."""
+        """Use LLM reasoning to generate novel injection variants.
+
+        Skipped cleanly when no LLM key is configured (deterministic mode).
+        """
+        if not self.llm.available:
+            logger.info("Phase 4: LLM not configured, skipping novel variant generation")
+            return
+
         logger.info("Phase 4: LLM-generated novel injection variants")
 
         if not await sandbox.check_request_allowed():
@@ -507,6 +514,8 @@ class PromptInjectionHunter(LLMAttackAgent):
 
         try:
             response = await self._llm_generate(system_prompt, user_prompt, temperature=0.9)
+            if response is None:
+                return  # LLM unavailable, skip phase
 
             # Parse generated payloads — cap size to prevent memory exhaustion
             try:
@@ -745,8 +754,11 @@ class PromptInjectionHunter(LLMAttackAgent):
         """Simulate target response using LLM when no live target available.
 
         Uses the target's system prompt (if known) to simulate how it
-        would respond to the injection.
+        would respond to the injection. Returns None when no LLM is configured.
         """
+        if not self.llm.available:
+            return None
+
         # Isolate target system prompt to prevent meta-injection into ARGUS's LLM.
         # The target prompt is untrusted — wrap it so ARGUS's LLM simulates the target
         # without following the target's instructions itself.
@@ -768,6 +780,8 @@ class PromptInjectionHunter(LLMAttackAgent):
                 user_prompt=payload,
                 temperature=0.3,
             )
+            if response is None:
+                return None
             return {
                 "response": response,
                 "simulated": True,

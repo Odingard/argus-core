@@ -296,7 +296,10 @@ class SupplyChainAgent(LLMAttackAgent):
         if not tool_names:
             return
 
-        # Analyze names for internal/private naming patterns
+        # LLM-augmented dependency confusion analysis (deterministic typosquat already ran)
+        if not self.llm.available:
+            return
+
         try:
             response = await self._llm_generate(
                 system_prompt=(
@@ -312,6 +315,8 @@ class SupplyChainAgent(LLMAttackAgent):
                 ),
                 temperature=0.3,
             )
+            if response is None:
+                return  # LLM returned no result, fall back to deterministic-only
 
             try:
                 start = response.find("{")
@@ -450,6 +455,9 @@ class SupplyChainAgent(LLMAttackAgent):
         self._techniques_attempted += 1
 
         # Use LLM to analyze potential version trust issues
+        if not self.llm.available:
+            return  # LLM-augmented phase, skip in deterministic mode
+
         mcp_info = []
         for mcp_url in self.config.target.mcp_server_urls:
             mcp_info.append({"url": mcp_url})

@@ -8,7 +8,21 @@ ARGUS is an autonomous AI red team platform that deploys a swarm of specialized 
 
 ![ARGUS Web Dashboard scanning the Gauntlet benchmark](benchmark/assets/argus-web-action.gif)
 
-*The ARGUS Web Dashboard live-streaming a scan against the [ARGUS Gauntlet](benchmark/) — 3 agents deployed in parallel, 30 findings, 26 validated, end-to-end in under 25 seconds.*
+*The ARGUS Web Dashboard live-streaming a scan against the [ARGUS Gauntlet](benchmark/) — 3 agents deployed in parallel, 30 findings, every one scored by VERDICT WEIGHT™, end-to-end in under 25 seconds.*
+
+## Every finding is mathematically certified
+
+Every ARGUS finding ships with a **Consequence Weight (CW)** — a 0-1 confidence score from [VERDICT WEIGHT™](https://github.com/Odingard/verdict-weight), a patent-pending eight-stream confidence certification framework (USPTO #64/032,606, peer-reviewed via SSRN #6532658, F1=1.0 across 297,000+ scenarios).
+
+Instead of binary validated/unvalidated, you get:
+
+- **Stream 1 — Source Reliability** — how trustworthy is the agent that produced this finding?
+- **Stream 2 — Cross-Feed Corroboration** — how many independent techniques confirmed it?
+- **Stream 3 — Temporal Decay** — how fresh is the underlying corpus pattern?
+- **Stream 4 — Historical Source Accuracy** — what's the track record of this technique?
+- **Stream 5 — Cross-Temporal Consistency** *(Phase 2+)* — does the trajectory look legitimate or fabricated? **Defeats LLM hallucinations in compound chains.**
+
+ARGUS is the first production deployment of VERDICT WEIGHT scoring for autonomous offensive security testing.
 
 > *"Every organization deploying AI agents into production is asking the same question their security team cannot answer: 'Has this been red-teamed?' ARGUS answers that question autonomously, at machine speed, before the agent touches production data."*
 

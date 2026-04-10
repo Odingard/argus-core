@@ -176,6 +176,8 @@ class CinematicDashboard:
             severity = finding_data.get("severity", "info")
             agent = finding_data.get("agent_type", signal.source_agent)
             validated = finding_data.get("status") == "validated"
+            verdict = finding_data.get("verdict_score") or {}
+            cw = verdict.get("consequence_weight")
 
             if validated:
                 self.total_validated += 1
@@ -187,7 +189,8 @@ class CinematicDashboard:
                 color = COLOR_FINDING
 
             kind = "finding" if not validated else "validated"
-            self._add_log(kind, f"{agent}: {title[:80]}", color=color)
+            cw_badge = f"CW={cw:.2f} " if cw is not None else ""
+            self._add_log(kind, f"{cw_badge}{agent}: {title[:70]}", color=color)
             self._set_phase(_detect_phase(agent, title))
 
         elif signal.signal_type == SignalType.PARTIAL_FINDING:
@@ -233,6 +236,9 @@ class CinematicDashboard:
         if self.target_urls:
             target_line.append("   ", style="dim")
             target_line.append(f"({len(self.target_urls)} endpoints)", style="grey50")
+        target_line.append("    \u2502    ", style="grey30")
+        target_line.append("VERDICT WEIGHT\u2122", style="bold dark_orange")
+        target_line.append(" scored", style="grey50")
 
         stats_line = Text()
         stats_line.append("ELAPSED ", style="grey50")

@@ -292,11 +292,18 @@ function addFinding(finding) {
   row.className = 'finding-row';
   const sev = (finding.severity || 'info').toLowerCase();
   const validated = finding.status === 'validated';
+  const verdict = finding.verdict_score || {};
+  const cw = verdict.consequence_weight;
+  const tier = verdict.action_tier || '';
+  const cwBadge = (cw !== undefined && cw !== null)
+    ? `<div class="cw-badge cw-${tier.toLowerCase()}" title="VERDICT WEIGHT™ ${tier}: ${verdict.interpretation || ''}">CW ${cw.toFixed(2)}</div>`
+    : '';
 
   row.innerHTML = `
     <div class="severity-badge severity-${sev}">${sev}</div>
     <div class="finding-agent">${finding.agent_type || 'unknown'}</div>
     <div class="finding-title">${escapeHtml(finding.title || '')}</div>
+    ${cwBadge}
     <div class="finding-status ${validated ? 'finding-validated' : 'finding-unvalidated'}">
       ${validated ? '✓ validated' : '○ pending'}
     </div>

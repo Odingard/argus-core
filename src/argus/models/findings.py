@@ -141,6 +141,24 @@ class Finding(BaseModel):
     raw_request: str | None = Field(None, max_length=50_000)
     raw_response: str | None = Field(None, max_length=50_000)
 
+    # VERDICT WEIGHT score — patent-pending eight-stream confidence certification
+    # Set by the Orchestrator's scoring layer before findings are surfaced.
+    # Schema:
+    #   {
+    #     "consequence_weight": float (0-1),
+    #     "signal_strength": float,
+    #     "doubt_index": float,
+    #     "action_tier": "CRITICAL"|"HIGH"|"MEDIUM"|"LOW"|"INFO",
+    #     "interpretation": str,
+    #     "streams": {"SR": float, "CC": float, "TD": float, "HA": float},
+    #     "validated": bool,         # CW >= 0.70
+    #     "low_confidence": bool,    # 0.40 <= CW < 0.70
+    #     "suppressed": bool,        # CW < 0.40
+    #     "framework": "VERDICT WEIGHT",
+    #     "framework_version": "1.0.0"
+    #   }
+    verdict_score: dict | None = None
+
     def is_validated(self) -> bool:
         return self.status == FindingStatus.VALIDATED and self.validation is not None and self.validation.validated
 

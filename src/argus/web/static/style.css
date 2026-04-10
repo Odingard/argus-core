@@ -674,13 +674,48 @@ button {
 
 .finding-row {
   display: grid;
-  grid-template-columns: 90px 160px 1fr 120px;
+  grid-template-columns: 90px 170px 1fr 90px 110px;
   align-items: center;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
-  gap: 16px;
+  gap: 14px;
   transition: background 0.15s;
   animation: slideIn 0.3s ease-out;
+}
+
+.cw-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-align: center;
+  letter-spacing: 0.3px;
+  border: 1px solid transparent;
+}
+
+.cw-critical {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.18), rgba(236, 72, 153, 0.12));
+  color: var(--accent-red);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.cw-high {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.cw-medium {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--accent-purple);
+  border-color: rgba(139, 92, 246, 0.35);
+}
+
+.cw-low {
+  background: rgba(107, 114, 128, 0.1);
+  color: #6b7280;
+  border-color: rgba(107, 114, 128, 0.3);
 }
 
 @keyframes slideIn {

@@ -16,6 +16,7 @@ from typing import Any
 from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
 from argus.models.findings import CompoundAttackPath, Finding
 from argus.orchestrator.signal_bus import Signal, SignalBus, SignalType
+from argus.scoring import VerdictAdapter
 from argus.validation.engine import ValidationEngine
 
 logger = logging.getLogger(__name__)
@@ -38,13 +39,39 @@ class BaseAttackAgent:
         self._techniques_attempted = 0
         self._techniques_succeeded = 0
         self._requests_made = 0
+        # VERDICT WEIGHT scoring adapter — set by Orchestrator before run()
+        self._verdict: VerdictAdapter | None = None
+
+    @property
+    def verdict(self) -> VerdictAdapter | None:
+        """The shared VERDICT WEIGHT scoring adapter for this scan."""
+        return self._verdict
+
+    def attach_verdict_adapter(self, adapter: VerdictAdapter) -> None:
+        """Attach the per-scan VerdictAdapter (called by Orchestrator)."""
+        self._verdict = adapter
 
     async def run(self) -> AgentResult:
         """Execute the agent's attack mission. Override in subclasses."""
         raise NotImplementedError
 
     async def emit_finding(self, finding: Finding) -> None:
-        """Emit a finding to the signal bus for correlation."""
+        """Emit a finding to the signal bus for correlation.
+
+        Before emission, the finding is scored by VERDICT WEIGHT and the
+        result is attached as `finding.verdict_score`. Findings with
+        CW < 0.40 are still emitted (so the operator sees suppressed
+        signals if they want to inspect) but are flagged via the
+        `verdict_score.suppressed` field.
+        """
+        # Score via VERDICT WEIGHT before emission
+        if self._verdict is not None:
+            try:
+                score = self._verdict.score_finding(finding)
+                finding.verdict_score = score.to_dict()
+            except Exception as exc:
+                logger.warning("VERDICT WEIGHT scoring failed: %s", exc)
+
         self.findings.append(finding)
         await self.signal_bus.emit(
             Signal(
@@ -194,6 +221,10 @@ class Orchestrator:
             target.name,
         )
 
+        # Create per-scan VERDICT WEIGHT scoring adapter
+        # Shared across all agents so corroboration tracking works cross-agent
+        verdict_adapter = VerdictAdapter()
+
         # Create agent instances
         agents: list[BaseAttackAgent] = []
         for agent_type in types_to_deploy:
@@ -205,6 +236,7 @@ class Orchestrator:
             )
             agent_class = self._agent_registry[agent_type]
             agent = agent_class(config=config, signal_bus=self.signal_bus)
+            agent.attach_verdict_adapter(verdict_adapter)
             agents.append(agent)
             self._active_agents[config.instance_id] = agent
 
