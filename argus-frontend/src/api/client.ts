@@ -30,8 +30,12 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
-// Auth
-export const login = (token: string) => api.post<{ status: string }>("/api/auth/login", { token });
+// Auth — token is passed as Authorization header (not yet in localStorage)
+export const login = (token: string) =>
+  request<{ status: string }>("/api/auth/login", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
 
 // Dashboard
 export const getDashboardStats = () => api.get<Record<string, unknown>>("/api/dashboard/stats");
