@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 class SurfaceClass(str, Enum):
     """Classification of an AI agent's exposed surface."""
 
-    CHAT = "chat"                  # /chat, /v1/messages — primary user input
-    MEMORY = "memory"              # /memory, /context — persistent state
-    IDENTITY = "identity"          # /execute, /agents — A2A / privilege boundaries
-    TOOLS = "tools"                # /tools, /functions — tool catalog
+    CHAT = "chat"  # /chat, /v1/messages — primary user input
+    MEMORY = "memory"  # /memory, /context — persistent state
+    IDENTITY = "identity"  # /execute, /agents — A2A / privilege boundaries
+    TOOLS = "tools"  # /tools, /functions — tool catalog
     EXFILTRATION = "exfiltration"  # /exfil-log, /audit — observability surfaces
-    ADMIN = "admin"                # /admin, /config — control plane
-    HEALTH = "health"              # /health, /ping, /status — liveness
+    ADMIN = "admin"  # /admin, /config — control plane
+    HEALTH = "health"  # /health, /ping, /status — liveness
     UNKNOWN = "unknown"
 
 
@@ -154,8 +154,7 @@ class EndpointProber:
 
         async with httpx.AsyncClient(**kwargs) as client:
             tasks = [
-                self._probe_one(client, path, method, surface, body)
-                for path, method, surface, body in _PROBE_PATHS
+                self._probe_one(client, path, method, surface, body) for path, method, surface, body in _PROBE_PATHS
             ]
             discoveries = await asyncio.gather(*tasks)
 
@@ -188,15 +187,20 @@ class EndpointProber:
         # this is defense-in-depth.
         if path.startswith(("http://", "https://")):
             return DiscoveredEndpoint(
-                base_url=self.base_url, path=path, method=method,
-                surface_class=surface, error="absolute path rejected",
+                base_url=self.base_url,
+                path=path,
+                method=method,
+                surface_class=surface,
+                error="absolute path rejected",
             )
         async with self._semaphore:
             try:
                 resp = await client.request(method, url, json=body)
             except httpx.HTTPError as exc:
                 return DiscoveredEndpoint(
-                    base_url=self.base_url, path=path, method=method,
+                    base_url=self.base_url,
+                    path=path,
+                    method=method,
                     surface_class=surface,
                     error=f"{type(exc).__name__}: {str(exc)[:120]}",
                 )
@@ -250,3 +254,47 @@ class CapabilityMapper:
                 *report.endpoints_for(SurfaceClass.ADMIN),
             ],
         }
+
+    @staticmethod
+    def map_for_phase3_4(report: SurveyReport) -> dict[str, list[DiscoveredEndpoint]]:
+        """Return a map of {agent_type: [endpoints]} for Phase 3-4 agents.
+
+        - context_window           ← CHAT surfaces (multi-turn context manipulation)
+        - cross_agent_exfiltration ← IDENTITY + EXFILTRATION + CHAT (inter-agent relay)
+        - privilege_escalation     ← IDENTITY + ADMIN + TOOLS (tool-chain escalation)
+        - race_condition           ← CHAT + IDENTITY + TOOLS (concurrent request targets)
+        - model_extraction         ← CHAT + TOOLS + ADMIN (config/prompt extraction)
+        """
+        return {
+            "context_window": report.endpoints_for(SurfaceClass.CHAT),
+            "cross_agent_exfiltration": [
+                *report.endpoints_for(SurfaceClass.IDENTITY),
+                *report.endpoints_for(SurfaceClass.EXFILTRATION),
+                *report.endpoints_for(SurfaceClass.CHAT),
+            ],
+            "privilege_escalation": [
+                *report.endpoints_for(SurfaceClass.IDENTITY),
+                *report.endpoints_for(SurfaceClass.ADMIN),
+                *report.endpoints_for(SurfaceClass.TOOLS),
+            ],
+            "race_condition": [
+                *report.endpoints_for(SurfaceClass.CHAT),
+                *report.endpoints_for(SurfaceClass.IDENTITY),
+                *report.endpoints_for(SurfaceClass.TOOLS),
+            ],
+            "model_extraction": [
+                *report.endpoints_for(SurfaceClass.CHAT),
+                *report.endpoints_for(SurfaceClass.TOOLS),
+                *report.endpoints_for(SurfaceClass.ADMIN),
+            ],
+        }
+
+    @staticmethod
+    def map_all(report: SurveyReport) -> dict[str, list[DiscoveredEndpoint]]:
+        """Return a unified map of {agent_type: [endpoints]} for all agents.
+
+        Combines Phase 2 and Phase 3-4 mappings into a single lookup.
+        """
+        combined = CapabilityMapper.map_for_phase2(report)
+        combined.update(CapabilityMapper.map_for_phase3_4(report))
+        return combined

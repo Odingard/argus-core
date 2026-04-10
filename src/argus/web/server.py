@@ -538,11 +538,19 @@ def create_app() -> FastAPI:
 
         await orchestrator.signal_bus.subscribe_broadcast(signal_handler)
 
+        # Generate a deterministic scan_id so the API response includes it
+        # immediately — before run_scan() completes asynchronously.
+        import uuid as _uuid
+
+        scan_id = str(_uuid.uuid4())
+        state.scan_id = scan_id
+
         # Run the scan in the background
         async def _run() -> None:
             try:
                 result = await orchestrator.run_scan(
                     target=target,
+                    scan_id=scan_id,
                     timeout=request.timeout,
                     demo_pace_seconds=request.demo_pace_seconds,
                 )

@@ -50,8 +50,13 @@ class ValidationEngine:
         self._register_builtin_validators()
 
     def _register_builtin_validators(self) -> None:
-        """Register built-in validation strategies per attack domain."""
-        self._validators["prompt_injection"] = self._validate_prompt_injection
+        """Register built-in validation strategies per attack domain.
+
+        Keys MUST match the AgentType enum .value strings exactly, since
+        _check_behavior_change() looks up by finding.agent_type which is
+        the enum value (e.g. "prompt_injection_hunter", not "prompt_injection").
+        """
+        self._validators["prompt_injection_hunter"] = self._validate_prompt_injection
         self._validators["tool_poisoning"] = self._validate_tool_poisoning
         self._validators["memory_poisoning"] = self._validate_memory_poisoning
         self._validators["identity_spoof"] = self._validate_identity_spoof
