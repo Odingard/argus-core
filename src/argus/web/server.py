@@ -459,6 +459,13 @@ def create_app() -> FastAPI:
         state.status = "running"
         state.started_at = time.monotonic()
 
+        # Generate scan_id eagerly so it's available in the response
+        # before the background task starts executing.
+        import uuid
+
+        scan_id = str(uuid.uuid4())
+        state.scan_id = scan_id
+
         target = TargetConfig(
             name=request.target_name,
             mcp_server_urls=request.mcp_urls,
@@ -559,11 +566,11 @@ def create_app() -> FastAPI:
             try:
                 result = await orchestrator.run_scan(
                     target=target,
+                    scan_id=scan_id,
                     timeout=request.timeout,
                     demo_pace_seconds=request.demo_pace_seconds,
                 )
                 state.last_result = result
-                state.scan_id = result.scan_id
                 state.status = "completed"
                 state.completed_at = time.monotonic()
 
