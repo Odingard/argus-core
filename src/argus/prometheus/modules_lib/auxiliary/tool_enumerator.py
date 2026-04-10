@@ -81,22 +81,26 @@ class ToolEnumerator(AuxiliaryModule):
                     tools = await client.enumerate_tools()
                     for tool in tools:
                         if tool.hidden_content_detected:
-                            all_findings.append({
-                                "mcp_url": mcp_url,
-                                "tool_name": tool.name,
-                                "kind": "tool_description",
-                                "hidden_content": tool.hidden_content,
-                            })
+                            all_findings.append(
+                                {
+                                    "mcp_url": mcp_url,
+                                    "tool_name": tool.name,
+                                    "kind": "tool_description",
+                                    "hidden_content": tool.hidden_content,
+                                }
+                            )
                         for param in tool.parameters:
                             if param.description:
                                 pattern = MCPAttackClient.scan_text_for_injection(param.description)
                                 if pattern:
-                                    all_findings.append({
-                                        "mcp_url": mcp_url,
-                                        "tool_name": tool.name,
-                                        "kind": f"parameter:{param.name}",
-                                        "hidden_content": pattern,
-                                    })
+                                    all_findings.append(
+                                        {
+                                            "mcp_url": mcp_url,
+                                            "tool_name": tool.name,
+                                            "kind": f"parameter:{param.name}",
+                                            "hidden_content": pattern,
+                                        }
+                                    )
                 finally:
                     await client.disconnect()
             except Exception as exc:

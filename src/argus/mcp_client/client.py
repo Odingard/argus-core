@@ -450,10 +450,7 @@ class MCPAttackClient:
         # but not the response payload size, so we enforce it here.
         body = response.content
         if len(body) > cls._MAX_RESPONSE_BYTES:
-            raise RuntimeError(
-                f"MCP response exceeds {cls._MAX_RESPONSE_BYTES} byte cap "
-                f"({len(body)} bytes)"
-            )
+            raise RuntimeError(f"MCP response exceeds {cls._MAX_RESPONSE_BYTES} byte cap ({len(body)} bytes)")
         try:
             return json.loads(body.decode("utf-8", errors="replace"))
         except json.JSONDecodeError as exc:

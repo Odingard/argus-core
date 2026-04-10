@@ -184,7 +184,7 @@ class TyposquatDetector(AuxiliaryModule):
         # Pairwise lookalike detection
         lookalikes: list[tuple[str, str, str, str]] = []
         for i, (url_a, name_a) in enumerate(name_pairs):
-            for url_b, name_b in name_pairs[i + 1:]:
+            for url_b, name_b in name_pairs[i + 1 :]:
                 if name_a == name_b:
                     continue
                 if self._is_lookalike(name_a, name_b):

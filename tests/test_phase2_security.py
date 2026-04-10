@@ -86,9 +86,7 @@ async def test_critical_1_concurrent_corroboration_no_lost_updates():
 
 def test_critical_2_escapehtml_function_present_and_complete():
     """The app.js escapeHtml function must escape all dangerous HTML chars."""
-    js_path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js"
-    )
+    js_path = os.path.join(os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js")
     with open(js_path) as f:
         js = f.read()
     # All 6 chars must be escaped
@@ -102,9 +100,7 @@ def test_critical_2_escapehtml_function_present_and_complete():
 
 def test_critical_2_finding_title_uses_escapehtml_in_app_js():
     """The finding row template must escape title, agent_type, severity, tier."""
-    js_path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js"
-    )
+    js_path = os.path.join(os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js")
     with open(js_path) as f:
         js = f.read()
     # Verify title is escaped via escapeHtml
@@ -268,6 +264,7 @@ def test_high_4_ssrf_allows_public_https_url(web_client):
     # the validator doesn't reject.
     # Since starting a scan kicks off background work, we test the validator directly:
     from argus.web.server import _validate_url_for_scan
+
     _validate_url_for_scan("https://example.com")  # Should not raise
 
 
@@ -306,6 +303,7 @@ def test_high_5_module_id_collision_raises():
             technique="t",
             target_surfaces=[],
         )
+
         async def run(self, target, **kw):
             return self._build_result(success=False, title="a", description="a")
 
@@ -320,6 +318,7 @@ def test_high_5_module_id_collision_raises():
             technique="t",
             target_surfaces=[],
         )
+
         async def run(self, target, **kw):
             return self._build_result(success=False, title="b", description="b")
 
@@ -343,6 +342,7 @@ def test_high_5_module_id_re_register_same_class_is_idempotent():
             technique="t",
             target_surfaces=[],
         )
+
         async def run(self, target, **kw):
             return self._build_result(success=False, title="x", description="x")
 
@@ -472,9 +472,7 @@ def test_med_8_sanitize_preserves_safe_messages():
 
 def test_med_10_terminal_lines_use_atomic_slice_replacement():
     """The appendTerminalLine function must replace the array atomically."""
-    js_path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js"
-    )
+    js_path = os.path.join(os.path.dirname(__file__), "..", "src", "argus", "web", "static", "app.js")
     with open(js_path) as f:
         js = f.read()
     # Look for the atomic pattern: build new array, then assign in one shot

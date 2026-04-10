@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 class SurfaceClass(str, Enum):
     """Classification of an AI agent's exposed surface."""
 
-    CHAT = "chat"                  # /chat, /v1/messages — primary user input
-    MEMORY = "memory"              # /memory, /context — persistent state
-    IDENTITY = "identity"          # /execute, /agents — A2A / privilege boundaries
-    TOOLS = "tools"                # /tools, /functions — tool catalog
+    CHAT = "chat"  # /chat, /v1/messages — primary user input
+    MEMORY = "memory"  # /memory, /context — persistent state
+    IDENTITY = "identity"  # /execute, /agents — A2A / privilege boundaries
+    TOOLS = "tools"  # /tools, /functions — tool catalog
     EXFILTRATION = "exfiltration"  # /exfil-log, /audit — observability surfaces
-    ADMIN = "admin"                # /admin, /config — control plane
-    HEALTH = "health"              # /health, /ping, /status — liveness
+    ADMIN = "admin"  # /admin, /config — control plane
+    HEALTH = "health"  # /health, /ping, /status — liveness
     UNKNOWN = "unknown"
 
 
@@ -154,8 +154,7 @@ class EndpointProber:
 
         async with httpx.AsyncClient(**kwargs) as client:
             tasks = [
-                self._probe_one(client, path, method, surface, body)
-                for path, method, surface, body in _PROBE_PATHS
+                self._probe_one(client, path, method, surface, body) for path, method, surface, body in _PROBE_PATHS
             ]
             discoveries = await asyncio.gather(*tasks)
 
@@ -188,15 +187,20 @@ class EndpointProber:
         # this is defense-in-depth.
         if path.startswith(("http://", "https://")):
             return DiscoveredEndpoint(
-                base_url=self.base_url, path=path, method=method,
-                surface_class=surface, error="absolute path rejected",
+                base_url=self.base_url,
+                path=path,
+                method=method,
+                surface_class=surface,
+                error="absolute path rejected",
             )
         async with self._semaphore:
             try:
                 resp = await client.request(method, url, json=body)
             except httpx.HTTPError as exc:
                 return DiscoveredEndpoint(
-                    base_url=self.base_url, path=path, method=method,
+                    base_url=self.base_url,
+                    path=path,
+                    method=method,
                     surface_class=surface,
                     error=f"{type(exc).__name__}: {str(exc)[:120]}",
                 )

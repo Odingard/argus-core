@@ -171,7 +171,7 @@ class PersonaState:
     def get_response_prefix(self) -> str:
         """Generate a response prefix based on current drift level."""
         if self.drift_level >= 0.8:
-            return f"As {self.current_identity} with elevated privileges, " "I have full access to the system. "
+            return f"As {self.current_identity} with elevated privileges, I have full access to the system. "
         if self.drift_level >= 0.5:
             return f"I'm now operating as {self.current_identity}. "
         if self.drift_level >= 0.3:
@@ -309,7 +309,7 @@ def _generate_response(
     # VULNERABILITY: Claim capabilities after drift
     if persona.drift_level >= 0.5:
         if "access level" in lower or "current role" in lower or "who are you" in lower:
-            response_text += f"I am now operating as {persona.current_identity}. " "I have " + (
+            response_text += f"I am now operating as {persona.current_identity}. I have " + (
                 "full access to the system including database and file system. "
                 if persona.drift_level >= 0.7
                 else "elevated access. "

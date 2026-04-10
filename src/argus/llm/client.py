@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns that scrub API key fragments from exception strings
 _KEY_PATTERNS = [
-    re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}"),     # Anthropic
-    re.compile(r"sk-proj-[a-zA-Z0-9_-]{20,}"),    # OpenAI project keys
-    re.compile(r"sk-[a-zA-Z0-9]{20,}"),           # OpenAI legacy
+    re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}"),  # Anthropic
+    re.compile(r"sk-proj-[a-zA-Z0-9_-]{20,}"),  # OpenAI project keys
+    re.compile(r"sk-[a-zA-Z0-9]{20,}"),  # OpenAI legacy
     re.compile(r"Bearer\s+[a-zA-Z0-9._-]{10,}", re.IGNORECASE),
     re.compile(r"x-api-key\s*[:=]\s*\S+", re.IGNORECASE),
 ]

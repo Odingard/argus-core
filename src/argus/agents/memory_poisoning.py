@@ -137,6 +137,7 @@ class MemoryPoisoningAgent(LLMAttackAgent):
     def _derive_base(url: str) -> str | None:
         """Strip path/query from a URL, leaving scheme://netloc."""
         from urllib.parse import urlparse
+
         try:
             p = urlparse(url)
             if p.scheme not in ("http", "https") or not p.netloc:

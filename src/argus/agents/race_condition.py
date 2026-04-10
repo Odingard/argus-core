@@ -442,9 +442,7 @@ class RaceConditionAgent(LLMAttackAgent):
                 step_number=1,
                 action=f"Send concurrent requests to {path}",
                 input_data=description[:500],
-                expected_result=(
-                    "Concurrent requests should not bypass authorization or " "leak state between sessions"
-                ),
+                expected_result=("Concurrent requests should not bypass authorization or leak state between sessions"),
                 actual_result=(results[-1].response_text[:500] if results else "N/A"),
             ),
         ]
