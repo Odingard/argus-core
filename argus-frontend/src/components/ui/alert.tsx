@@ -4,13 +4,13 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border border-oklch(0.92 0.004 286.32) px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-oklch(0.141 0.005 285.823) [&>svg~*]:pl-7 dark:border-oklch(1 0 0 / 10%) dark:[&>svg]:text-oklch(0.985 0 0)",
+  "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground [&>svg~*]:pl-7",
   {
     variants: {
       variant: {
-        default: "bg-oklch(1 0 0) text-oklch(0.141 0.005 285.823) dark:bg-oklch(0.141 0.005 285.823) dark:text-oklch(0.985 0 0)",
+        default: "bg-background text-foreground",
         destructive:
-          "border-oklch(0.577 0.245 27.325)/50 text-oklch(0.577 0.245 27.325) dark:border-oklch(0.577 0.245 27.325) [&>svg]:text-oklch(0.577 0.245 27.325) dark:border-oklch(0.704 0.191 22.216)/50 dark:text-oklch(0.704 0.191 22.216) dark:dark:border-oklch(0.704 0.191 22.216) dark:[&>svg]:text-oklch(0.704 0.191 22.216)",
+          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
       },
     },
     defaultVariants: {
