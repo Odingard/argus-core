@@ -120,6 +120,18 @@ TECHNIQUE_HISTORICAL_ACCURACY: dict[str, tuple[int, int]] = {
     "rug_pull_detection": (90, 100),
     "tool_output_injection": (75, 100),
     "mcp_trust_analysis": (70, 100),
+    # Phase 2 — Memory poisoning. Two-step plant + observe-leak chain has very
+    # low FP rate when sensitive markers are directly extracted from the
+    # response (the gating condition for emission).
+    "memory_poison": (90, 100),
+    "memory_poison_system_override": (90, 100),
+    "memory_poison_role_hijack": (88, 100),
+    "memory_poison_indirect_extraction": (88, 100),
+    "memory_poison_priv_escalation": (87, 100),
+    # Phase 2 — Identity spoofing. Baseline vs spoof diff with concrete
+    # status/marker change is high signal.
+    "identity_spoof": (92, 100),
+    "identity_baseline": (92, 100),
 }
 
 
@@ -208,10 +220,17 @@ class VerdictAdapter:
             return "unknown"
         # Strip variant suffixes — corpus:pi-direct-001:variant -> corpus:pi-direct-001
         family = technique.split(":variant")[0]
-        # Strip role_hijack_X suffixes
+        # Strip "trigger:" prefix that Phase 2 agents emit on the second turn
+        if family.startswith("trigger:"):
+            family = family[len("trigger:"):]
+        # Strip "identity_spoof:command_name" -> "identity_spoof"
+        if family.startswith("identity_spoof:"):
+            return "identity_spoof"
+        # Strip role_hijack_X / memory_poison_X suffixes
         for prefix in ("role_hijack", "prompt_extraction", "delimiter_escape",
                        "guardrail_bypass", "tool_invocation", "indirect_doc",
-                       "indirect_web", "encoded", "multistep"):
+                       "indirect_web", "encoded", "multistep",
+                       "memory_poison", "identity_spoof"):
             if family.startswith(prefix):
                 return prefix
         return family

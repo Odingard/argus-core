@@ -17,7 +17,13 @@ from pathlib import Path
 # Make ARGUS importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus.agents import PromptInjectionHunter, SupplyChainAgent, ToolPoisoningAgent
+from argus.agents import (
+    IdentitySpoofAgent,
+    MemoryPoisoningAgent,
+    PromptInjectionHunter,
+    SupplyChainAgent,
+    ToolPoisoningAgent,
+)
 from argus.models.agents import AgentType, TargetConfig
 from argus.orchestrator.engine import Orchestrator
 from argus.ui import CinematicDashboard
@@ -36,7 +42,7 @@ async def main() -> int:
             "http://localhost:8013",  # Scenario 07 — Race Condition
         ],
         agent_endpoint="http://localhost:8002/chat",  # Scenario 01 — Target agent
-        non_destructive=True,
+        non_destructive=False,  # benchmark scenarios are throwaway docker — aggressive probes OK
         max_requests_per_minute=120,
     )
 
@@ -44,6 +50,8 @@ async def main() -> int:
     orchestrator.register_agent(AgentType.PROMPT_INJECTION, PromptInjectionHunter)
     orchestrator.register_agent(AgentType.TOOL_POISONING, ToolPoisoningAgent)
     orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
+    orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
+    orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
 
     dashboard = CinematicDashboard()
     result = await dashboard.run(

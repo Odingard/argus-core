@@ -111,18 +111,41 @@ def _validate_url_for_scan(url: str) -> None:
     if host in SSRF_BLOCKED_EXACT_HOSTS:
         raise ValueError(f"URL host '{host}' is blocked (private/metadata range)")
 
-    # Check IP address ranges
+    # Check literal IPs first
     try:
         ip = ipaddress.ip_address(host)
-    except ValueError:
-        # Not a literal IP — DNS resolution would happen later, but we can't
-        # safely resolve here without risking a TOCTOU. The URL passes for now
-        # and the actual MCP/HTTP client will hit network policy.
+        _check_ip_blocked(ip)
         return
+    except ValueError as exc:
+        if "points to" in str(exc):
+            raise
+        # Not a literal IP — fall through to DNS resolution
 
+    # Resolve DNS and re-check every returned address. This closes the
+    # DNS-rebinding bypass where an attacker registers `evil.example.com`
+    # with an A record of 127.0.0.1 / 169.254.169.254 etc.
+    # Note: this is best-effort. The real MCP/HTTP client should still
+    # validate the resolved address at request time, since DNS responses
+    # can change between this check and the actual connect.
+    import socket as _socket
+    try:
+        infos = _socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise ValueError(f"URL host '{host}' could not be resolved: {type(exc).__name__}") from None
+
+    for info in infos:
+        addr = info[4][0]
+        try:
+            resolved_ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        _check_ip_blocked(resolved_ip)
+
+
+def _check_ip_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+    """Raise ValueError if an IP address is in a blocked range."""
     if ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_reserved or ip.is_multicast:
         raise ValueError(f"URL points to blocked IP range: {ip}")
-    # Block AWS/GCP/Azure metadata IPs explicitly
     if str(ip) in ("169.254.169.254", "169.254.170.2"):
         raise ValueError(f"URL points to cloud metadata endpoint: {ip}")
 
@@ -365,8 +388,13 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="Dashboard HTML missing") from None
 
         if is_loopback:
-            # Inject the token into a meta tag the JS will read
-            token_meta = f'<meta name="argus-token" content="{WEB_TOKEN}">'
+            # Inject the token into a meta tag the JS will read.
+            # HTML-escape the token: auto-generated tokens are safe, but an
+            # operator-supplied ARGUS_WEB_TOKEN containing quotes would
+            # otherwise break out of the attribute and enable stored XSS.
+            from html import escape as _html_escape
+            safe_token = _html_escape(WEB_TOKEN, quote=True)
+            token_meta = f'<meta name="argus-token" content="{safe_token}">'
             html = html.replace("</head>", f"  {token_meta}\n</head>", 1)
 
         return Response(content=html, media_type="text/html")
@@ -463,8 +491,18 @@ def create_app() -> FastAPI:
                     title = finding_data.get("title", "")
                     agent["current_action"] = f"Found: {title[:80]}"
 
+                    # Truncate raw_request/raw_response before broadcasting on
+                    # SSE — large target responses can blow out browser memory
+                    # and may contain PII the operator does not want streamed.
+                    # The full body remains in the in-memory finding for export.
+                    sse_data = dict(finding_data)
+                    for key in ("raw_request", "raw_response"):
+                        v = sse_data.get(key)
+                        if isinstance(v, str) and len(v) > 5000:
+                            sse_data[key] = v[:5000] + "...[truncated for SSE]"
+
                     state.add_finding(finding_data)
-                    await state.broadcast("finding", finding_data)
+                    await state.broadcast("finding", sse_data)
 
                 elif signal.signal_type == SignalType.PARTIAL_FINDING:
                     data_summary = str(signal.data.get("type", "probing"))[:60]

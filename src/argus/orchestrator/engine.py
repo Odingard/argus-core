@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from argus.correlation import CorrelationEngine
 from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
 from argus.models.findings import CompoundAttackPath, Finding
 from argus.orchestrator.signal_bus import Signal, SignalBus, SignalType
@@ -169,11 +170,18 @@ class Orchestrator:
     def __init__(
         self,
         validation_engine: ValidationEngine | None = None,
+        correlation_engine: CorrelationEngine | None = None,
     ) -> None:
+        # NOTE: each run_scan() builds its own per-scan SignalBus to avoid
+        # cross-contamination between concurrent scans. The instance attribute
+        # below is kept as a "current bus" reference for legacy callers /
+        # introspection but should not be relied on across scans.
         self.signal_bus = SignalBus()
         self.validation_engine = validation_engine or ValidationEngine()
+        self.correlation_engine = correlation_engine or CorrelationEngine()
         self._agent_registry: dict[AgentType, type[BaseAttackAgent]] = {}
         self._active_agents: dict[str, BaseAttackAgent] = {}
+        self._scan_lock = asyncio.Lock()
 
     def register_agent(self, agent_type: AgentType, agent_class: type[BaseAttackAgent]) -> None:
         """Register an attack agent class for deployment."""
@@ -214,6 +222,12 @@ class Orchestrator:
             result.completed_at = datetime.now(UTC)
             return result
 
+        # Per-scan SignalBus prevents cross-contamination if a second scan
+        # starts before the first cleans up. The instance attribute is also
+        # repointed so legacy introspection sees the current bus.
+        scan_signal_bus = SignalBus()
+        self.signal_bus = scan_signal_bus
+
         logger.info(
             "ARGUS SCAN %s — Deploying %d agents against target '%s'",
             scan_id[:8],
@@ -235,7 +249,7 @@ class Orchestrator:
                 demo_pace_seconds=demo_pace_seconds,
             )
             agent_class = self._agent_registry[agent_type]
-            agent = agent_class(config=config, signal_bus=self.signal_bus)
+            agent = agent_class(config=config, signal_bus=scan_signal_bus)
             agent.attach_verdict_adapter(verdict_adapter)
             agents.append(agent)
             self._active_agents[config.instance_id] = agent
@@ -257,12 +271,20 @@ class Orchestrator:
         all_findings: list[Finding] = []
         for i, agent_result in enumerate(agent_results):
             if isinstance(agent_result, Exception):
-                logger.error("Agent %s failed with exception: %s", agents[i].agent_type.value, agent_result)
+                logger.error(
+                    "Agent %s failed with exception: %s",
+                    agents[i].agent_type.value,
+                    type(agent_result).__name__,
+                )
+                logger.debug("Agent %s full exception: %s", agents[i].agent_type.value, agent_result)
+                # Sanitize: only the exception class name is propagated to the
+                # result. The full str(exc) often includes target URLs with
+                # credentials, full request bodies, or other sensitive content.
                 result.agent_results.append(
                     agents[i].build_result(
                         AgentStatus.FAILED,
                         result.started_at,
-                        errors=[str(agent_result)],
+                        errors=[type(agent_result).__name__],
                     )
                 )
             elif isinstance(agent_result, AgentResult):
@@ -278,6 +300,20 @@ class Orchestrator:
             # otherwise they stay unvalidated for now. Full validation requires
             # the agent to provide a replay function — wired up per-agent in Phase 1+.
             result.findings.append(finding)
+
+        # Run correlation v1 — produce compound attack paths from findings
+        try:
+            result.compound_paths = await self.correlation_engine.correlate(
+                scan_id=scan_id,
+                findings=result.findings,
+            )
+            logger.info(
+                "Correlation produced %d compound attack paths",
+                len(result.compound_paths),
+            )
+        except Exception as exc:
+            logger.error("Correlation engine failed: %s", type(exc).__name__)
+            logger.debug("Correlation full exception: %s", exc)
 
         # Collect signal history
         result.signals = await self.signal_bus.get_history()
@@ -339,5 +375,7 @@ class Orchestrator:
             return agent.build_result(AgentStatus.TIMED_OUT, started_at, errors=["Timed out"])
 
         except Exception as exc:
-            logger.error("Agent %s crashed: %s", agent.agent_type.value, exc)
-            return agent.build_result(AgentStatus.FAILED, started_at, errors=[str(exc)])
+            logger.error("Agent %s crashed: %s", agent.agent_type.value, type(exc).__name__)
+            logger.debug("Agent %s full exception: %s", agent.agent_type.value, exc)
+            # Sanitize: only the exception class name reaches the result.
+            return agent.build_result(AgentStatus.FAILED, started_at, errors=[type(exc).__name__])

@@ -137,7 +137,18 @@ class MCPAttackClient:
     async def disconnect(self) -> None:
         """Close the connection."""
         if self._process:
-            self._process.terminate()
+            try:
+                self._process.terminate()
+                # Reap the process so it doesn't become a zombie. If the
+                # subprocess ignores SIGTERM, escalate to SIGKILL after 5s.
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("MCP subprocess did not exit on terminate, killing")
+                    self._process.kill()
+                    self._process.wait(timeout=2)
+            except Exception as exc:
+                logger.debug("Error during MCP subprocess shutdown: %s", type(exc).__name__)
             self._process = None
         if self._http_client:
             await self._http_client.aclose()
@@ -321,12 +332,16 @@ class MCPAttackClient:
         if not resolved_cmd:
             raise FileNotFoundError(f"Command not found on PATH: {self.config.command}")
 
-        self._process = subprocess.Popen(
+        self._process = subprocess.Popen(  # noqa: S603
             [resolved_cmd, *self.config.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_build_minimal_env(self.config.env or None),
+            close_fds=True,
+            # New process group: a misbehaving MCP server cannot send signals
+            # back to the ARGUS parent process group.
+            start_new_session=True,
         )
 
         # Send initialize request
@@ -358,10 +373,19 @@ class MCPAttackClient:
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
 
+        # Security hardening — match the conductor/session.py transport pattern:
+        # - follow_redirects=False so a malicious MCP server can't 302 us to an
+        #   internal address (SSRF pivot through DNS rebinding etc.)
+        # - event_hooks disabled so any logger plugged in cannot leak the
+        #   Authorization header or full request URL
+        # - limits clamp the maximum response body we'll accept
         self._http_client = httpx.AsyncClient(
             base_url=self.config.url,
             headers=headers,
             timeout=self.config.timeout_seconds,
+            follow_redirects=False,
+            event_hooks={"request": [], "response": []},
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
 
         # Auto-detect transport style. Default to JSON-RPC; if the REST endpoint
@@ -370,14 +394,14 @@ class MCPAttackClient:
         try:
             probe = await self._http_client.get("/tools/list")
             if probe.status_code == 200:
-                data = probe.json()
+                data = self._safe_json(probe)
                 if isinstance(data, dict) and "tools" in data:
                     self._http_style = "rest"
-                    logger.debug("MCP server %s uses REST transport", self.config.url)
+                    logger.debug("MCP server uses REST transport")
         except Exception as exc:
             # Probe failed — server doesn't support REST GET /tools/list,
             # fall back to JSON-RPC. Common for production MCP servers.
-            logger.debug("REST probe failed for %s: %s", self.config.url, type(exc).__name__)
+            logger.debug("REST probe failed: %s", type(exc).__name__)
 
     async def _send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Send a request to the MCP server.
@@ -409,6 +433,32 @@ class MCPAttackClient:
         }
         return await self._send_http(request)
 
+    # Maximum bytes we'll read from any single MCP server response.
+    # A malicious server could otherwise return a multi-GB response and
+    # exhaust ARGUS memory. 1MB is generous for legitimate tool catalogs.
+    _MAX_RESPONSE_BYTES: int = 1_048_576
+
+    @classmethod
+    def _safe_json(cls, response: httpx.Response) -> Any:
+        """Parse a response body as JSON, bounded to _MAX_RESPONSE_BYTES.
+
+        Raises RuntimeError on oversized bodies. Used by all HTTP MCP paths
+        so a hostile server cannot exhaust ARGUS memory.
+        """
+        # response.content is the full body buffered by httpx — we cap by slicing
+        # the bytes before parsing. httpx.Limits caps the underlying connection
+        # but not the response payload size, so we enforce it here.
+        body = response.content
+        if len(body) > cls._MAX_RESPONSE_BYTES:
+            raise RuntimeError(
+                f"MCP response exceeds {cls._MAX_RESPONSE_BYTES} byte cap "
+                f"({len(body)} bytes)"
+            )
+        try:
+            return json.loads(body.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"MCP response JSON parse failed: {type(exc).__name__}") from None
+
     async def _send_http_rest(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Send a request to a REST-style MCP server.
 
@@ -422,7 +472,7 @@ class MCPAttackClient:
         if method == "tools/list":
             response = await self._http_client.get("/tools/list")
             response.raise_for_status()
-            return response.json()
+            return self._safe_json(response)
 
         if method == "tools/call":
             response = await self._http_client.post(
@@ -433,7 +483,7 @@ class MCPAttackClient:
                 },
             )
             response.raise_for_status()
-            data = response.json()
+            data = self._safe_json(response)
             # REST-style servers return {"result": {...}} or just {...}
             if isinstance(data, dict) and "result" in data:
                 return {"content": [{"type": "text", "text": json.dumps(data["result"])}]}
@@ -460,7 +510,12 @@ class MCPAttackClient:
 
         response = json.loads(line.decode())
         if "error" in response:
-            raise RuntimeError(f"MCP error: {response['error']}")
+            # Sanitize: do not interpolate the raw target-controlled error body
+            # into the exception message. The target may smuggle text that ends
+            # up in logs / dashboard / SSE streams.
+            err = response["error"]
+            code = err.get("code", "?") if isinstance(err, dict) else "?"
+            raise RuntimeError(f"MCP error code {code}")
         return response.get("result", {})
 
     async def _send_http(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -468,7 +523,9 @@ class MCPAttackClient:
         assert self._http_client
         response = await self._http_client.post("/", json=request)
         response.raise_for_status()
-        data = response.json()
-        if "error" in data:
-            raise RuntimeError(f"MCP error: {data['error']}")
-        return data.get("result", {})
+        data = self._safe_json(response)
+        if isinstance(data, dict) and "error" in data:
+            err = data["error"]
+            code = err.get("code", "?") if isinstance(err, dict) else "?"
+            raise RuntimeError(f"MCP error code {code}")
+        return data.get("result", {}) if isinstance(data, dict) else {}

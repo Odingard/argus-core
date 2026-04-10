@@ -373,33 +373,45 @@ class ToolPoisoningAgent(LLMAttackAgent):
                 return match.group()
         return ""
 
-    # Sensitive default values for common parameter names. These are
-    # standard offensive-security probes that any vulnerability scanner
-    # uses to surface conditional behavior in target systems. NOT
-    # benchmark-specific.
-    _SENSITIVE_DEFAULTS: dict[str, list[str]] = {
+    # Non-destructive sensitive default values. Safe to send against any
+    # target — these are read-only probes that surface conditional behavior
+    # without causing side-effects on the target system.
+    _SAFE_SENSITIVE_DEFAULTS: dict[str, list[str]] = {
         # Path-like parameters — probe common admin / config locations
-        "path": ["admin", "/admin", "config", "/etc/passwd", "secret"],
-        "file_path": ["config.yaml", "secrets.json", "/etc/passwd", ".env", "admin.conf"],
+        "path": ["admin", "/admin", "config", "secret"],
+        "file_path": ["config.yaml", "secrets.json", ".env", "admin.conf"],
         "filepath": ["config.yaml", "secrets.json", ".env"],
         "filename": ["config.yaml", ".env", "secrets.json"],
         "directory": ["admin", "config", "secret"],
         "dir": ["admin", "config", "secret"],
-        # URL-like parameters — probe loopback/localhost/file
-        "url": ["http://localhost", "file:///etc/passwd"],
-        "endpoint": ["http://localhost"],
-        # Query-like parameters — probe SQL-style sensitive queries
+        # Query-like parameters — pure string probes, no SQL keywords
         "query": ["admin", "password", "secret"],
-        "sql": ["SELECT * FROM users", "SELECT * FROM secrets"],
         "search": ["admin", "password"],
-        # Identity-like parameters
+        # Identity-like parameters — names only
         "user": ["admin", "root"],
         "username": ["admin", "root"],
         "role": ["admin", "root"],
     }
 
-    @classmethod
-    def _build_probe_args_set(cls, tool) -> list[dict]:
+    # Aggressive sensitive defaults — only fired against targets that
+    # explicitly opt out of `non_destructive`. Includes path-traversal probes,
+    # URL probes that could trigger SSRF/file:// reads on the target, and
+    # SQL keywords that could mutate target state.
+    #
+    # Per the non-destructive validation rule: ARGUS must never fire these
+    # against a customer engagement without explicit aggressive_probing
+    # consent. The benchmark scenarios opt in via target.non_destructive=False.
+    _AGGRESSIVE_SENSITIVE_DEFAULTS: dict[str, list[str]] = {
+        "path": ["/etc/passwd", "../../etc/passwd"],
+        "file_path": ["/etc/passwd", "../../etc/passwd"],
+        # URL-like parameters — could induce target to fetch loopback/file://
+        "url": ["http://localhost", "http://127.0.0.1", "file:///etc/passwd"],
+        "endpoint": ["http://localhost", "http://127.0.0.1"],
+        # SQL probes can mutate target state — only with consent
+        "sql": ["SELECT * FROM users", "SELECT * FROM secrets"],
+    }
+
+    def _build_probe_args_set(self, tool) -> list[dict]:
         """Build a list of arg dicts that probe common sensitive defaults.
 
         Returns multiple arg sets per tool — one with neutral values (`test`),
@@ -407,10 +419,21 @@ class ToolPoisoningAgent(LLMAttackAgent):
         This is generic offensive technique: scan target behavior with common
         sensitive inputs to surface conditional code paths (admin behaviors,
         path-traversal responses, role-elevation hooks).
+
+        Aggressive probes (path traversal, file://, SQL, SSRF-style URLs)
+        are only fired when the target has opted out of `non_destructive`.
+        Per the non-destructive validation rule, ARGUS does not modify
+        target state without explicit consent.
         """
         # Always include the neutral baseline first
-        baseline = cls._build_safe_args(tool)
+        baseline = self._build_safe_args(tool)
         probes = [baseline]
+
+        # Build the merged probe table for this scan based on the consent flag
+        probe_table: dict[str, list[str]] = {**self._SAFE_SENSITIVE_DEFAULTS}
+        if not self.config.target.non_destructive:
+            for k, v in self._AGGRESSIVE_SENSITIVE_DEFAULTS.items():
+                probe_table[k] = probe_table.get(k, []) + list(v)
 
         # For each parameter, generate a variant set with the sensitive default.
         # We probe parameters whose lower-cased name matches one of our keys.
@@ -418,9 +441,9 @@ class ToolPoisoningAgent(LLMAttackAgent):
             if param.type != "string":
                 continue
             key = param.name.lower()
-            if key not in cls._SENSITIVE_DEFAULTS:
+            if key not in probe_table:
                 continue
-            for sensitive_value in cls._SENSITIVE_DEFAULTS[key]:
+            for sensitive_value in probe_table[key]:
                 variant = dict(baseline)
                 variant[param.name] = sensitive_value
                 # Make sure required params are filled (baseline already has them)
