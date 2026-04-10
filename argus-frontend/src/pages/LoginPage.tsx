@@ -20,6 +20,8 @@ export function LoginPage() {
     setLoading(true);
     setError("");
     try {
+      const { login } = await import("@/api/client");
+      await login(token.trim());
       localStorage.setItem("argus_token", token.trim());
       navigate("/");
     } catch {

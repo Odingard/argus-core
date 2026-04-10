@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   AlertTriangle,
   Download,
@@ -238,9 +238,8 @@ export function FindingsPage() {
               {filtered.map((f) => {
                 const StatusIcon = STATUS_ICONS[f.status] || AlertTriangle;
                 return (
-                  <>
+                  <React.Fragment key={f.id}>
                     <TableRow
-                      key={f.id}
                       className="cursor-pointer"
                       onClick={() => setExpanded(expanded === f.id ? null : f.id)}
                     >
@@ -311,7 +310,7 @@ export function FindingsPage() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </TableBody>

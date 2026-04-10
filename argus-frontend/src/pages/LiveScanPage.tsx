@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Radio,
   Play,
@@ -53,13 +53,21 @@ export function LiveScanPage() {
   const [scanRunning, setScanRunning] = useState(false);
   const [targetUrl, setTargetUrl] = useState("");
   const [scanMode, setScanMode] = useState("full");
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
 
   const startScan = () => {
     if (!targetUrl) return;
     setScanRunning(true);
     // Simulate agent progression
     let step = 0;
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       step++;
       setAgents((prev) =>
         prev.map((a, i) => {
@@ -78,13 +86,18 @@ export function LiveScanPage() {
         })
       );
       if (step > 60) {
-        clearInterval(interval);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = null;
         setScanRunning(false);
       }
     }, 500);
   };
 
   const stopScan = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     setScanRunning(false);
     setAgents((prev) =>
       prev.map((a) => ({
