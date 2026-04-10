@@ -41,6 +41,8 @@ class OWASPAgenticCategory(str, Enum):
     RACE_CONDITIONS = "AA08:2025 — Race Conditions in Multi-Agent Systems"
     MODEL_EXTRACTION = "AA09:2025 — Model and Configuration Extraction"
     INSUFFICIENT_MONITORING = "AA10:2025 — Insufficient Agent Monitoring"
+    PERSONA_HIJACKING = "AA11:ARGUS — Persona Hijacking and Identity Drift"
+    MEMORY_BOUNDARY_COLLAPSE = "AA12:ARGUS — Memory Boundary Collapse"
 
 
 class OWASPLLMCategory(str, Enum):

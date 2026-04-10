@@ -50,8 +50,10 @@ from argus.agents import (
     ContextWindowAgent,
     CrossAgentExfilAgent,
     IdentitySpoofAgent,
+    MemoryBoundaryCollapseAgent,
     MemoryPoisoningAgent,
     ModelExtractionAgent,
+    PersonaHijackingAgent,
     PrivilegeEscalationAgent,
     PromptInjectionHunter,
     RaceConditionAgent,
@@ -480,6 +482,9 @@ def create_app() -> FastAPI:
         orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
         # Phase 4
         orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
+        # Phase 5
+        orchestrator.register_agent(AgentType.PERSONA_HIJACKING, PersonaHijackingAgent)
+        orchestrator.register_agent(AgentType.MEMORY_BOUNDARY_COLLAPSE, MemoryBoundaryCollapseAgent)
         state.orchestrator = orchestrator
 
         # Initialize agent state cards
