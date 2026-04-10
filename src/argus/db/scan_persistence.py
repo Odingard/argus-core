@@ -145,7 +145,7 @@ class ScanPersistence:
             summary["compound_attack_paths"],
         )
 
-        return scan_record
+        return self._repo.get_scan(scan_result.scan_id) or scan_record
 
     def close(self) -> None:
         self._repo.close()

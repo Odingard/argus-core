@@ -196,7 +196,9 @@ class APIKeyRepository:
         api_key.last_used_at = datetime.now(UTC)
         self._session.commit()
 
-        return _to_dict(api_key)
+        result = _to_dict(api_key)
+        result.pop("key_hash", None)
+        return result
 
     def list_all(self, active_only: bool = True) -> list[dict[str, Any]]:
         query = self._session.query(DBAPIKey)
