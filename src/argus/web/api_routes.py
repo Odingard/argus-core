@@ -149,7 +149,7 @@ def create_production_router() -> APIRouter:
         repo = ScanRepository()
         try:
             scans = repo.list_scans(limit=limit, offset=offset, target_id=target_id, status=status)
-            total = repo.get_scan_count(target_id=target_id)
+            total = repo.get_scan_count(target_id=target_id, status=status)
             return {"scans": scans, "total": total, "limit": limit, "offset": offset}
         finally:
             repo.close()
@@ -297,13 +297,15 @@ def create_production_router() -> APIRouter:
             from argus.db.session import get_session
 
             session = get_session()
-            from argus.db.models import DBAPIKey, DBFinding, DBScan, DBTarget
+            try:
+                from argus.db.models import DBAPIKey, DBFinding, DBScan, DBTarget
 
-            target_count = session.query(DBTarget).filter(DBTarget.is_active.is_(True)).count()
-            scan_count = session.query(DBScan).count()
-            finding_count = session.query(DBFinding).count()
-            key_count = session.query(DBAPIKey).filter(DBAPIKey.is_active.is_(True)).count()
-            session.close()
+                target_count = session.query(DBTarget).filter(DBTarget.is_active.is_(True)).count()
+                scan_count = session.query(DBScan).count()
+                finding_count = session.query(DBFinding).count()
+                key_count = session.query(DBAPIKey).filter(DBAPIKey.is_active.is_(True)).count()
+            finally:
+                session.close()
             return {
                 "status": "healthy",
                 "tables": {

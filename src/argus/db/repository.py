@@ -451,10 +451,12 @@ class ScanRepository:
             paths.append(d)
         return paths
 
-    def get_scan_count(self, target_id: str | None = None) -> int:
+    def get_scan_count(self, target_id: str | None = None, status: str | None = None) -> int:
         query = self._session.query(DBScan)
         if target_id:
             query = query.filter(DBScan.target_id == target_id)
+        if status:
+            query = query.filter(DBScan.status == status)
         return query.count()
 
     def close(self) -> None:

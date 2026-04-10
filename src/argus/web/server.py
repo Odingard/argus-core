@@ -567,12 +567,14 @@ def create_app() -> FastAPI:
                     from argus.db.scan_persistence import ScanPersistence
 
                     persistence = ScanPersistence()
-                    persistence.save(
-                        scan_result=result,
-                        target_name=request.target_name,
-                        initiated_by="web_dashboard",
-                    )
-                    persistence.close()
+                    try:
+                        persistence.save(
+                            scan_result=result,
+                            target_name=request.target_name,
+                            initiated_by="web_dashboard",
+                        )
+                    finally:
+                        persistence.close()
                     logger.info("Scan %s persisted to database", result.scan_id[:8])
                 except Exception as persist_exc:
                     logger.warning("Failed to persist scan: %s", type(persist_exc).__name__)

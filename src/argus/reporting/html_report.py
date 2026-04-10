@@ -108,7 +108,7 @@ class HTMLReportGenerator:
                 <div class="meta-item"><strong>Target:</strong> {_esc(target)}</div>
                 <div class="meta-item"><strong>Generated:</strong> {_esc(generated_at)}</div>
                 <div class="meta-item"><strong>Scan ID:</strong> {_esc(summary.get('scan_id', 'N/A'))}</div>
-                <div class="meta-item"><strong>Duration:</strong> {summary.get('duration_seconds', 0):.1f}s</div>
+                <div class="meta-item"><strong>Duration:</strong> {summary.get('duration_seconds') or 0:.1f}s</div>
             </div>
         </div>
         <div class="risk-banner" style="border-left-color: {risk_color};">
