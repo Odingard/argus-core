@@ -361,6 +361,17 @@ def alec_export(
     orchestrator = _create_orchestrator()
     result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout))
 
+    # Persist scan results to database
+    try:
+        persistence = ScanPersistence()
+        try:
+            persistence.save(scan_result=result, target_name=target_name, initiated_by="cli:alec-export")
+        finally:
+            persistence.close()
+        console.print("[dim]Scan persisted to database[/]")
+    except Exception as exc:
+        console.print(f"[yellow]Warning: Could not persist scan: {type(exc).__name__}[/]")
+
     exporter = ALECEvidenceExporter()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(exporter.export_json(result))
