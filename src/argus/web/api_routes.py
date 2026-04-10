@@ -115,7 +115,7 @@ def create_production_router() -> APIRouter:
     async def update_target(target_id: str, body: TargetUpdate) -> dict[str, Any]:
         repo = TargetRepository()
         try:
-            updates = {k: v for k, v in body.model_dump().items() if v is not None}
+            updates = body.model_dump(exclude_unset=True)
             if not updates:
                 raise HTTPException(status_code=400, detail="No fields to update")
             target = repo.update(target_id, **updates)

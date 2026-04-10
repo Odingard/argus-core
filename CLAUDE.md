@@ -2,7 +2,7 @@
 
 ## What is ARGUS
 Autonomous AI Red Team Platform by Odingard Security / Six Sense Enterprise Services.
-Deploys 10 specialized offensive AI agents in parallel against target AI systems.
+Deploys 12 specialized offensive AI agents in parallel against target AI systems.
 
 ## Development Commands
 - `make dev` — Install with dev dependencies

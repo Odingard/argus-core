@@ -31,28 +31,28 @@ export const api = {
 };
 
 // Auth
-export const login = (token: string) => api.post<{ status: string }>("/api/v1/auth/login", { token });
+export const login = (token: string) => api.post<{ status: string }>("/api/auth/login", { token });
 
 // Dashboard
-export const getDashboardStats = () => api.get<Record<string, unknown>>("/api/v1/dashboard/stats");
+export const getDashboardStats = () => api.get<Record<string, unknown>>("/api/dashboard/stats");
 
 // Scans
-export const getScans = () => api.get<{ scans: unknown[] }>("/api/v1/scans");
-export const getScan = (id: string) => api.get<Record<string, unknown>>(`/api/v1/scans/${id}`);
-export const startScan = (body: unknown) => api.post<Record<string, unknown>>("/api/v1/scans/start", body);
-export const cancelScan = (id: string) => api.post<Record<string, unknown>>(`/api/v1/scans/${id}/cancel`);
+export const getScans = () => api.get<{ scans: unknown[] }>("/api/scans");
+export const getScan = (id: string) => api.get<Record<string, unknown>>(`/api/scans/${id}`);
+export const startScan = (body: unknown) => api.post<Record<string, unknown>>("/api/scans/start", body);
+export const cancelScan = (id: string) => api.post<Record<string, unknown>>(`/api/scans/${id}/cancel`);
 
 // Targets
-export const getTargets = () => api.get<{ targets: unknown[] }>("/api/v1/targets");
-export const createTarget = (body: unknown) => api.post<Record<string, unknown>>("/api/v1/targets", body);
-export const deleteTarget = (id: string) => api.delete<Record<string, unknown>>(`/api/v1/targets/${id}`);
+export const getTargets = () => api.get<{ targets: unknown[] }>("/api/targets");
+export const createTarget = (body: unknown) => api.post<Record<string, unknown>>("/api/targets", body);
+export const deleteTarget = (id: string) => api.delete<Record<string, unknown>>(`/api/targets/${id}`);
 
 // Findings
-export const getFindings = (params?: string) => api.get<{ findings: unknown[] }>(`/api/v1/findings${params ? `?${params}` : ""}`);
-export const getFinding = (id: string) => api.get<Record<string, unknown>>(`/api/v1/findings/${id}`);
+export const getFindings = (params?: string) => api.get<{ findings: unknown[] }>(`/api/findings${params ? `?${params}` : ""}`);
+export const getFinding = (id: string) => api.get<Record<string, unknown>>(`/api/findings/${id}`);
 export const updateFindingStatus = (id: string, status: string) =>
-  api.put<Record<string, unknown>>(`/api/v1/findings/${id}/status`, { status });
+  api.put<Record<string, unknown>>(`/api/findings/${id}/status`, { status });
 
 // Health
 export const getHealth = () => api.get<{ status: string }>("/health");
-export const getAgentStatus = () => api.get<{ agents: unknown[] }>("/api/v1/agents/status");
+export const getAgentStatus = () => api.get<{ agents: unknown[] }>("/api/agents/status");

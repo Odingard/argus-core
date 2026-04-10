@@ -286,7 +286,8 @@ class ScanRepository:
         if duration_seconds is not None:
             scan.duration_seconds = duration_seconds
         elif scan.started_at:
-            scan.duration_seconds = (scan.completed_at - scan.started_at).total_seconds()
+            started = scan.started_at if scan.started_at.tzinfo else scan.started_at.replace(tzinfo=UTC)
+            scan.duration_seconds = (scan.completed_at - started).total_seconds()
         scan.agents_deployed = agents_deployed
         scan.agents_completed = agents_completed
         scan.agents_failed = agents_failed
