@@ -55,9 +55,7 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
     {
         "id": "tool_poisoning_data_exfiltration",
         "required_agents": {"tool_poisoning", "supply_chain"},
-        "title": (
-            "Compound: tool_poisoning enables data_exfiltration via planted MCP tool"
-        ),
+        "title": ("Compound: tool_poisoning enables data_exfiltration via planted MCP tool"),
         "compound_impact": (
             "A poisoned MCP tool definition (hidden instructions in tool description) "
             "combined with the same MCP server's elevated trust enables exfiltration "
@@ -74,9 +72,7 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
         "id": "memory_poisoning_privilege_escalation",
         "required_agents": {"memory_poisoning"},
         "require_marker_leak": True,
-        "title": (
-            "Compound: memory_poisoning chains into privilege_escalation"
-        ),
+        "title": ("Compound: memory_poisoning chains into privilege_escalation"),
         "compound_impact": (
             "Adversarial content planted in cross-session agent memory was retrieved "
             "into a privileged context and caused leakage of sensitive markers and "
@@ -93,9 +89,7 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
         "id": "identity_spoofing_privilege_escalation",
         "required_agents": {"identity_spoof"},
         "require_marker_leak": True,
-        "title": (
-            "Compound: identity_spoofing chains into privilege_escalation and exfiltration"
-        ),
+        "title": ("Compound: identity_spoofing chains into privilege_escalation and exfiltration"),
         "compound_impact": (
             "A claimed orchestrator identity in request headers granted access to "
             "privileged commands without cryptographic verification, leading to "
@@ -111,9 +105,7 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
     {
         "id": "prompt_injection_tool_misuse",
         "required_agents": {"prompt_injection_hunter", "tool_poisoning"},
-        "title": (
-            "Compound: prompt_injection enables tool_misuse via poisoned tool catalog"
-        ),
+        "title": ("Compound: prompt_injection enables tool_misuse via poisoned tool catalog"),
         "compound_impact": (
             "Direct prompt injection on the chat surface combined with a poisoned tool "
             "catalog creates a chain where the injection can invoke the planted tool, "
@@ -128,9 +120,7 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
     {
         "id": "supply_chain_prompt_injection",
         "required_agents": {"supply_chain", "tool_poisoning"},
-        "title": (
-            "Compound: supply_chain delivers prompt_injection payloads via tool output"
-        ),
+        "title": ("Compound: supply_chain delivers prompt_injection payloads via tool output"),
         "compound_impact": (
             "An untrusted MCP server in the supply chain ships tool output that "
             "contains hidden prompt-injection payloads. When a downstream agent "
@@ -140,6 +130,85 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
         "owasp": [
             OWASPAgenticCategory.SUPPLY_CHAIN,
             OWASPAgenticCategory.PROMPT_INJECTION,
+        ],
+    },
+    # ── Phase 3-4 compound patterns ──────────────────────────────
+    {
+        "id": "context_window_privilege_escalation",
+        "required_agents": {"context_window", "privilege_escalation"},
+        "title": ("Compound: context_window manipulation enables privilege_escalation"),
+        "compound_impact": (
+            "Context window manipulation enables privilege escalation through "
+            "accumulated trust. By flooding or carefully crafting the context window, "
+            "the attacker shifts the agent into a high-trust state where privilege "
+            "escalation payloads succeed that would otherwise be rejected."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.MEMORY_POISONING,
+            OWASPAgenticCategory.PRIVILEGE_ESCALATION,
+        ],
+    },
+    {
+        "id": "cross_agent_exfil_model_extraction",
+        "required_agents": {"cross_agent_exfil", "model_extraction"},
+        "require_marker_leak": True,
+        "title": ("Compound: cross_agent_exfil relays extracted model configuration"),
+        "compound_impact": (
+            "Cross-agent relay exfiltrates extracted model configuration. "
+            "The model_extraction agent recovers system prompts and tool inventory, "
+            "then the cross_agent_exfil agent uses inter-agent communication channels "
+            "to relay the extracted secrets outside the trust boundary."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.CROSS_AGENT_EXFIL,
+            OWASPAgenticCategory.MODEL_EXTRACTION,
+        ],
+    },
+    {
+        "id": "race_condition_privilege_escalation",
+        "required_agents": {"race_condition", "privilege_escalation"},
+        "title": ("Compound: race_condition in authorization enables privilege_escalation"),
+        "compound_impact": (
+            "Race condition in authorization check enables privilege escalation. "
+            "A TOCTOU vulnerability in the permission verification flow allows a "
+            "concurrent request to slip through with elevated privileges before the "
+            "authorization state is fully committed."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.RACE_CONDITIONS,
+            OWASPAgenticCategory.PRIVILEGE_ESCALATION,
+        ],
+    },
+    {
+        "id": "model_extraction_prompt_injection",
+        "required_agents": {"model_extraction", "prompt_injection_hunter"},
+        "require_marker_leak": True,
+        "title": ("Compound: model_extraction enables targeted prompt_injection"),
+        "compound_impact": (
+            "Extracted system prompt enables targeted prompt injection. "
+            "The model_extraction agent recovers the full system prompt and guardrail "
+            "instructions, which the prompt_injection agent then uses to craft a "
+            "precisely targeted injection that bypasses the known defences."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.MODEL_EXTRACTION,
+            OWASPAgenticCategory.PROMPT_INJECTION,
+        ],
+    },
+    {
+        "id": "context_window_cross_agent_exfil",
+        "required_agents": {"context_window", "cross_agent_exfil"},
+        "require_marker_leak": True,
+        "title": ("Compound: context_window pollution enables cross_agent data exfiltration"),
+        "compound_impact": (
+            "Context window pollution enables cross-agent data exfiltration. "
+            "By manipulating the context window the attacker plants instructions that "
+            "cause the agent to leak sensitive data through cross-agent communication "
+            "channels, turning shared context into a covert exfiltration relay."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.MEMORY_POISONING,
+            OWASPAgenticCategory.CROSS_AGENT_EXFIL,
         ],
     },
 ]
@@ -191,9 +260,7 @@ class CorrelationEngine:
                     if not any(self._has_marker_evidence(f) for f in host_findings):
                         continue
 
-                participants = [
-                    f for f in host_findings if f.agent_type in pattern["required_agents"]
-                ]
+                participants = [f for f in host_findings if f.agent_type in pattern["required_agents"]]
                 if not participants:
                     continue
 
@@ -218,9 +285,7 @@ class CorrelationEngine:
             if global_key in emitted_pattern_keys:
                 continue
             if pattern["required_agents"].issubset(all_agents):
-                participants = [
-                    f for f in findings if f.agent_type in pattern["required_agents"]
-                ][:6]
+                participants = [f for f in findings if f.agent_type in pattern["required_agents"]][:6]
                 cp = self._build_compound_path(
                     scan_id=scan_id,
                     pattern=pattern,
@@ -259,14 +324,15 @@ class CorrelationEngine:
     @staticmethod
     def _has_marker_evidence(finding: Finding) -> bool:
         """True if a finding's text fields suggest a sensitive marker leaked."""
-        text = " ".join([
-            finding.title or "",
-            finding.description or "",
-            finding.raw_response or "",
-        ]).lower()
+        text = " ".join(
+            [
+                finding.title or "",
+                finding.description or "",
+                finding.raw_response or "",
+            ]
+        ).lower()
         return any(
-            tok in text
-            for tok in ("canary", "secret", "leak", "extract", "marker", "elevated", "trust_granted")
+            tok in text for tok in ("canary", "secret", "leak", "extract", "marker", "elevated", "trust_granted")
         )
 
     @staticmethod
@@ -285,9 +351,7 @@ class CorrelationEngine:
                     step_number=i,
                     agent_type=f.agent_type,
                     technique=f.technique or "unknown",
-                    description=(
-                        f"Stage {i}: {f.title} ({f.agent_type}) on {f.target_surface}"
-                    ),
+                    description=(f"Stage {i}: {f.title} ({f.agent_type}) on {f.target_surface}"),
                     target_surface=f.target_surface,
                 )
             )
@@ -321,8 +385,7 @@ class CorrelationEngine:
                 f"{', '.join(sorted(pattern['required_agents']))} stages."
             ),
             detailed_steps=[
-                f"Audit {f.agent_type} surface {f.target_surface} per finding {f.id[:8]}"
-                for f in participants[:5]
+                f"Audit {f.agent_type} surface {f.target_surface} per finding {f.id[:8]}" for f in participants[:5]
             ],
         )
 
