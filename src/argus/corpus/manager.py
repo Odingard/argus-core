@@ -47,6 +47,12 @@ class AttackCategory(str, Enum):
     SUPPLY_CHAIN_PACKAGE = "supply_chain.package"
     MODEL_EXTRACTION_PROMPT = "model_extraction.prompt"
     MODEL_EXTRACTION_BOUNDARY = "model_extraction.boundary"
+    PERSONA_HIJACKING_DRIFT = "persona_hijacking.drift"
+    PERSONA_HIJACKING_BOUNDARY = "persona_hijacking.boundary"
+    PERSONA_HIJACKING_AUTHORITY = "persona_hijacking.authority"
+    MEMORY_BOUNDARY_BLEED = "memory_boundary.bleed"
+    MEMORY_BOUNDARY_CONTAMINATION = "memory_boundary.contamination"
+    MEMORY_BOUNDARY_HIERARCHY = "memory_boundary.hierarchy"
 
 
 class AttackPattern(BaseModel):

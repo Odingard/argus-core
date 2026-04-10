@@ -20,8 +20,10 @@ from argus.agents import (
     ContextWindowAgent,
     CrossAgentExfilAgent,
     IdentitySpoofAgent,
+    MemoryBoundaryCollapseAgent,
     MemoryPoisoningAgent,
     ModelExtractionAgent,
+    PersonaHijackingAgent,
     PrivilegeEscalationAgent,
     PromptInjectionHunter,
     RaceConditionAgent,
@@ -51,6 +53,9 @@ def _create_orchestrator() -> Orchestrator:
     orch.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
     # Phase 4
     orch.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
+    # Phase 5
+    orch.register_agent(AgentType.PERSONA_HIJACKING, PersonaHijackingAgent)
+    orch.register_agent(AgentType.MEMORY_BOUNDARY_COLLAPSE, MemoryBoundaryCollapseAgent)
     return orch
 
 
@@ -369,6 +374,72 @@ def probe(mcp_url: str) -> None:
             await client.disconnect()
 
     asyncio.run(_probe())
+
+
+# ---------------------------------------------------------------------------
+# Test target commands
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="test-target")
+def test_target() -> None:
+    """Manage the ARGUS mock vulnerable AI target for testing."""
+
+
+@test_target.command(name="start")
+@click.option("--host", default="127.0.0.1", help="Host to bind")
+@click.option("--port", default=9999, help="Port to bind")
+@click.option("--reload", is_flag=True, help="Enable auto-reload")
+def test_target_start(host: str, port: int, reload: bool) -> None:
+    """Start the mock vulnerable AI target.
+
+    Launches a FastAPI server that simulates a vulnerable AI agent
+    with intentional security flaws for each ARGUS attack agent to
+    find. Use this for local development and testing.
+
+    Then run a scan against it:
+        ARGUS_WEB_ALLOW_PRIVATE=1 argus scan mock-target \\
+            --agent-endpoint http://localhost:9999/chat
+    """
+    import uvicorn
+
+    console.print(BANNER, style="bold red")
+    console.print("\n[bold yellow]ARGUS Test Target[/] (mock vulnerable AI agent)")
+    console.print(f"Starting on [cyan]http://{host}:{port}[/]")
+    console.print("\n[bold red]WARNING:[/] This is an intentionally vulnerable target.")
+    console.print("[bold red]DO NOT expose to the internet.[/]\n")
+    console.print("[dim]To scan against it:[/]")
+    console.print(
+        f"[dim]  ARGUS_WEB_ALLOW_PRIVATE=1 argus scan mock-target " f"--agent-endpoint http://{host}:{port}/chat[/]\n"
+    )
+
+    uvicorn.run(
+        "argus.test_harness.mock_target:create_mock_app",
+        host=host,
+        port=port,
+        reload=reload,
+        factory=True,
+        log_level="info",
+    )
+
+
+@test_target.command(name="status")
+@click.option("--port", default=9999, help="Port to check")
+def test_target_status(port: int) -> None:
+    """Check if the mock target is running."""
+    import httpx
+
+    try:
+        resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            console.print(f"[green]Mock target is running[/] on port {port}")
+            console.print(f"[dim]Service: {data.get('service', 'unknown')}[/]")
+        else:
+            console.print(f"[yellow]Mock target responded with status {resp.status_code}[/]")
+    except httpx.HTTPError:
+        console.print(f"[red]Mock target is not running[/] on port {port}")
+        console.print("[dim]Start it with: argus test-target start[/]")
 
 
 if __name__ == "__main__":
