@@ -64,6 +64,7 @@ export function LiveScanPage() {
 
   const startScan = () => {
     if (!targetUrl) return;
+    setAgents(INITIAL_AGENTS);
     setScanRunning(true);
     // Simulate agent progression
     let step = 0;
