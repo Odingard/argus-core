@@ -18,7 +18,7 @@ ARGUS deploys **12 specialized offensive agents in parallel** against AI systems
 
 ```bash
 pip install argus-redteam
-argus scan --target https://your-ai-agent.com/api/chat
+argus scan "My AI Agent" --mcp-url https://your-ai-agent.com/api/chat
 ```
 
 ---
