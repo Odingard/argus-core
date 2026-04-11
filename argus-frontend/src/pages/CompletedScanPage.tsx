@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   CheckCircle,
   Download,
@@ -8,6 +8,11 @@ import {
   Calendar,
   Loader2,
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  XCircle,
+  Clock,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getScans } from "@/api/client";
+import { getScans, getScanFindings } from "@/api/client";
 
 interface CompletedScan {
   id: string;
@@ -33,11 +38,41 @@ interface CompletedScan {
   status: string;
 }
 
+interface ScanFinding {
+  id: string;
+  title: string;
+  severity: string;
+  agent: string;
+  target: string;
+  status: string;
+  confidence: number;
+}
+
+const SEVERITY_STYLES: Record<string, string> = {
+  critical: "bg-red-600",
+  high: "bg-orange-600",
+  medium: "bg-yellow-600",
+  low: "bg-blue-600",
+  info: "bg-gray-600",
+};
+
+const STATUS_ICONS: Record<string, React.ElementType> = {
+  open: AlertTriangle,
+  unvalidated: AlertTriangle,
+  validated: CheckCircle,
+  triaged: Clock,
+  resolved: CheckCircle,
+  false_positive: XCircle,
+};
+
 export function CompletedScanPage() {
   const [search, setSearch] = useState("");
   const [scans, setScans] = useState<CompletedScan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [scanFindings, setScanFindings] = useState<Record<string, ScanFinding[]>>({});
+  const [loadingFindings, setLoadingFindings] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +106,37 @@ export function CompletedScanPage() {
     return () => { cancelled = true; };
   }, []);
 
+  const handleExpandScan = async (scanId: string) => {
+    if (expandedScan === scanId) {
+      setExpandedScan(null);
+      return;
+    }
+    setExpandedScan(scanId);
+    if (scanFindings[scanId]) return; // already loaded
+    try {
+      setLoadingFindings(scanId);
+      const data = await getScanFindings(scanId);
+      const findings: ScanFinding[] = (data.findings || []).map((f: Record<string, unknown>) => ({
+        id: String(f.id ?? ""),
+        title: String(f.title ?? ""),
+        severity: String(f.severity ?? "medium"),
+        agent: String(f.agent_type ?? ""),
+        target: String(f.target_surface ?? f.target ?? ""),
+        status: String(f.status ?? "unvalidated"),
+        confidence: Number(
+          typeof f.verdict_score === "object" && f.verdict_score !== null
+            ? (f.verdict_score as Record<string, unknown>).weight ?? 0
+            : f.verdict_score ?? 0
+        ),
+      }));
+      setScanFindings((prev) => ({ ...prev, [scanId]: findings }));
+    } catch {
+      setScanFindings((prev) => ({ ...prev, [scanId]: [] }));
+    } finally {
+      setLoadingFindings(null);
+    }
+  };
+
   if (loading && scans.length === 0) {
     return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
   }
@@ -98,7 +164,7 @@ export function CompletedScanPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Completed Scans</h2>
           <p className="text-sm text-muted-foreground">
-            Scan history with comparison and export
+            Scan history — click a scan to view its findings
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -131,12 +197,13 @@ export function CompletedScanPage() {
         </Button>
       </div>
 
-      {/* Scan table */}
+      {/* Scan table with expandable findings */}
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8"></TableHead>
                 <TableHead>Scan ID</TableHead>
                 <TableHead>Target</TableHead>
                 <TableHead>Date</TableHead>
@@ -149,35 +216,109 @@ export function CompletedScanPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((scan) => {
+                const isExpanded = expandedScan === scan.id;
+                const findings = scanFindings[scan.id] || [];
+                const isLoadingThis = loadingFindings === scan.id;
                 return (
-                  <TableRow key={scan.id}>
-                    <TableCell className="font-mono text-xs">{scan.id}</TableCell>
-                    <TableCell className="font-medium">{scan.target}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {scan.date}
-                    </TableCell>
-                    <TableCell className="text-sm">{scan.duration}</TableCell>
-                    <TableCell>{scan.agents}</TableCell>
-                    <TableCell>
-                      <span className="text-sm font-medium">{scan.totalFindings} findings</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="gap-1 text-green-400">
-                        <CheckCircle className="h-3 w-3" />
-                        Done
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="sm">
-                          <Eye className="h-3 w-3" />
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          <Download className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <React.Fragment key={scan.id}>
+                    <TableRow className="cursor-pointer" onClick={() => handleExpandScan(scan.id)}>
+                      <TableCell>
+                        {isExpanded ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{scan.id.slice(0, 8)}...</TableCell>
+                      <TableCell className="font-medium">{scan.target}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {scan.date ? new Date(scan.date).toLocaleString() : scan.date}
+                      </TableCell>
+                      <TableCell className="text-sm">{scan.duration}</TableCell>
+                      <TableCell>{scan.agents}</TableCell>
+                      <TableCell>
+                        <span className="text-sm font-medium">{scan.totalFindings} findings</span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="gap-1 text-green-400">
+                          <CheckCircle className="h-3 w-3" />
+                          Done
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleExpandScan(scan.id); }}>
+                            <Eye className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            <Download className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow>
+                        <TableCell colSpan={9} className="bg-muted/30 p-4">
+                          {isLoadingThis ? (
+                            <div className="flex items-center justify-center py-4">
+                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                              <span className="ml-2 text-sm text-muted-foreground">Loading findings for scan {scan.id.slice(0, 8)}...</span>
+                            </div>
+                          ) : findings.length === 0 ? (
+                            <p className="py-4 text-center text-sm text-muted-foreground">No findings for this scan</p>
+                          ) : (
+                            <div className="space-y-2">
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                Findings for Scan {scan.id.slice(0, 8)}... ({findings.length} total)
+                              </p>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Finding</TableHead>
+                                    <TableHead>Severity</TableHead>
+                                    <TableHead>Agent</TableHead>
+                                    <TableHead>Target Surface</TableHead>
+                                    <TableHead>Confidence</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead></TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {findings.map((f) => {
+                                    const StatusIcon = STATUS_ICONS[f.status] || AlertTriangle;
+                                    return (
+                                      <TableRow key={f.id}>
+                                        <TableCell className="max-w-xs truncate text-sm font-medium">{f.title}</TableCell>
+                                        <TableCell>
+                                          <Badge className={`text-xs ${SEVERITY_STYLES[f.severity]}`}>{f.severity}</Badge>
+                                        </TableCell>
+                                        <TableCell className="font-mono text-xs">{f.agent}</TableCell>
+                                        <TableCell className="text-sm">{f.target}</TableCell>
+                                        <TableCell>
+                                          <span className="text-sm font-medium">{(f.confidence * 100).toFixed(0)}%</span>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Badge variant="outline" className="gap-1 text-xs capitalize">
+                                            <StatusIcon className="h-3 w-3" />
+                                            {f.status.replace("_", " ")}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Button variant="ghost" size="sm" className="gap-1">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </TableBody>

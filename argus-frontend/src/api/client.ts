@@ -93,6 +93,12 @@ export const getPendingScans = () =>
   api.get<{ scans: Record<string, unknown>[]; total: number }>("/api/scans/pending");
 export const getScheduledScans = () =>
   api.get<{ schedules: Record<string, unknown>[]; total: number }>("/api/scans/scheduled");
+export const createScheduledScan = (body: unknown) =>
+  api.post<{ schedule: Record<string, unknown> }>("/api/scans/scheduled", body);
+export const updateScheduledScan = (id: string, body: unknown) =>
+  api.put<{ schedule: Record<string, unknown> }>(`/api/scans/scheduled/${id}`, body);
+export const deleteScheduledScan = (id: string) =>
+  api.delete<{ status: string }>(`/api/scans/scheduled/${id}`);
 
 // Targets
 export const getTargets = () =>
@@ -105,6 +111,17 @@ export const deleteTarget = (id: string) =>
 // Findings
 export const getFindings = (params?: string) =>
   api.get<{ findings: Record<string, unknown>[]; total: number }>(`/api/findings${params ? `?${params}` : ""}`);
+export const getFindingsGroupedByScan = (params?: string) =>
+  api.get<{
+    scan_groups: {
+      scan: { scan_id: string; target_name: string; status: string; created_at: string; completed_at: string | null; total_findings: number; agents_deployed: number };
+      findings: Record<string, unknown>[];
+    }[];
+    total: number;
+    total_scans: number;
+  }>(`/api/findings?group_by_scan=true${params ? `&${params}` : ""}`);
+export const getScanFindings = (scanId: string, params?: string) =>
+  api.get<{ scan_id: string; findings: Record<string, unknown>[]; total: number }>(`/api/scans/${scanId}/findings${params ? `?${params}` : ""}`);
 export const getFinding = (id: string) =>
   api.get<{ finding: Record<string, unknown> }>(`/api/findings/${id}`);
 export const updateFindingStatus = (id: string, status: string) =>

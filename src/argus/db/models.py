@@ -7,6 +7,8 @@ Tables:
 - scan_agents: Per-agent results within a scan
 - findings: Individual attack findings with full evidence
 - compound_paths: Correlated multi-agent attack paths
+- settings: Platform configuration key-value store
+- scheduled_scans: Recurring scan configurations
 """
 
 from __future__ import annotations
@@ -259,3 +261,60 @@ class DBCompoundPath(Base):
 
     # Relationship
     scan = relationship("DBScan", back_populates="compound_paths")
+
+
+class DBSetting(Base):
+    """Platform configuration key-value store.
+
+    Sections: scan, llm, notifications, integrations, cerberus.
+    Values are stored as JSON text.
+    """
+
+    __tablename__ = "settings"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    section = Column(String(50), nullable=False, index=True)  # scan, llm, notifications, integrations, cerberus
+    key = Column(String(200), nullable=False)
+    value = Column(Text, nullable=False, default="")  # JSON-encoded value
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+
+class DBScheduledScan(Base):
+    """Recurring scan configuration.
+
+    Defines automated scans that run on a cron-like schedule.
+    """
+
+    __tablename__ = "scheduled_scans"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    # Identity
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+
+    # Target
+    target_id = Column(String(36), ForeignKey("targets.id"), nullable=False)
+    target_name = Column(String(200), nullable=False)
+
+    # Schedule (cron-style)
+    cron_expression = Column(String(100), nullable=False)  # e.g. "0 2 * * 1" (Mon 2am)
+    timezone = Column(String(50), default="UTC")
+
+    # Scan config
+    scan_profile = Column(String(50), default="full")  # full, quick, stealth, phase5_only
+    non_destructive = Column(Boolean, default=True)
+    timeout_seconds = Column(Float, default=600.0)
+    agents_json = Column(Text, default="[]")  # JSON list of agent types to include (empty = all)
+
+    # State
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True)
+    last_run_status = Column(String(20), nullable=True)  # completed, failed, cancelled
+    run_count = Column(Integer, default=0)
+
+    # Relationship
+    target = relationship("DBTarget")

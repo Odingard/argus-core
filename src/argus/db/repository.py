@@ -23,6 +23,8 @@ from argus.db.models import (
     DBFinding,
     DBScan,
     DBScanAgent,
+    DBScheduledScan,
+    DBSetting,
     DBTarget,
 )
 from argus.db.session import get_session
@@ -476,6 +478,141 @@ class ScanRepository:
         if status:
             query = query.filter(DBScan.status == status)
         return query.count()
+
+    def close(self) -> None:
+        self._session.close()
+
+
+# ---------------------------------------------------------------------------
+# Settings CRUD
+# ---------------------------------------------------------------------------
+
+
+class SettingsRepository:
+    """CRUD operations for platform settings (key-value store by section)."""
+
+    def __init__(self, session: Session | None = None) -> None:
+        self._session = session or get_session()
+
+    def get_all(self) -> dict[str, dict[str, Any]]:
+        """Return all settings grouped by section."""
+        rows = self._session.query(DBSetting).all()
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if row.section not in result:
+                result[row.section] = {}
+            result[row.section][row.key] = json.loads(row.value)
+        return result
+
+    def get_section(self, section: str) -> dict[str, Any]:
+        """Return all settings for a given section."""
+        rows = self._session.query(DBSetting).filter(DBSetting.section == section).all()
+        return {row.key: json.loads(row.value) for row in rows}
+
+    def put_section(self, section: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Upsert all key-value pairs for a section."""
+        for key, value in data.items():
+            existing = self._session.query(DBSetting).filter(DBSetting.section == section, DBSetting.key == key).first()
+            json_value = json.dumps(value, default=str)
+            if existing:
+                existing.value = json_value
+                existing.updated_at = datetime.now(UTC)
+            else:
+                self._session.add(DBSetting(section=section, key=key, value=json_value))
+        self._session.commit()
+        return self.get_section(section)
+
+    def delete_section(self, section: str) -> bool:
+        """Delete all settings for a section."""
+        count = self._session.query(DBSetting).filter(DBSetting.section == section).delete()
+        self._session.commit()
+        return count > 0
+
+    def close(self) -> None:
+        self._session.close()
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Scan CRUD
+# ---------------------------------------------------------------------------
+
+
+class ScheduledScanRepository:
+    """CRUD operations for scheduled (recurring) scans."""
+
+    def __init__(self, session: Session | None = None) -> None:
+        self._session = session or get_session()
+
+    def create(
+        self,
+        name: str,
+        target_id: str,
+        target_name: str,
+        cron_expression: str,
+        description: str = "",
+        timezone: str = "UTC",
+        scan_profile: str = "full",
+        non_destructive: bool = True,
+        timeout_seconds: float = 600.0,
+        agents: list[str] | None = None,
+    ) -> dict[str, Any]:
+        schedule = DBScheduledScan(
+            name=name,
+            description=description,
+            target_id=target_id,
+            target_name=target_name,
+            cron_expression=cron_expression,
+            timezone=timezone,
+            scan_profile=scan_profile,
+            non_destructive=non_destructive,
+            timeout_seconds=timeout_seconds,
+            agents_json=json.dumps(agents or []),
+        )
+        self._session.add(schedule)
+        self._session.commit()
+        logger.info("Created scheduled scan: %s (%s)", name, schedule.id)
+        return self._serialize(schedule)
+
+    def list_all(self, active_only: bool = True) -> list[dict[str, Any]]:
+        query = self._session.query(DBScheduledScan)
+        if active_only:
+            query = query.filter(DBScheduledScan.is_active.is_(True))
+        query = query.order_by(desc(DBScheduledScan.created_at))
+        return [self._serialize(s) for s in query.all()]
+
+    def get(self, schedule_id: str) -> dict[str, Any] | None:
+        schedule = self._session.get(DBScheduledScan, schedule_id)
+        if schedule is None:
+            return None
+        return self._serialize(schedule)
+
+    def update(self, schedule_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        schedule = self._session.get(DBScheduledScan, schedule_id)
+        if schedule is None:
+            return None
+        for key, value in kwargs.items():
+            if key == "agents":
+                schedule.agents_json = json.dumps(value)
+            elif hasattr(schedule, key):
+                setattr(schedule, key, value)
+        schedule.updated_at = datetime.now(UTC)
+        self._session.commit()
+        return self._serialize(schedule)
+
+    def delete(self, schedule_id: str) -> bool:
+        """Soft-delete a scheduled scan."""
+        schedule = self._session.get(DBScheduledScan, schedule_id)
+        if schedule is None:
+            return False
+        schedule.is_active = False
+        schedule.updated_at = datetime.now(UTC)
+        self._session.commit()
+        return True
+
+    def _serialize(self, schedule: DBScheduledScan) -> dict[str, Any]:
+        d = _to_dict(schedule)
+        d["agents"] = json.loads(d.pop("agents_json", "[]"))
+        return d
 
     def close(self) -> None:
         self._session.close()

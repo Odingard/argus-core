@@ -74,7 +74,7 @@ def _finding_cw(finding: dict[str, Any]) -> float:
     vs = finding.get("verdict_score") or {}
     if isinstance(vs, dict):
         cw = vs.get("consequence_weight")
-        if isinstance(cw, (int, float)):
+        if isinstance(cw, int | float):
             return float(cw)
     return 0.0
 
@@ -128,13 +128,15 @@ def score_scenario(
         text = _finding_text(finding)
         if _matches_indicators(text, indicators):
             cw = _finding_cw(finding)
-            matched.append({
-                "title": finding.get("title", ""),
-                "agent_type": finding.get("agent_type", ""),
-                "technique": finding.get("technique", ""),
-                "cw": cw,
-                "validated": _is_validated(finding),
-            })
+            matched.append(
+                {
+                    "title": finding.get("title", ""),
+                    "agent_type": finding.get("agent_type", ""),
+                    "technique": finding.get("technique", ""),
+                    "cw": cw,
+                    "validated": _is_validated(finding),
+                }
+            )
 
     result["matched_findings"] = matched[:20]
 
@@ -157,7 +159,8 @@ def score_scenario(
         compound_paths = compound_paths or []
         for cp in compound_paths:
             cp_text = " ".join(
-                str(v) for v in [
+                str(v)
+                for v in [
                     cp.get("title", ""),
                     cp.get("description", ""),
                     cp.get("compound_impact", ""),
@@ -232,9 +235,7 @@ def render_text_report(report: dict[str, Any]) -> str:
         else:
             for tier_name, tier_data in result["tiers"].items():
                 status = "PASS" if tier_data["earned"] == tier_data["max"] else "FAIL"
-                lines.append(
-                    f"    {tier_name.title():12s}: {tier_data['earned']}/{tier_data['max']}  [{status}]"
-                )
+                lines.append(f"    {tier_name.title():12s}: {tier_data['earned']}/{tier_data['max']}  [{status}]")
             matched = result.get("matched_count", 0)
             above_val = result.get("above_validation_cw", 0)
             if matched:

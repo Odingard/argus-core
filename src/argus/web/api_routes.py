@@ -13,7 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
-from argus.db.repository import APIKeyRepository, ScanRepository, TargetRepository, _to_dict
+from argus.db.repository import (
+    APIKeyRepository,
+    ScanRepository,
+    ScheduledScanRepository,
+    SettingsRepository,
+    TargetRepository,
+    _to_dict,
+)
 from argus.db.session import init_db
 from argus.web.auth import AuthContext, require_role
 
@@ -108,6 +115,31 @@ class FindingStatusUpdate(BaseModel):
 class APIKeyCreate(BaseModel):
     name: str = Field(..., max_length=200)
     role: str = Field(default="viewer", pattern="^(admin|operator|viewer)$")
+
+
+class ScheduledScanCreate(BaseModel):
+    name: str = Field(..., max_length=200)
+    target_id: str
+    target_name: str = ""
+    cron_expression: str = Field(..., max_length=100)
+    description: str = ""
+    timezone: str = "UTC"
+    scan_profile: str = Field(default="full", pattern="^(full|quick|stealth|phase5_only)$")
+    non_destructive: bool = True
+    timeout_seconds: float = 600.0
+    agents: list[str] = []
+
+
+class ScheduledScanUpdate(BaseModel):
+    name: str | None = None
+    cron_expression: str | None = None
+    description: str | None = None
+    timezone: str | None = None
+    scan_profile: str | None = None
+    non_destructive: bool | None = None
+    timeout_seconds: float | None = None
+    agents: list[str] | None = None
+    is_active: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -223,12 +255,79 @@ def create_production_router() -> APIRouter:
 
     @router.get("/scans/scheduled", dependencies=[Depends(require_role("read"))])
     async def scheduled_scans() -> dict[str, Any]:
-        """Return scheduled scan configurations.
+        """Return all active scheduled scan configurations."""
+        repo = ScheduledScanRepository()
+        try:
+            schedules = repo.list_all()
+            return {"schedules": schedules, "total": len(schedules)}
+        finally:
+            repo.close()
 
-        Currently returns an empty list — scheduled scans are a future feature
-        that will be stored in a dedicated table.
-        """
-        return {"schedules": [], "total": 0}
+    @router.post("/scans/scheduled", dependencies=[Depends(require_role("write"))])
+    async def create_scheduled_scan(body: ScheduledScanCreate) -> dict[str, Any]:
+        """Create a new scheduled scan configuration."""
+        # Validate that the target exists
+        target_repo = TargetRepository()
+        try:
+            target = target_repo.get(body.target_id)
+            if target is None:
+                raise HTTPException(status_code=404, detail="Target not found")
+            target_name = body.target_name or target["name"]
+        finally:
+            target_repo.close()
+
+        repo = ScheduledScanRepository()
+        try:
+            schedule = repo.create(
+                name=body.name,
+                target_id=body.target_id,
+                target_name=target_name,
+                cron_expression=body.cron_expression,
+                description=body.description,
+                timezone=body.timezone,
+                scan_profile=body.scan_profile,
+                non_destructive=body.non_destructive,
+                timeout_seconds=body.timeout_seconds,
+                agents=body.agents,
+            )
+            return {"schedule": schedule}
+        finally:
+            repo.close()
+
+    @router.get("/scans/scheduled/{schedule_id}", dependencies=[Depends(require_role("read"))])
+    async def get_scheduled_scan(schedule_id: str) -> dict[str, Any]:
+        repo = ScheduledScanRepository()
+        try:
+            schedule = repo.get(schedule_id)
+            if schedule is None:
+                raise HTTPException(status_code=404, detail="Scheduled scan not found")
+            return {"schedule": schedule}
+        finally:
+            repo.close()
+
+    @router.put("/scans/scheduled/{schedule_id}", dependencies=[Depends(require_role("write"))])
+    async def update_scheduled_scan(schedule_id: str, body: ScheduledScanUpdate) -> dict[str, Any]:
+        repo = ScheduledScanRepository()
+        try:
+            updates = body.model_dump(exclude_unset=True)
+            if not updates:
+                raise HTTPException(status_code=400, detail="No fields to update")
+            schedule = repo.update(schedule_id, **updates)
+            if schedule is None:
+                raise HTTPException(status_code=404, detail="Scheduled scan not found")
+            return {"schedule": schedule}
+        finally:
+            repo.close()
+
+    @router.delete("/scans/scheduled/{schedule_id}", dependencies=[Depends(require_role("write"))])
+    async def delete_scheduled_scan(schedule_id: str) -> dict[str, str]:
+        repo = ScheduledScanRepository()
+        try:
+            if not repo.delete(schedule_id):
+                raise HTTPException(status_code=404, detail="Scheduled scan not found")
+            return {"status": "deleted", "schedule_id": schedule_id}
+        finally:
+            repo.close()
 
     @router.get("/scans/{scan_id}", dependencies=[Depends(require_role("read"))])
     async def get_scan(scan_id: str) -> dict[str, Any]:
@@ -596,19 +695,27 @@ def create_production_router() -> APIRouter:
         severity: str | None = Query(default=None),
         status: str | None = Query(default=None),
         agent_type: str | None = Query(default=None),
+        scan_id: str | None = Query(default=None),
         search: str | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
+        group_by_scan: bool = Query(default=False),
     ) -> dict[str, Any]:
-        """List findings across all scans with optional filters."""
+        """List findings across all scans with optional filters.
+
+        When group_by_scan=true, returns findings grouped by scan_id with
+        scan metadata (target_name, date, status) for each group.
+        """
         import json as json_mod
 
-        from argus.db.models import DBFinding
+        from argus.db.models import DBFinding, DBScan
         from argus.db.session import get_session
 
         session = get_session()
         try:
             query = session.query(DBFinding)
+            if scan_id:
+                query = query.filter(DBFinding.scan_id == scan_id)
             if severity:
                 query = query.filter(DBFinding.severity == severity)
             if status:
@@ -628,6 +735,38 @@ def create_production_router() -> APIRouter:
                 d["remediation"] = json_mod.loads(d.pop("remediation_json") or "null")
                 d["verdict_score"] = json_mod.loads(d.pop("verdict_score_json") or "null")
                 findings.append(d)
+
+            if group_by_scan:
+                # Group findings by scan_id and include scan metadata
+                scan_ids = list({f["scan_id"] for f in findings if f.get("scan_id")})
+                scan_map: dict[str, dict[str, Any]] = {}
+                if scan_ids:
+                    scans = session.query(DBScan).filter(DBScan.id.in_(scan_ids)).all()
+                    for s in scans:
+                        scan_map[s.id] = {
+                            "scan_id": s.id,
+                            "target_name": s.target_name,
+                            "status": s.status,
+                            "created_at": str(s.created_at),
+                            "completed_at": str(s.completed_at) if s.completed_at else None,
+                            "total_findings": s.total_findings,
+                            "agents_deployed": s.agents_deployed,
+                        }
+                grouped: dict[str, dict[str, Any]] = {}
+                for f in findings:
+                    sid = f.get("scan_id", "unknown")
+                    if sid not in grouped:
+                        grouped[sid] = {
+                            "scan": scan_map.get(sid, {"scan_id": sid}),
+                            "findings": [],
+                        }
+                    grouped[sid]["findings"].append(f)
+                return {
+                    "scan_groups": list(grouped.values()),
+                    "total": total,
+                    "total_scans": len(grouped),
+                }
+
             return {"findings": findings, "total": total}
         finally:
             session.close()
@@ -1122,5 +1261,44 @@ def create_production_router() -> APIRouter:
             ]
 
         return {"patterns": patterns, "total": len(patterns)}
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    @router.get("/settings", dependencies=[Depends(require_role("read"))])
+    async def get_settings() -> dict[str, Any]:
+        """Return all platform settings grouped by section."""
+        repo = SettingsRepository()
+        try:
+            settings = repo.get_all()
+            return {"settings": settings}
+        finally:
+            repo.close()
+
+    @router.get("/settings/{section}", dependencies=[Depends(require_role("read"))])
+    async def get_settings_section(section: str) -> dict[str, Any]:
+        repo = SettingsRepository()
+        try:
+            data = repo.get_section(section)
+            return {"section": section, "settings": data}
+        finally:
+            repo.close()
+
+    @router.put("/settings/{section}", dependencies=[Depends(require_role("admin"))])
+    async def save_settings_section(section: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Upsert settings for a section (admin only)."""
+        valid_sections = {"scan", "llm", "notifications", "integrations", "cerberus", "general"}
+        if section not in valid_sections:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid section '{section}'. Must be one of: {', '.join(sorted(valid_sections))}",
+            )
+        repo = SettingsRepository()
+        try:
+            updated = repo.put_section(section, body)
+            return {"status": "saved", "section": section, "settings": updated}
+        finally:
+            repo.close()
 
     return router

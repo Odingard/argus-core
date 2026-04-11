@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Key,
   Sliders,
@@ -9,6 +9,10 @@ import {
   FileDown,
   Save,
   Loader2,
+  Plus,
+  Trash2,
+  AlertTriangle,
+  CheckCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getSettings, saveSettings } from "@/api/client";
+import { getSettings, saveSettings, getApiKeys, createApiKey, revokeApiKey } from "@/api/client";
 
 type SettingsTab = "api" | "scan" | "llm" | "integrations" | "notifications" | "users" | "cerberus";
 
@@ -42,22 +46,19 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        const data = await getSettings();
-        if (!cancelled) setSettings(data.settings || {});
-      } catch {
-        // Settings endpoint may not exist yet — use defaults
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const reload = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await getSettings();
+      setSettings(data.settings || {});
+    } catch {
+      // Settings endpoint may return empty on first use
+    } finally {
+      setLoading(false);
     }
-    load();
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => { reload(); }, [reload]);
 
   if (loading) {
     return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
@@ -68,7 +69,7 @@ export function SettingsPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
         <p className="text-sm text-muted-foreground">
-          Platform configuration — API keys, scan profiles, LLM backend, integrations
+          Platform configuration — all data loaded from database
         </p>
       </div>
 
@@ -94,93 +95,237 @@ export function SettingsPage() {
           })}
         </div>
 
-        {/* Tab content */}
+        {/* Tab content — all wired to real backend API */}
         <div className="flex-1">
           {tab === "api" && <APIKeysSettings />}
-          {tab === "scan" && <ScanProfileSettings />}
-          {tab === "llm" && <LLMSettings />}
-          {tab === "integrations" && <IntegrationSettings />}
-          {tab === "notifications" && <NotificationSettings />}
+          {tab === "scan" && <ScanProfileSettings settings={(settings.scan ?? {}) as Record<string, unknown>} />}
+          {tab === "llm" && <LLMSettings settings={(settings.llm ?? {}) as Record<string, unknown>} />}
+          {tab === "integrations" && <IntegrationSettings settings={(settings.integrations ?? {}) as Record<string, unknown>} />}
+          {tab === "notifications" && <NotificationSettings settings={(settings.notifications ?? {}) as Record<string, unknown>} />}
           {tab === "users" && <UserSettings />}
-          {tab === "cerberus" && <CerberusExportSettings />}
+          {tab === "cerberus" && <CerberusExportSettings settings={(settings.cerberus ?? {}) as Record<string, unknown>} />}
         </div>
       </div>
     </div>
   );
 }
 
+/* ── API Keys — loaded from /api/auth/keys (real DB) ── */
 function APIKeysSettings() {
+  const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyRole, setNewKeyRole] = useState("read");
+  const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const loadKeys = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await getApiKeys();
+      setKeys(data.api_keys || []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load API keys");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const handleCreate = async () => {
+    if (!newKeyName.trim()) return;
+    try {
+      setSaving(true);
+      await createApiKey({ name: newKeyName.trim(), role: newKeyRole });
+      setNewKeyName("");
+      setSuccessMsg("API key created");
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadKeys();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create key");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRevoke = async (keyId: string) => {
+    try {
+      await revokeApiKey(keyId);
+      setSuccessMsg("API key revoked");
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadKeys();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke key");
+    }
+  };
+
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>API Keys</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div>
-          <Label>Primary API Key</Label>
-          <div className="mt-1 flex gap-2">
-            <Input value="argus-key-****-****-****-7f3a" readOnly className="font-mono" />
-            <Button variant="outline" size="sm">Regenerate</Button>
+        {error && (
+          <div className="flex items-center gap-2 rounded-md bg-red-500/10 p-3 text-sm text-red-400">
+            <AlertTriangle className="h-4 w-4" />{error}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Used for API access and CLI authentication</p>
-        </div>
-        <div>
-          <Label>Read-Only Key</Label>
-          <div className="mt-1 flex gap-2">
-            <Input value="argus-ro-****-****-****-2e1b" readOnly className="font-mono" />
-            <Button variant="outline" size="sm">Regenerate</Button>
+        )}
+        {successMsg && (
+          <div className="flex items-center gap-2 rounded-md bg-green-500/10 p-3 text-sm text-green-400">
+            <CheckCircle className="h-4 w-4" />{successMsg}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Viewer access — can read findings but cannot run scans</p>
+        )}
+
+        {keys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No API keys found. Create one below.</p>
+        ) : (
+          keys.map((k) => (
+            <div key={String(k.id)} className="flex items-center justify-between rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">{String(k.name || "Unnamed")}</p>
+                <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                  {String(k.key_prefix || String(k.id || "").slice(0, 12))}...
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{String(k.role || "read")}</Badge>
+                <Badge variant="outline" className="text-xs">{k.is_active ? "Active" : "Revoked"}</Badge>
+                {k.is_active && (
+                  <Button variant="outline" size="sm" className="gap-1 text-red-400" onClick={() => handleRevoke(String(k.id))}>
+                    <Trash2 className="h-3 w-3" />Revoke
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+
+        <div className="border-t border-border pt-4">
+          <p className="mb-2 text-sm font-medium">Create New API Key</p>
+          <div className="flex gap-2">
+            <Input placeholder="Key name" value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} className="flex-1" />
+            <Select value={newKeyRole} onValueChange={setNewKeyRole}>
+              <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="read">Read</SelectItem>
+                <SelectItem value="write">Write</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={handleCreate} disabled={saving || !newKeyName.trim()} className="gap-1">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Create
+            </Button>
+          </div>
         </div>
-        <Button className="gap-2"><Save className="h-4 w-4" />Save Changes</Button>
       </CardContent>
     </Card>
   );
 }
 
-function ScanProfileSettings() {
+/* ── Generic settings section hook — loads/saves from /api/settings/{section} ── */
+function useSettingsSection(section: string, initial: Record<string, unknown>) {
+  const [values, setValues] = useState<Record<string, unknown>>(initial);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { setValues(initial); }, [initial]);
+
+  const update = (key: string, val: unknown) => {
+    setValues((prev) => ({ ...prev, [key]: val }));
+    setSaved(false);
+  };
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      await saveSettings(section, values);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return { values, update, save, saving, saved, error };
+}
+
+/* ── Scan Profiles — loaded from /api/settings/scan ── */
+function ScanProfileSettings({ settings }: { settings: Record<string, unknown> }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("scan", settings);
+  const profiles = (values.profiles ?? []) as { name: string; agents: number; desc: string }[];
+
+  const addProfile = () => {
+    update("profiles", [...profiles, { name: "New Profile", agents: 12, desc: "Custom scan profile" }]);
+  };
+
+  const removeProfile = (idx: number) => {
+    update("profiles", profiles.filter((_, i) => i !== idx));
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Scan Profiles</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>Scan Profiles</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {[
-          { name: "Full Scan", agents: 12, desc: "All 12 agents, all techniques" },
-          { name: "Quick Scan", agents: 5, desc: "Top 5 priority agents, limited techniques" },
-          { name: "Stealth Scan", agents: 12, desc: "All agents, rate-limited to avoid detection" },
-          { name: "Phase 5 Only", agents: 2, desc: "Persona Hijacking + Memory Boundary Collapse" },
-        ].map((p) => (
-          <div key={p.name} className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <p className="text-sm font-medium">{p.name}</p>
-              <p className="text-xs text-muted-foreground">{p.desc}</p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        {profiles.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No scan profiles configured. Add one below.</p>
+        ) : (
+          profiles.map((p, idx) => (
+            <div key={idx} className="flex items-center justify-between rounded-md border border-border p-3">
+              <div className="flex-1 space-y-1">
+                <Input value={p.name} onChange={(e) => {
+                  const updated = [...profiles];
+                  updated[idx] = { ...updated[idx], name: e.target.value };
+                  update("profiles", updated);
+                }} className="h-7 border-none bg-transparent p-0 text-sm font-medium" />
+                <Input value={p.desc} onChange={(e) => {
+                  const updated = [...profiles];
+                  updated[idx] = { ...updated[idx], desc: e.target.value };
+                  update("profiles", updated);
+                }} className="h-6 border-none bg-transparent p-0 text-xs text-muted-foreground" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{p.agents} agents</Badge>
+                <Button variant="outline" size="sm" className="text-red-400" onClick={() => removeProfile(idx)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{p.agents} agents</Badge>
-              <Button variant="outline" size="sm">Edit</Button>
-            </div>
-          </div>
-        ))}
-        <Button variant="outline" className="w-full">+ Create Scan Profile</Button>
+          ))
+        )}
+        <Button variant="outline" className="w-full gap-1" onClick={addProfile}><Plus className="h-3 w-3" />Add Scan Profile</Button>
+        <Button onClick={save} disabled={saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved" : "Save Changes"}
+        </Button>
       </CardContent>
     </Card>
   );
 }
 
-function LLMSettings() {
+/* ── LLM Config — loaded from /api/settings/llm ── */
+function LLMSettings({ settings }: { settings: Record<string, unknown> }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("llm", settings);
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>LLM Configuration</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>LLM Configuration</CardTitle></CardHeader>
       <CardContent className="space-y-4">
+        {error && <p className="text-sm text-red-400">{error}</p>}
         <div>
           <Label>LLM Provider</Label>
-          <Select defaultValue="openai">
-            <SelectTrigger className="mt-1">
-              <SelectValue />
-            </SelectTrigger>
+          <Select value={String(values.provider || "")} onValueChange={(v) => update("provider", v)}>
+            <SelectTrigger className="mt-1"><SelectValue placeholder="Select provider" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="openai">OpenAI</SelectItem>
               <SelectItem value="anthropic">Anthropic</SelectItem>
@@ -191,135 +336,192 @@ function LLMSettings() {
         </div>
         <div>
           <Label>Model</Label>
-          <Input defaultValue="gpt-4" className="mt-1" />
+          <Input value={String(values.model || "")} onChange={(e) => update("model", e.target.value)} className="mt-1" placeholder="e.g. gpt-4" />
         </div>
         <div>
           <Label>API Key</Label>
-          <Input type="password" defaultValue="sk-..." className="mt-1 font-mono" />
+          <Input type="password" value={String(values.api_key || "")} onChange={(e) => update("api_key", e.target.value)} className="mt-1 font-mono" placeholder="Enter API key" />
         </div>
         <div>
           <Label>Temperature</Label>
-          <Input type="number" defaultValue="0.7" step="0.1" min="0" max="2" className="mt-1 w-24" />
+          <Input type="number" value={String(values.temperature ?? "")} onChange={(e) => update("temperature", parseFloat(e.target.value) || 0)} step="0.1" min="0" max="2" className="mt-1 w-24" placeholder="0.7" />
         </div>
         <div>
           <Label>Max Tokens</Label>
-          <Input type="number" defaultValue="4096" className="mt-1 w-32" />
+          <Input type="number" value={String(values.max_tokens ?? "")} onChange={(e) => update("max_tokens", parseInt(e.target.value) || 0)} className="mt-1 w-32" placeholder="4096" />
         </div>
-        <Button className="gap-2"><Save className="h-4 w-4" />Save Changes</Button>
+        <Button onClick={save} disabled={saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved" : "Save Changes"}
+        </Button>
       </CardContent>
     </Card>
   );
 }
 
-function IntegrationSettings() {
+/* ── Integrations — loaded from /api/settings/integrations ── */
+function IntegrationSettings({ settings }: { settings: Record<string, unknown> }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("integrations", settings);
+  const integrations = (values.items ?? []) as { name: string; desc: string; enabled: boolean; config: string }[];
+
+  const toggleIntegration = (idx: number) => {
+    const updated = [...integrations];
+    updated[idx] = { ...updated[idx], enabled: !updated[idx].enabled };
+    update("items", updated);
+  };
+
+  const updateConfig = (idx: number, config: string) => {
+    const updated = [...integrations];
+    updated[idx] = { ...updated[idx], config };
+    update("items", updated);
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Integrations</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>Integrations</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {[
-          { name: "Slack", desc: "Send alerts to Slack channels", connected: true },
-          { name: "Jira", desc: "Auto-create tickets for findings", connected: false },
-          { name: "PagerDuty", desc: "Alert on-call for CRITICAL findings", connected: false },
-          { name: "Webhook", desc: "Send findings to custom endpoints", connected: true },
-          { name: "SIEM Export", desc: "Forward to Splunk / Sentinel / etc.", connected: false },
-        ].map((i) => (
-          <div key={i.name} className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <p className="text-sm font-medium">{i.name}</p>
-              <p className="text-xs text-muted-foreground">{i.desc}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {i.connected ? (
-                <Badge className="bg-green-600">Connected</Badge>
-              ) : (
-                <Badge variant="secondary">Not Connected</Badge>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        {integrations.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No integrations configured. Save to initialize defaults.</p>
+        ) : (
+          integrations.map((i, idx) => (
+            <div key={idx} className="rounded-md border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">{i.name}</p>
+                  <p className="text-xs text-muted-foreground">{i.desc}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {i.enabled ? (
+                    <Badge className="bg-green-600">Enabled</Badge>
+                  ) : (
+                    <Badge variant="secondary">Disabled</Badge>
+                  )}
+                  <Switch checked={i.enabled} onCheckedChange={() => toggleIntegration(idx)} />
+                </div>
+              </div>
+              {i.enabled && (
+                <Input value={i.config || ""} onChange={(e) => updateConfig(idx, e.target.value)} placeholder="Configuration (webhook URL, API key, etc.)" className="text-xs" />
               )}
-              <Button variant="outline" size="sm">Configure</Button>
             </div>
-          </div>
-        ))}
+          ))
+        )}
+        <Button onClick={save} disabled={saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved" : "Save Changes"}
+        </Button>
       </CardContent>
     </Card>
   );
 }
 
-function NotificationSettings() {
+/* ── Notifications — loaded from /api/settings/notifications ── */
+function NotificationSettings({ settings }: { settings: Record<string, unknown> }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("notifications", settings);
+
+  const NOTIFICATION_TYPES = [
+    { key: "critical_finding", label: "New CRITICAL finding", desc: "Alert immediately on critical severity" },
+    { key: "scan_complete", label: "Scan complete", desc: "Notify when a scan finishes" },
+    { key: "target_regression", label: "Target regression", desc: "Alert when a previously clean target fails" },
+    { key: "persona_drift", label: "Persona drift detected", desc: "Alert when persona baseline deviation exceeds threshold" },
+    { key: "memory_leak", label: "Memory boundary leak", desc: "Alert when canary tokens cross boundaries" },
+    { key: "compound_chain", label: "New compound chain", desc: "Alert when correlation engine discovers a new attack path" },
+    { key: "scheduled_fail", label: "Scheduled scan failed", desc: "Alert when a recurring scan fails to run" },
+  ];
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Notification Preferences</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>Notification Preferences</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {[
-          { label: "New CRITICAL finding", desc: "Alert immediately on critical severity", default: true },
-          { label: "Scan complete", desc: "Notify when a scan finishes", default: true },
-          { label: "Target regression", desc: "Alert when a previously clean target fails", default: true },
-          { label: "Persona drift detected", desc: "Alert when persona baseline deviation exceeds threshold", default: true },
-          { label: "Memory boundary leak", desc: "Alert when canary tokens cross boundaries", default: true },
-          { label: "New compound chain", desc: "Alert when correlation engine discovers a new attack path", default: false },
-          { label: "Scheduled scan failed", desc: "Alert when a recurring scan fails to run", default: true },
-        ].map((n) => (
-          <div key={n.label} className="flex items-center justify-between">
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        {NOTIFICATION_TYPES.map((n) => (
+          <div key={n.key} className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">{n.label}</p>
               <p className="text-xs text-muted-foreground">{n.desc}</p>
             </div>
-            <Switch defaultChecked={n.default} />
+            <Switch
+              checked={values[n.key] !== false}
+              onCheckedChange={(checked) => update(n.key, checked)}
+            />
           </div>
         ))}
-        <Button className="gap-2"><Save className="h-4 w-4" />Save Preferences</Button>
+        <Button onClick={save} disabled={saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved" : "Save Preferences"}
+        </Button>
       </CardContent>
     </Card>
   );
 }
 
+/* ── Users — loaded from /api/auth/keys (same API keys = users with roles) ── */
 function UserSettings() {
+  const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        setLoading(true);
+        const data = await getApiKeys();
+        setKeys(data.api_keys || []);
+      } catch {
+        // may fail if not admin
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>User Management</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>User Management</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {[
-          { name: "admin@odingard.com", role: "Operator", lastActive: "2h ago" },
-          { name: "analyst@client.com", role: "Viewer", lastActive: "1d ago" },
-        ].map((u) => (
-          <div key={u.name} className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <p className="text-sm font-medium">{u.name}</p>
-              <p className="text-xs text-muted-foreground">Last active: {u.lastActive}</p>
+        <p className="text-xs text-muted-foreground">Users are identified by their API keys. Each key has a role that determines access level.</p>
+        {keys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No API keys / users found.</p>
+        ) : (
+          keys.map((k) => (
+            <div key={String(k.id)} className="flex items-center justify-between rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">{String(k.name || "Unnamed Key")}</p>
+                <p className="text-xs text-muted-foreground">
+                  Created: {k.created_at ? new Date(String(k.created_at)).toLocaleString() : "N/A"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{String(k.role || "read")}</Badge>
+                <Badge variant="outline" className="text-xs">{k.is_active ? "Active" : "Revoked"}</Badge>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{u.role}</Badge>
-              <Button variant="outline" size="sm">Edit</Button>
-            </div>
-          </div>
-        ))}
-        <Button variant="outline" className="w-full">+ Invite User</Button>
+          ))
+        )}
+        <p className="text-xs text-muted-foreground">To add users, create API keys in the API Keys tab.</p>
       </CardContent>
     </Card>
   );
 }
 
-function CerberusExportSettings() {
+/* ── CERBERUS Export — loaded from /api/settings/cerberus ── */
+function CerberusExportSettings({ settings }: { settings: Record<string, unknown> }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("cerberus", settings);
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>CERBERUS Export</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>CERBERUS Export</CardTitle></CardHeader>
       <CardContent className="space-y-4">
+        {error && <p className="text-sm text-red-400">{error}</p>}
         <p className="text-sm text-muted-foreground">
-          Export ARGUS findings as CERBERUS detection rules for deployment in the defensive product.
-          Rules are auto-generated from validated findings with compound attack chain context.
+          Export ARGUS findings as CERBERUS detection rules. Settings are saved to the database.
         </p>
         <div>
           <Label>Export Format</Label>
-          <Select defaultValue="cerberus-native">
-            <SelectTrigger className="mt-1">
-              <SelectValue />
-            </SelectTrigger>
+          <Select value={String(values.format || "")} onValueChange={(v) => update("format", v)}>
+            <SelectTrigger className="mt-1"><SelectValue placeholder="Select format" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="cerberus-native">CERBERUS Native</SelectItem>
               <SelectItem value="sigma">Sigma Rules</SelectItem>
@@ -330,10 +532,8 @@ function CerberusExportSettings() {
         </div>
         <div>
           <Label>Include Findings</Label>
-          <Select defaultValue="validated-only">
-            <SelectTrigger className="mt-1">
-              <SelectValue />
-            </SelectTrigger>
+          <Select value={String(values.include_findings || "")} onValueChange={(v) => update("include_findings", v)}>
+            <SelectTrigger className="mt-1"><SelectValue placeholder="Select filter" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="validated-only">Validated Only</SelectItem>
               <SelectItem value="high-confidence">High Confidence (VW &gt; 0.7)</SelectItem>
@@ -342,14 +542,18 @@ function CerberusExportSettings() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <Switch defaultChecked />
+          <Switch checked={values.include_chain_context !== false} onCheckedChange={(v) => update("include_chain_context", v)} />
           <Label>Include compound chain context</Label>
         </div>
         <div className="flex items-center gap-2">
-          <Switch defaultChecked />
+          <Switch checked={values.include_alec_refs !== false} onCheckedChange={(v) => update("include_alec_refs", v)} />
           <Label>Include ALEC evidence references</Label>
         </div>
-        <Button className="gap-2"><FileDown className="h-4 w-4" />Export Rules</Button>
+        <Button onClick={save} disabled={saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved" : "Save Settings"}
+        </Button>
+        <Button variant="outline" className="gap-2"><FileDown className="h-4 w-4" />Export Rules</Button>
       </CardContent>
     </Card>
   );
