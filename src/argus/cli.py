@@ -875,5 +875,155 @@ def test_target_status(port: int) -> None:
         console.print("[dim]Start it with: argus test-target start[/]")
 
 
+# ---------------------------------------------------------------------------
+# Arena commands
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def arena() -> None:
+    """Manage the ARGUS Arena — 12 intentionally vulnerable AI targets."""
+
+
+@arena.command(name="start")
+@click.option("--only", type=str, default=None, help="Comma-separated scenario numbers (e.g. 1,3,5)")
+def arena_start(only: str | None) -> None:
+    """Start Arena targets locally (all 12 or a subset).
+
+    Each scenario runs in its own thread on ports 9001-9012.
+    Then point ARGUS at them:
+
+        ARGUS_WEB_ALLOW_PRIVATE=1 argus arena scan --all
+    """
+    from arena.runner import start_all
+
+    only_list = [int(x.strip()) for x in only.split(",")] if only else None
+
+    console.print(BANNER, style="bold red")
+    console.print("\n[bold yellow]ARGUS Arena[/] — 12 Intentionally Vulnerable AI Targets")
+    console.print("[bold red]WARNING: DO NOT expose to the internet.[/]\n")
+
+    threads = start_all(only=only_list)
+    count = len(threads)
+    console.print(f"\n[green]{count} Arena scenario(s) running.[/]  Press Ctrl+C to stop.\n")
+
+    import time
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Shutting down Arena...[/]")
+
+
+@arena.command(name="status")
+def arena_status() -> None:
+    """Check which Arena scenarios are running."""
+    import httpx
+
+    from arena import SCENARIO_PORTS
+
+    table = Table(title="ARGUS Arena — Scenario Status")
+    table.add_column("Scenario", style="cyan")
+    table.add_column("Port", justify="right")
+    table.add_column("Status", justify="center")
+    table.add_column("Service", style="dim")
+
+    running = 0
+    for scenario_id, port in SCENARIO_PORTS.items():
+        try:
+            resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                table.add_row(scenario_id, str(port), "[green]UP[/]", data.get("name", ""))
+                running += 1
+            else:
+                table.add_row(scenario_id, str(port), "[yellow]ERR[/]", f"HTTP {resp.status_code}")
+        except Exception:
+            table.add_row(scenario_id, str(port), "[red]DOWN[/]", "")
+
+    console.print(table)
+    console.print(f"\n[bold]{running}/{len(SCENARIO_PORTS)} scenarios running[/]")
+
+
+@arena.command(name="scan")
+@click.option("--all", "scan_all", is_flag=True, help="Scan all 12 Arena scenarios")
+@click.option("--only", type=str, default=None, help="Comma-separated scenario numbers")
+@click.option("--timeout", default=300, help="Scan timeout per scenario in seconds")
+def arena_scan(scan_all: bool, only: str | None, timeout: int) -> None:
+    """Run ARGUS against Arena targets.
+
+    Requires Arena scenarios to be running (via `argus arena start`).
+    """
+    import httpx
+
+    from arena import SCENARIO_PORTS
+
+    if not scan_all and not only:
+        console.print("[red]Specify --all or --only <numbers>[/]")
+        return
+
+    only_list = [int(x.strip()) for x in only.split(",")] if only else None
+
+    console.print(BANNER, style="bold red")
+    console.print("\n[bold]ARGUS Arena Scan[/]\n")
+
+    orchestrator = _create_orchestrator()
+
+    for scenario_id, port in SCENARIO_PORTS.items():
+        num = int(scenario_id.split("-")[1])
+        if only_list and num not in only_list:
+            continue
+
+        console.print(f"\n[bold cyan]Scanning {scenario_id}[/] on port {port}...")
+
+        # Check if scenario is running
+        try:
+            resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0)
+            if resp.status_code != 200:
+                console.print(f"  [yellow]Skipping — not healthy (HTTP {resp.status_code})[/]")
+                continue
+        except Exception:
+            console.print("  [yellow]Skipping — not running[/]")
+            continue
+
+        target = TargetConfig(
+            name=scenario_id,
+            mcp_server_urls=[],
+            agent_endpoint=f"http://127.0.0.1:{port}/chat",
+        )
+
+        try:
+            result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout))
+            findings_count = len(result.validated_findings)
+            console.print(f"  [green]Done — {findings_count} findings[/]")
+        except Exception as exc:
+            console.print(f"  [red]Error: {exc}[/]")
+
+    console.print("\n[bold green]Arena scan complete.[/]")
+
+
+@arena.command(name="score")
+def arena_score() -> None:
+    """Show Arena scoring — how well ARGUS performed against each scenario."""
+    from arena.scoring import EXPECTED_VULNS, ScenarioScore, print_scorecard
+
+    # For now, show expected vulns per scenario as a reference
+    scores = []
+    for sid, vulns in EXPECTED_VULNS.items():
+        scores.append(
+            ScenarioScore(
+                scenario_id=sid,
+                scenario_name=sid.replace("arena-", "").replace("-", " ").title(),
+                agent_domain="",
+                canary_flag="",
+                expected_vulns=vulns,
+            )
+        )
+
+    console.print(print_scorecard(scores))
+    console.print("[dim]Run 'argus arena scan --all' first to populate actual scores.[/]")
+
+
 if __name__ == "__main__":
     main()

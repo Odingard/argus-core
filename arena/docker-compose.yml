@@ -1,0 +1,168 @@
+# ARGUS Arena — 12 Intentionally Vulnerable AI Agent Targets
+#
+# Usage:
+#   cd arena/
+#   docker compose up -d            # start all 12 targets
+#   docker compose up -d arena-01   # start just one
+#
+# Then point ARGUS at them:
+#   ARGUS_WEB_ALLOW_PRIVATE=1 argus scan arena --agent-endpoint http://localhost:9001/chat
+#
+# WARNING: These are intentionally vulnerable. DO NOT expose to the internet.
+
+services:
+  arena-01-prompt-leak:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9001:9001"
+    command: ["python", "-c", "from arena.scenarios.arena_01_prompt_leak import PromptLeakScenario; PromptLeakScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-02-tool-poison:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9002:9002"
+    command: ["python", "-c", "from arena.scenarios.arena_02_tool_poison import ToolPoisonScenario; ToolPoisonScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-03-supply-chain:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9003:9003"
+    command: ["python", "-c", "from arena.scenarios.arena_03_supply_chain import SupplyChainScenario; SupplyChainScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-04-memory-poison:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9004:9004"
+    command: ["python", "-c", "from arena.scenarios.arena_04_memory_poison import MemoryPoisonScenario; MemoryPoisonScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-05-identity-spoof:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9005:9005"
+    command: ["python", "-c", "from arena.scenarios.arena_05_identity_spoof import IdentitySpoofScenario; IdentitySpoofScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-06-context-window:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9006:9006"
+    command: ["python", "-c", "from arena.scenarios.arena_06_context_window import ContextWindowScenario; ContextWindowScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9006/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-07-exfil-relay:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9007:9007"
+    command: ["python", "-c", "from arena.scenarios.arena_07_exfil_relay import ExfilRelayScenario; ExfilRelayScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9007/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-08-priv-escalation:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9008:9008"
+    command: ["python", "-c", "from arena.scenarios.arena_08_priv_escalation import PrivEscalationScenario; PrivEscalationScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9008/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-09-race-condition:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9009:9009"
+    command: ["python", "-c", "from arena.scenarios.arena_09_race_condition import RaceConditionScenario; RaceConditionScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9009/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-10-model-extraction:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9010:9010"
+    command: ["python", "-c", "from arena.scenarios.arena_10_model_extraction import ModelExtractionScenario; ModelExtractionScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-11-persona-hijack:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9011:9011"
+    command: ["python", "-c", "from arena.scenarios.arena_11_persona_hijack import PersonaHijackScenario; PersonaHijackScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9011/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  arena-12-memory-boundary:
+    build:
+      context: ..
+      dockerfile: arena/Dockerfile
+    ports:
+      - "9012:9012"
+    command: ["python", "-c", "from arena.scenarios.arena_12_memory_boundary import MemoryBoundaryScenario; MemoryBoundaryScenario().run()"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9012/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
