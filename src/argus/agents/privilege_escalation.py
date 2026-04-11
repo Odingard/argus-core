@@ -715,7 +715,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         ]
 
         for indicator_name, pattern in cloud_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, text):
                 cloud_indicators.append(indicator_name)
 
         # Also check standard markers

@@ -669,11 +669,10 @@ class PromptInjectionHunter(LLMAttackAgent):
         injections — where the output of one successful injection is fed
         back into the agent as input, amplifying the attack across turns.
 
-        Requires LLM augmentation. Skipped cleanly in deterministic mode.
+        Uses static injection chains — no LLM required.
         """
         if not self.llm.available:
-            logger.info("Phase 6: LLM not configured, skipping recursive injection")
-            return
+            logger.info("Phase 6: LLM not configured, using static recursive chains only")
 
         logger.info("Phase 6: Recursive prompt injection chains")
 

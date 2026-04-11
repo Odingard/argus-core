@@ -169,6 +169,24 @@ def create_beacon_router(auth_dependency: Any = None) -> APIRouter:
     router = APIRouter(tags=["beacon"])
     store = BeaconStore.get()
 
+    # ---- Authenticated endpoint FIRST (more specific path) ----
+    # Must be registered before the catch-all /beacon/{scan_id}/{canary}
+    # route, otherwise Starlette's registration-order resolution would
+    # match /beacon/hits/{scan_id} as scan_id="hits", canary="..."
+    # and bypass authentication entirely.
+    _hits_deps: list[Any] = [Depends(auth_dependency)] if auth_dependency else []
+
+    @router.get("/beacon/hits/{scan_id}", dependencies=_hits_deps)
+    async def list_beacon_hits(scan_id: str) -> dict[str, Any]:
+        """List all beacon hits for a scan (requires authentication)."""
+        hits = store.all_hits(scan_id)
+        return {
+            "scan_id": scan_id,
+            "total_hits": len(hits),
+            "hits": [h.to_dict() for h in hits],
+        }
+
+    # ---- Unauthenticated catch-all callback endpoint ----
     @router.api_route(
         "/beacon/{scan_id}/{canary}",
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
@@ -205,18 +223,5 @@ def create_beacon_router(auth_dependency: Any = None) -> APIRouter:
 
         # Return a plausible response so the target agent doesn't error out
         return {"status": "ok", "message": "Beacon received"}
-
-    # Build dependency list for the authenticated endpoint
-    _hits_deps: list[Any] = [Depends(auth_dependency)] if auth_dependency else []
-
-    @router.get("/beacon/hits/{scan_id}", dependencies=_hits_deps)
-    async def list_beacon_hits(scan_id: str) -> dict[str, Any]:
-        """List all beacon hits for a scan (requires authentication)."""
-        hits = store.all_hits(scan_id)
-        return {
-            "scan_id": scan_id,
-            "total_hits": len(hits),
-            "hits": [h.to_dict() for h in hits],
-        }
 
     return router
