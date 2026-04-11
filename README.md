@@ -276,7 +276,7 @@ export ARGUS_LICENSE_KEY=your-key-here
 ## Community
 
 - **GitHub Issues** — Bug reports, feature requests
-- **Discord** — Join the community (link coming soon)
+- **[Discord](https://discord.gg/pyyuurcS)** — Join the ARGUS community
 
 ---
 
