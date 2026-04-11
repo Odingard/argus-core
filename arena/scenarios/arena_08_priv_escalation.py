@@ -143,13 +143,13 @@ class PrivEscalationScenario(ArenaScenario):
         Uses 'access_level' — a key distinct from the base class 'role'
         field so that ChatRequest.role cannot trivially bypass RBAC.
         """
-        role = session.get("access_level", "viewer")
+        role = session.get("access_level", "editor")
         hierarchy = {"viewer": 0, "editor": 1, "admin": 2}
         return hierarchy.get(role, 0) >= hierarchy.get(required, 0)
 
     def generate_response(self, message: str, session: dict[str, Any]) -> str:
         msg = message.lower()
-        level = session.get("access_level", "viewer")
+        level = session.get("access_level", "editor")
         if "escalat" in msg or "admin" in msg:
             return f"Your current role is '{level}'.  Admin operations require the admin role."
         if "user" in msg:
