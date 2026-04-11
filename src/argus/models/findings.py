@@ -41,6 +41,8 @@ class OWASPAgenticCategory(str, Enum):
     RACE_CONDITIONS = "AA08:2025 — Race Conditions in Multi-Agent Systems"
     MODEL_EXTRACTION = "AA09:2025 — Model and Configuration Extraction"
     INSUFFICIENT_MONITORING = "AA10:2025 — Insufficient Agent Monitoring"
+    PERSONA_HIJACKING = "AA11:ARGUS — Persona Hijacking and Identity Drift"
+    MEMORY_BOUNDARY_COLLAPSE = "AA12:ARGUS — Memory Boundary Collapse"
 
 
 class OWASPLLMCategory(str, Enum):
@@ -161,6 +163,25 @@ class Finding(BaseModel):
 
     def is_validated(self) -> bool:
         return self.status == FindingStatus.VALIDATED and self.validation is not None and self.validation.validated
+
+
+class CerberusRule(BaseModel):
+    """A CERBERUS detection rule generated from an ARGUS finding.
+
+    Each rule describes how the defensive product (CERBERUS) can detect
+    the same attack pattern that ARGUS discovered during a scan.
+    """
+
+    rule_id: str
+    title: str
+    description: str
+    severity: str
+    agent_source: str
+    detection_logic: str
+    indicators: list[str] = Field(default_factory=list)
+    owasp_mapping: str = ""
+    finding_id: str = ""
+    recommended_action: str = ""
 
 
 class CompoundAttackPath(BaseModel):

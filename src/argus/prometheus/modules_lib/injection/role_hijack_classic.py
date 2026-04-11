@@ -117,8 +117,7 @@ class RoleHijackClassic(InjectionModule):
                 response=response_text[:5000],
                 direct_evidence=True,
                 proof=(
-                    f"Canary token '{CANARY_TOKEN}' present in target response. "
-                    f"Response excerpt: {response_text[:300]}"
+                    f"Canary token '{CANARY_TOKEN}' present in target response. Response excerpt: {response_text[:300]}"
                 ),
                 target_surface="user_input",
             )

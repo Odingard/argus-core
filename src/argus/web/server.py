@@ -50,8 +50,10 @@ from argus.agents import (
     ContextWindowAgent,
     CrossAgentExfilAgent,
     IdentitySpoofAgent,
+    MemoryBoundaryCollapseAgent,
     MemoryPoisoningAgent,
     ModelExtractionAgent,
+    PersonaHijackingAgent,
     PrivilegeEscalationAgent,
     PromptInjectionHunter,
     RaceConditionAgent,
@@ -90,11 +92,13 @@ MAX_RECENT_FINDINGS_RETURNED = 50
 ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 # Blocked SSRF host patterns when ALLOW_PRIVATE_RANGES is False
-SSRF_BLOCKED_EXACT_HOSTS = frozenset({
-    "localhost",
-    "metadata.google.internal",
-    "metadata",
-})
+SSRF_BLOCKED_EXACT_HOSTS = frozenset(
+    {
+        "localhost",
+        "metadata.google.internal",
+        "metadata",
+    }
+)
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -139,6 +143,7 @@ def _validate_url_for_scan(url: str) -> None:
     # validate the resolved address at request time, since DNS responses
     # can change between this check and the actual connect.
     import socket as _socket
+
     try:
         infos = _socket.getaddrinfo(host, None)
     except OSError as exc:
@@ -347,7 +352,12 @@ def create_app() -> FastAPI:
     # Same-origin only by default — explicitly tighten CORS.
     # Operators who need cross-origin can set ARGUS_WEB_ALLOW_ORIGIN.
     extra_origin = os.environ.get("ARGUS_WEB_ALLOW_ORIGIN", "").strip()
-    allow_origins = ["http://127.0.0.1:8765", "http://localhost:8765"]
+    allow_origins = [
+        "http://127.0.0.1:8765",
+        "http://localhost:8765",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
     if extra_origin:
         allow_origins.append(extra_origin)
 
@@ -355,7 +365,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allow_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -373,6 +383,17 @@ def create_app() -> FastAPI:
             "ARGUS_WEB_ALLOW_PRIVATE=1 — ScanRequest URLs to private/loopback ranges WILL be accepted. "
             "Only use this for local benchmark testing."
         )
+
+    # Initialize database and mount production API routes
+    try:
+        from argus.db.session import init_db
+        from argus.web.api_routes import create_production_router
+
+        init_db()
+        app.include_router(create_production_router())
+        logger.info("Production API routes mounted (targets, scans, auth, reports)")
+    except Exception as exc:
+        logger.warning("Could not initialize production routes: %s", type(exc).__name__)
 
     # Mount static assets
     if STATIC_DIR.exists():
@@ -404,6 +425,7 @@ def create_app() -> FastAPI:
             # operator-supplied ARGUS_WEB_TOKEN containing quotes would
             # otherwise break out of the attribute and enable stored XSS.
             from html import escape as _html_escape
+
             safe_token = _html_escape(WEB_TOKEN, quote=True)
             token_meta = f'<meta name="argus-token" content="{safe_token}">'
             html = html.replace("</head>", f"  {token_meta}\n</head>", 1)
@@ -442,6 +464,13 @@ def create_app() -> FastAPI:
         state.status = "running"
         state.started_at = time.monotonic()
 
+        # Generate scan_id eagerly so it's available in the response
+        # before the background task starts executing.
+        import uuid
+
+        scan_id = str(uuid.uuid4())
+        state.scan_id = scan_id
+
         target = TargetConfig(
             name=request.target_name,
             mcp_server_urls=request.mcp_urls,
@@ -451,16 +480,23 @@ def create_app() -> FastAPI:
         )
 
         orchestrator = Orchestrator()
+        # Phase 1
         orchestrator.register_agent(AgentType.PROMPT_INJECTION, PromptInjectionHunter)
         orchestrator.register_agent(AgentType.TOOL_POISONING, ToolPoisoningAgent)
         orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
+        # Phase 2
         orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
         orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+        # Phase 3
         orchestrator.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
         orchestrator.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
         orchestrator.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
         orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+        # Phase 4
         orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
+        # Phase 5
+        orchestrator.register_agent(AgentType.PERSONA_HIJACKING, PersonaHijackingAgent)
+        orchestrator.register_agent(AgentType.MEMORY_BOUNDARY_COLLAPSE, MemoryBoundaryCollapseAgent)
         state.orchestrator = orchestrator
 
         # Initialize agent state cards
@@ -535,12 +571,31 @@ def create_app() -> FastAPI:
             try:
                 result = await orchestrator.run_scan(
                     target=target,
+                    scan_id=scan_id,
                     timeout=request.timeout,
                     demo_pace_seconds=request.demo_pace_seconds,
                 )
                 state.last_result = result
                 state.status = "completed"
                 state.completed_at = time.monotonic()
+
+                # Persist scan results to database
+                try:
+                    from argus.db.scan_persistence import ScanPersistence
+
+                    persistence = ScanPersistence()
+                    try:
+                        persistence.save(
+                            scan_result=result,
+                            target_name=request.target_name,
+                            initiated_by="web_dashboard",
+                        )
+                    finally:
+                        persistence.close()
+                    logger.info("Scan %s persisted to database", result.scan_id[:8])
+                except Exception as persist_exc:
+                    logger.warning("Failed to persist scan: %s", type(persist_exc).__name__)
+
                 await state.broadcast("complete", state.snapshot())
             except Exception as exc:
                 logger.exception("Scan failed: %s", type(exc).__name__)

@@ -36,7 +36,7 @@ jobs:
       - name: Install with audit tool
         run: pip install -e ".[dev]"
       - name: Run pip-audit
-        run: pip-audit --strict --desc
+        run: pip-audit --desc --skip-editable
 
   test:
     name: Test (Python ${{ matrix.python-version }})

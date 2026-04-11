@@ -21,6 +21,8 @@ class AgentType(str, Enum):
     RACE_CONDITION = "race_condition"
     SUPPLY_CHAIN = "supply_chain"
     MODEL_EXTRACTION = "model_extraction"
+    PERSONA_HIJACKING = "persona_hijacking"
+    MEMORY_BOUNDARY_COLLAPSE = "memory_boundary_collapse"
     CORRELATION = "correlation"
 
 

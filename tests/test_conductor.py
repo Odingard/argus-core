@@ -38,12 +38,14 @@ def make_fake_server() -> tuple[httpx.MockTransport, dict[str, Any]]:
             body = json.loads(request.content) if request.content else {}
         except json.JSONDecodeError:
             body = {}
-        state["history"].append({
-            "path": request.url.path,
-            "method": request.method,
-            "body": body,
-            "headers": dict(request.headers),
-        })
+        state["history"].append(
+            {
+                "path": request.url.path,
+                "method": request.method,
+                "body": body,
+                "headers": dict(request.headers),
+            }
+        )
         path = request.url.path
         if path == "/chat":
             return httpx.Response(200, json={"echoed": body, "path": path, "turn_count": state["turns"]})
@@ -52,11 +54,14 @@ def make_fake_server() -> tuple[httpx.MockTransport, dict[str, Any]]:
             return httpx.Response(200, json={"status": "stored", "count": len(state["memory"])})
         if path == "/execute":
             if request.headers.get("X-Agent-Role") == "orchestrator":
-                return httpx.Response(200, json={
-                    "secret": "TEST-CANARY-99",
-                    "trust_granted": True,
-                    "elevated": True,
-                })
+                return httpx.Response(
+                    200,
+                    json={
+                        "secret": "TEST-CANARY-99",
+                        "trust_granted": True,
+                        "elevated": True,
+                    },
+                )
             return httpx.Response(403, json={"trust_granted": False})
         return httpx.Response(404, json={"error": "not found"})
 
@@ -65,12 +70,8 @@ def make_fake_server() -> tuple[httpx.MockTransport, dict[str, Any]]:
 
 async def test_session_executes_single_turn():
     transport, _state = make_fake_server()
-    async with ConversationSession(
-        base_url="http://target.test", transport=transport
-    ) as session:
-        result = await session.turn(
-            TurnSpec(name="hello", path="/chat", body={"message": "hi"})
-        )
+    async with ConversationSession(base_url="http://target.test", transport=transport) as session:
+        result = await session.turn(TurnSpec(name="hello", path="/chat", body={"message": "hi"}))
 
     assert result.ok()
     assert result.status_code == 200
@@ -89,9 +90,7 @@ async def test_session_runs_multi_turn_sequence():
             TurnSpec(name="trigger", path="/chat", body={"message": "retrieve"}),
         ],
     )
-    async with ConversationSession(
-        base_url="http://target.test", transport=transport
-    ) as session:
+    async with ConversationSession(base_url="http://target.test", transport=transport) as session:
         results = await sequence.run(session)
 
     assert len(results) == 2
@@ -129,13 +128,12 @@ async def test_session_per_turn_headers_merge_with_defaults():
 
 async def test_session_records_failure_without_raising():
     """A connection error must populate result.error, not crash."""
+
     def failing_handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
     transport = httpx.MockTransport(failing_handler)
-    async with ConversationSession(
-        base_url="http://dead.test", transport=transport
-    ) as session:
+    async with ConversationSession(base_url="http://dead.test", transport=transport) as session:
         result = await session.turn(TurnSpec(name="dead", path="/x", body={}))
 
     assert not result.ok()
@@ -147,13 +145,9 @@ async def test_session_records_failure_without_raising():
 async def test_session_rejects_cross_host_path():
     """SSRF guard: a path pointing at a different host must raise."""
     transport, _ = make_fake_server()
-    async with ConversationSession(
-        base_url="http://127.0.0.1:8003", transport=transport
-    ) as session:
+    async with ConversationSession(base_url="http://127.0.0.1:8003", transport=transport) as session:
         with pytest.raises(ValueError, match="allowed host"):
-            await session.turn(
-                TurnSpec(name="ssrf", path="http://evil.example/x", body={})
-            )
+            await session.turn(TurnSpec(name="ssrf", path="http://evil.example/x", body={}))
 
 
 def test_session_rejects_non_http_base():
@@ -187,12 +181,8 @@ def test_response_matcher_finds_privilege_indicators():
 
 async def test_turn_result_field_walks_nested_json():
     transport, _ = make_fake_server()
-    async with ConversationSession(
-        base_url="http://target.test", transport=transport
-    ) as session:
-        result = await session.turn(
-            TurnSpec(name="nested", path="/chat", body={"message": "x"})
-        )
+    async with ConversationSession(base_url="http://target.test", transport=transport) as session:
+        result = await session.turn(TurnSpec(name="nested", path="/chat", body={"message": "x"}))
 
     assert result.field("echoed", "message") == "x"
     assert result.field("nonexistent", "key") is None

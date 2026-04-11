@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 class ModuleCategory(str, Enum):
     """Top-level module categories — mirrors Metasploit module types."""
 
-    INJECTION = "injection"        # Exploits — attempts to compromise the target
-    PAYLOAD = "payload"            # What runs inside the model after injection
-    AUXILIARY = "auxiliary"        # Reconnaissance without exploitation
-    POST = "post"                  # Post-exploitation — pivot, persist, escalate
+    INJECTION = "injection"  # Exploits — attempts to compromise the target
+    PAYLOAD = "payload"  # What runs inside the model after injection
+    AUXILIARY = "auxiliary"  # Reconnaissance without exploitation
+    POST = "post"  # Post-exploitation — pivot, persist, escalate
 
 
 # ============================================================
@@ -52,18 +52,18 @@ class ModuleMetadata:
     reads these to filter, search, and rank modules.
     """
 
-    id: str                           # unique identifier (e.g. "prom-pi-001")
-    name: str                         # human-readable name
-    category: ModuleCategory          # top-level category
-    subcategory: str                  # e.g. "direct", "indirect.tool_description"
-    description: str                  # one-paragraph description
-    severity: str                     # critical|high|medium|low
-    technique: str                    # the attack technique identifier
-    target_surfaces: list[str]        # which surfaces this targets
-    requires_llm: bool = False        # does this module need an LLM key?
-    requires_session: bool = False    # does this require multi-turn session (CONDUCTOR)?
+    id: str  # unique identifier (e.g. "prom-pi-001")
+    name: str  # human-readable name
+    category: ModuleCategory  # top-level category
+    subcategory: str  # e.g. "direct", "indirect.tool_description"
+    description: str  # one-paragraph description
+    severity: str  # critical|high|medium|low
+    technique: str  # the attack technique identifier
+    target_surfaces: list[str]  # which surfaces this targets
+    requires_llm: bool = False  # does this module need an LLM key?
+    requires_session: bool = False  # does this require multi-turn session (CONDUCTOR)?
     owasp_agentic: str | None = None  # OWASP Agentic AI category
-    owasp_llm: str | None = None      # OWASP LLM Top 10 category
+    owasp_llm: str | None = None  # OWASP LLM Top 10 category
     references: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     author: str = "ARGUS"
@@ -85,16 +85,16 @@ class ModuleResult:
     """
 
     module_id: str
-    success: bool                            # did the attack succeed?
-    title: str                               # short title for the finding
-    description: str                         # what happened
-    severity: str = "medium"                 # critical|high|medium|low
-    technique: str = ""                      # technique identifier
-    target_surface: str = ""                 # which surface was hit
-    payload: str | None = None               # the actual payload sent
-    response: str | None = None              # the response observed
-    direct_evidence: bool = False            # was a canary observed / direct fact?
-    proof_of_exploitation: str | None = None # proof string for VERDICT WEIGHT
+    success: bool  # did the attack succeed?
+    title: str  # short title for the finding
+    description: str  # what happened
+    severity: str = "medium"  # critical|high|medium|low
+    technique: str = ""  # technique identifier
+    target_surface: str = ""  # which surface was hit
+    payload: str | None = None  # the actual payload sent
+    response: str | None = None  # the response observed
+    direct_evidence: bool = False  # was a canary observed / direct fact?
+    proof_of_exploitation: str | None = None  # proof string for VERDICT WEIGHT
     owasp_agentic: str | None = None
     owasp_llm: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

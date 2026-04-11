@@ -266,8 +266,7 @@ class IdentitySpoofAgent(LLMAttackAgent):
                 agent_type=self.agent_type.value,
                 technique="identity_spoof",
                 description=(
-                    f"Spoofed call to {path} with header(s) "
-                    f"{list(spoof_headers.keys())} claiming orchestrator identity"
+                    f"Spoofed call to {path} with header(s) {list(spoof_headers.keys())} claiming orchestrator identity"
                 ),
                 input_payload=command,
                 output_observed=spoofed_result.response_text[:2000],
@@ -284,10 +283,7 @@ class IdentitySpoofAgent(LLMAttackAgent):
             ),
             ReproductionStep(
                 step_number=2,
-                action=(
-                    f"POST {path} headers={spoof_headers} "
-                    f"body={{command:'{command}', agent_role:'orchestrator'}}"
-                ),
+                action=(f"POST {path} headers={spoof_headers} body={{command:'{command}', agent_role:'orchestrator'}}"),
                 expected_result="Endpoint should verify identity cryptographically",
                 actual_result=spoofed_result.response_text[:500],
             ),

@@ -132,20 +132,14 @@ class ConversationSession:
         if path.startswith(("http://", "https://")):
             parsed = urlparse(path)
             if parsed.netloc != self._allowed_host:
-                raise ValueError(
-                    f"ConversationSession path host {parsed.netloc} != "
-                    f"allowed host {self._allowed_host}"
-                )
+                raise ValueError(f"ConversationSession path host {parsed.netloc} != allowed host {self._allowed_host}")
             return path
         # Relative path — join against base, then verify the result hasn't
         # been redirected to a different host through urljoin oddities.
         resolved = urljoin(self.base_url, path.lstrip("/"))
         resolved_host = urlparse(resolved).netloc
         if resolved_host != self._allowed_host:
-            raise ValueError(
-                f"ConversationSession resolved host {resolved_host} != "
-                f"allowed host {self._allowed_host}"
-            )
+            raise ValueError(f"ConversationSession resolved host {resolved_host} != allowed host {self._allowed_host}")
         return resolved
 
     async def turn(self, spec: TurnSpec) -> TurnResult:
