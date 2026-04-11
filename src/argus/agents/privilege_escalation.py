@@ -274,9 +274,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
         # Step 1: enumerate the tool catalog
         try:
-            catalog_result = await session.turn(
-                TurnSpec(name="catalog", method="GET", path=catalog_path)
-            )
+            catalog_result = await session.turn(TurnSpec(name="catalog", method="GET", path=catalog_path))
         except ValueError:
             return
         if not catalog_result.ok() or catalog_result.response_json is None:
@@ -297,7 +295,9 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
         logger.debug(
             "PrivilegeEscalation: enumerated %d tools at %s%s",
-            len(tool_names), session.base_url, catalog_path,
+            len(tool_names),
+            session.base_url,
+            catalog_path,
         )
 
         # Step 2: chain through every tool, propagating discovered handles.
@@ -385,9 +385,19 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
         # Keys we treat as handles to propagate forward
         handle_keys = {
-            "token", "session_id", "session", "user_id", "id",
-            "request_id", "transaction_id", "handle", "session_token",
-            "access_token", "refresh_token", "auth_token", "key",
+            "token",
+            "session_id",
+            "session",
+            "user_id",
+            "id",
+            "request_id",
+            "transaction_id",
+            "handle",
+            "session_token",
+            "access_token",
+            "refresh_token",
+            "auth_token",
+            "key",
         }
         for c in candidates:
             for k, v in c.items():
@@ -572,10 +582,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         winning_tool = evidence.get("tool_name", "unknown")
         severity = FindingSeverity.CRITICAL if markers else FindingSeverity.HIGH
 
-        title = (
-            f"Privilege escalation via tool-call chain "
-            f"({len(tool_names)} tools, leak at step {chain_step + 1})"
-        )
+        title = f"Privilege escalation via tool-call chain ({len(tool_names)} tools, leak at step {chain_step + 1})"
         description = (
             f"Enumerated the tool catalog at {catalog_path} and chained {len(tool_names)} "
             f"tool calls through {tool_call_path}. The chain reached privileged data at "
@@ -610,10 +617,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
                 step_number=2,
                 action=f"POST {tool_call_path} with each tool, propagating output handles",
                 expected_result="Each tool should enforce its own authorization",
-                actual_result=(
-                    results[chain_step].response_text[:500]
-                    if 0 <= chain_step < len(results) else ""
-                ),
+                actual_result=(results[chain_step].response_text[:500] if 0 <= chain_step < len(results) else ""),
             ),
         ]
 
@@ -632,10 +636,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
             attack_chain=attack_chain_steps[: chain_step + 1] or attack_chain_steps,
             reproduction_steps=repro,
             raw_request=str(tool_names[: chain_step + 1]),
-            raw_response=(
-                results[chain_step].response_text
-                if 0 <= chain_step < len(results) else ""
-            ),
+            raw_response=(results[chain_step].response_text if 0 <= chain_step < len(results) else ""),
             owasp_agentic=OWASPAgenticCategory.PRIVILEGE_ESCALATION,
             owasp_llm=OWASPLLMCategory.EXCESSIVE_AGENCY,
             direct_evidence=True,
