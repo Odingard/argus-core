@@ -138,19 +138,23 @@ class PrivEscalationScenario(ArenaScenario):
         conn.close()
 
     def _check_role(self, session: dict[str, Any], required: str) -> bool:
-        """Role hierarchy: admin > editor > viewer."""
-        role = session.get("role", "viewer")
+        """Role hierarchy: admin > editor > viewer.
+
+        Uses 'access_level' — a key distinct from the base class 'role'
+        field so that ChatRequest.role cannot trivially bypass RBAC.
+        """
+        role = session.get("access_level", "viewer")
         hierarchy = {"viewer": 0, "editor": 1, "admin": 2}
         return hierarchy.get(role, 0) >= hierarchy.get(required, 0)
 
     def generate_response(self, message: str, session: dict[str, Any]) -> str:
         msg = message.lower()
-        role = session.get("role", "viewer")
+        level = session.get("access_level", "viewer")
         if "escalat" in msg or "admin" in msg:
-            return f"Your current role is '{role}'.  Admin operations require the admin role."
+            return f"Your current role is '{level}'.  Admin operations require the admin role."
         if "user" in msg:
             return "I can look up users. Use list_users or get_user_profile."
-        return f"SecureOps Platform.  Your role: {role}.  How can I help?"
+        return f"SecureOps Platform.  Your role: {level}.  How can I help?"
 
     def execute_tool(self, tool_name: str, params: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
         if tool_name == "list_users":
@@ -191,9 +195,9 @@ class PrivEscalationScenario(ArenaScenario):
                     (value, session.get("user_id", "u-003")),
                 )
                 conn.commit()
-                # If role was changed, update session
+                # If role was changed, update session access level
                 if field == "role":
-                    session["role"] = value
+                    session["access_level"] = value
                 conn.close()
                 return {"status": "success", "field": field, "updated": True}
             except Exception as e:
