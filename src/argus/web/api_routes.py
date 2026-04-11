@@ -206,6 +206,26 @@ def create_production_router() -> APIRouter:
         finally:
             repo.close()
 
+    @router.get("/scans/pending", dependencies=[Depends(require_role("read"))])
+    async def pending_scans() -> dict[str, Any]:
+        """Return scans with status pending or running."""
+        repo = ScanRepository()
+        try:
+            pending = repo.list_scans(limit=50, status="pending")
+            running = repo.list_scans(limit=50, status="running")
+            return {"scans": pending + running, "total": len(pending) + len(running)}
+        finally:
+            repo.close()
+
+    @router.get("/scans/scheduled", dependencies=[Depends(require_role("read"))])
+    async def scheduled_scans() -> dict[str, Any]:
+        """Return scheduled scan configurations.
+
+        Currently returns an empty list — scheduled scans are a future feature
+        that will be stored in a dedicated table.
+        """
+        return {"schedules": [], "total": 0}
+
     @router.get("/scans/{scan_id}", dependencies=[Depends(require_role("read"))])
     async def get_scan(scan_id: str) -> dict[str, Any]:
         repo = ScanRepository()
@@ -1100,29 +1120,5 @@ def create_production_router() -> APIRouter:
             ]
 
         return {"patterns": patterns, "total": len(patterns)}
-
-    # ------------------------------------------------------------------
-    # Scheduled / pending scans
-    # ------------------------------------------------------------------
-
-    @router.get("/scans/pending", dependencies=[Depends(require_role("read"))])
-    async def pending_scans() -> dict[str, Any]:
-        """Return scans with status pending or running."""
-        repo = ScanRepository()
-        try:
-            pending = repo.list_scans(limit=50, status="pending")
-            running = repo.list_scans(limit=50, status="running")
-            return {"scans": pending + running, "total": len(pending) + len(running)}
-        finally:
-            repo.close()
-
-    @router.get("/scans/scheduled", dependencies=[Depends(require_role("read"))])
-    async def scheduled_scans() -> dict[str, Any]:
-        """Return scheduled scan configurations.
-
-        Currently returns an empty list — scheduled scans are a future feature
-        that will be stored in a dedicated table.
-        """
-        return {"schedules": [], "total": 0}
 
     return router

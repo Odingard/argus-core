@@ -75,7 +75,7 @@ export function PipelinesPage() {
   async function handleAdd() {
     if (!newName) return;
     try {
-      await createTarget({ name: newName, type: "pipeline", description: newDesc });
+      await createTarget({ name: newName, target_type: "pipeline", description: newDesc });
       setNewName(""); setNewDesc("");
       loadPipelines();
     } catch { /* ignore */ }

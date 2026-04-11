@@ -84,7 +84,7 @@ export function MCPServersPage() {
   async function handleAddServer() {
     if (!newName || !newUrl) return;
     try {
-      await createTarget({ name: newName, url: newUrl, type: "mcp_server" });
+      await createTarget({ name: newName, mcp_server_urls: [newUrl], target_type: "mcp_server" });
       setNewName("");
       setNewUrl("");
       loadServers();

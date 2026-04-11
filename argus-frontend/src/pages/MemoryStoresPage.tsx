@@ -76,7 +76,7 @@ export function MemoryStoresPage() {
   async function handleAdd() {
     if (!newName) return;
     try {
-      await createTarget({ name: newName, type: "memory_store", store_type: newType, url: newEndpoint });
+      await createTarget({ name: newName, target_type: "memory_store", agent_endpoint: newEndpoint, description: newType ? `Type: ${newType}` : "" });
       setNewName(""); setNewType(""); setNewEndpoint("");
       loadStores();
     } catch { /* ignore */ }

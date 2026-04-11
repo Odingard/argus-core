@@ -78,7 +78,7 @@ export function AIAgentsPage() {
   async function handleAdd() {
     if (!newName || !newEndpoint) return;
     try {
-      await createTarget({ name: newName, url: newEndpoint, type: "ai_agent", model: newModel });
+      await createTarget({ name: newName, agent_endpoint: newEndpoint, target_type: "ai_agent", description: newModel ? `Model: ${newModel}` : "" });
       setNewName(""); setNewEndpoint(""); setNewModel("");
       loadAgents();
     } catch { /* ignore */ }
