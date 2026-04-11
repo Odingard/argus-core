@@ -51,7 +51,7 @@ export function PipelinesPage() {
       setLoading(true);
       const data = await getTargets();
       const pipeTargets = (data.targets || []).filter(
-        (t: Record<string, unknown>) => String(t.type ?? "").toLowerCase().includes("pipeline")
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("pipeline")
       );
       setPipelines(
         pipeTargets.map((t: Record<string, unknown>) => ({

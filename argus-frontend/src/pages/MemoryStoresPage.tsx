@@ -50,7 +50,7 @@ export function MemoryStoresPage() {
       setLoading(true);
       const data = await getTargets();
       const memTargets = (data.targets || []).filter(
-        (t: Record<string, unknown>) => String(t.type ?? "").toLowerCase().includes("memory")
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("memory")
       );
       setStores(
         memTargets.map((t: Record<string, unknown>) => ({

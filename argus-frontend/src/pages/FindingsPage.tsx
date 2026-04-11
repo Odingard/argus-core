@@ -266,9 +266,9 @@ export function FindingsPage() {
                                 <ExternalLink className="h-3 w-3" />
                                 Full Details
                               </Button>
-                              <Button size="sm" variant="outline">Mark Triaged</Button>
-                              <Button size="sm" variant="outline">Mark Resolved</Button>
-                              <Button size="sm" variant="outline" className="text-muted-foreground">
+                              <Button size="sm" variant="outline" onClick={() => handleStatusChange(f.id, "triaged")}>Mark Triaged</Button>
+                              <Button size="sm" variant="outline" onClick={() => handleStatusChange(f.id, "resolved")}>Mark Resolved</Button>
+                              <Button size="sm" variant="outline" className="text-muted-foreground" onClick={() => handleStatusChange(f.id, "false_positive")}>
                                 False Positive
                               </Button>
                             </div>

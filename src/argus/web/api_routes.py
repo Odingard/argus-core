@@ -55,6 +55,7 @@ class TargetCreate(BaseModel):
     name: str = Field(..., max_length=200)
     description: str = ""
     environment: str = "staging"
+    target_type: str = "generic"  # mcp_server, ai_agent, pipeline, memory_store, generic
     mcp_server_urls: list[str] = []
     agent_endpoint: str | None = None
     non_destructive: bool = True
@@ -78,6 +79,7 @@ class TargetUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     environment: str | None = None
+    target_type: str | None = None
     mcp_server_urls: list[str] | None = None
     agent_endpoint: str | None = None
     non_destructive: bool | None = None
@@ -128,6 +130,7 @@ def create_production_router() -> APIRouter:
                 name=body.name,
                 description=body.description,
                 environment=body.environment,
+                target_type=body.target_type,
                 mcp_server_urls=body.mcp_server_urls,
                 agent_endpoint=body.agent_endpoint,
                 non_destructive=body.non_destructive,

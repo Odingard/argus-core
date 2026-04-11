@@ -51,7 +51,7 @@ export function AIAgentsPage() {
       setLoading(true);
       const data = await getTargets();
       const aiTargets = (data.targets || []).filter(
-        (t: Record<string, unknown>) => String(t.type ?? "").toLowerCase().includes("ai_agent")
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("ai_agent")
       );
       setAgents(
         aiTargets.map((t: Record<string, unknown>) => ({

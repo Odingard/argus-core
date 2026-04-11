@@ -59,7 +59,7 @@ export function MCPServersPage() {
       setLoading(true);
       const data = await getTargets();
       const mcpTargets = (data.targets || []).filter(
-        (t: Record<string, unknown>) => String(t.type ?? "").toLowerCase().includes("mcp")
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("mcp")
       );
       setServers(
         mcpTargets.map((t: Record<string, unknown>) => ({
@@ -143,17 +143,17 @@ export function MCPServersPage() {
             <div className="space-y-4 pt-4">
               <div>
                 <Label>Server Name</Label>
-                <Input placeholder="Production MCP Server" className="mt-1" />
+                <Input placeholder="Production MCP Server" className="mt-1" value={newName} onChange={(e) => setNewName(e.target.value)} />
               </div>
               <div>
                 <Label>Server URL</Label>
-                <Input placeholder="https://mcp.example.com:8443" className="mt-1" />
+                <Input placeholder="https://mcp.example.com:8443" className="mt-1" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
               </div>
               <div>
                 <Label>Auth Token (optional)</Label>
                 <Input type="password" placeholder="Bearer token" className="mt-1" />
               </div>
-              <Button className="w-full">Add Server</Button>
+              <Button className="w-full" onClick={handleAddServer}>Add Server</Button>
             </div>
           </DialogContent>
         </Dialog>
