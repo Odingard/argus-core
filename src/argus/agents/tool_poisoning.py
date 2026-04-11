@@ -990,6 +990,12 @@ class ToolPoisoningAgent(LLMAttackAgent):
                         raw_response=response,
                         owasp_agentic=OWASPAgenticCategory.TOOL_MISUSE,
                         owasp_llm=OWASPLLMCategory.INSECURE_PLUGIN,
+                        direct_evidence=True,
+                        proof_of_exploitation=(
+                            f"Infrastructure exfiltration ({scenario['technique']}): "
+                            f"model agreed to use infra tooling for data exfiltration. "
+                            f"Response: {response[:300]}"
+                        ),
                     )
                     await self.emit_finding(finding)
 
@@ -1138,6 +1144,12 @@ class ToolPoisoningAgent(LLMAttackAgent):
                         raw_response=response,
                         owasp_agentic=OWASPAgenticCategory.TOOL_MISUSE,
                         owasp_llm=OWASPLLMCategory.INSECURE_PLUGIN,
+                        direct_evidence=True,
+                        proof_of_exploitation=(
+                            f"Schema manipulation ({schema_test['technique']}): "
+                            f"model followed hidden instructions in tool schema. "
+                            f"Indicator '{schema_test['indicator']}' found in response: {response[:300]}"
+                        ),
                     )
                     await self.emit_finding(finding)
 
