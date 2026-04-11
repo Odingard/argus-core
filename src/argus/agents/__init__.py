@@ -41,6 +41,21 @@ from argus.agents.race_condition import RaceConditionAgent
 from argus.agents.supply_chain import SupplyChainAgent
 from argus.agents.tool_poisoning import ToolPoisoningAgent
 
+AGENT_REGISTRY: dict[str, type[LLMAttackAgent]] = {
+    "prompt_injection_hunter": PromptInjectionHunter,
+    "tool_poisoning": ToolPoisoningAgent,
+    "supply_chain": SupplyChainAgent,
+    "memory_poisoning": MemoryPoisoningAgent,
+    "identity_spoof": IdentitySpoofAgent,
+    "context_window": ContextWindowAgent,
+    "cross_agent_exfiltration": CrossAgentExfilAgent,
+    "privilege_escalation": PrivilegeEscalationAgent,
+    "race_condition": RaceConditionAgent,
+    "model_extraction": ModelExtractionAgent,
+    "persona_hijacking": PersonaHijackingAgent,
+    "memory_boundary_collapse": MemoryBoundaryCollapseAgent,
+}
+
 __all__ = [
     "LLMAttackAgent",
     "PromptInjectionHunter",
@@ -55,4 +70,5 @@ __all__ = [
     "ModelExtractionAgent",
     "PersonaHijackingAgent",
     "MemoryBoundaryCollapseAgent",
+    "AGENT_REGISTRY",
 ]

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Server,
   Plus,
@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Shield,
   Wrench,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,53 +30,95 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { getTargets, createTarget, deleteTarget } from "@/api/client";
 
 interface MCPServer {
   id: string;
   name: string;
   url: string;
-  status: "healthy" | "degraded" | "offline";
+  status: string;
   tools: number;
   lastScan: string;
   findings: { critical: number; high: number; medium: number; low: number };
   riskScore: number;
 }
 
-const MOCK_SERVERS: MCPServer[] = [
-  {
-    id: "mcp-001",
-    name: "Primary MCP Server",
-    url: "https://mcp.example.com:8443",
-    status: "healthy",
-    tools: 24,
-    lastScan: "2 hours ago",
-    findings: { critical: 0, high: 1, medium: 3, low: 2 },
-    riskScore: 32,
-  },
-  {
-    id: "mcp-002",
-    name: "Staging MCP Server",
-    url: "https://staging-mcp.example.com:8443",
-    status: "degraded",
-    tools: 18,
-    lastScan: "1 day ago",
-    findings: { critical: 2, high: 3, medium: 5, low: 1 },
-    riskScore: 78,
-  },
-  {
-    id: "mcp-003",
-    name: "Development MCP Server",
-    url: "http://localhost:9999",
-    status: "healthy",
-    tools: 12,
-    lastScan: "5 hours ago",
-    findings: { critical: 0, high: 0, medium: 2, low: 1 },
-    riskScore: 15,
-  },
-];
-
 export function MCPServersPage() {
-  const [servers] = useState<MCPServer[]>(MOCK_SERVERS);
+  const [servers, setServers] = useState<MCPServer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+
+  useEffect(() => {
+    loadServers();
+  }, []);
+
+  async function loadServers() {
+    try {
+      setLoading(true);
+      const data = await getTargets();
+      const mcpTargets = (data.targets || []).filter(
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("mcp")
+      );
+      setServers(
+        mcpTargets.map((t: Record<string, unknown>) => ({
+          id: String(t.id ?? ""),
+          name: String(t.name ?? ""),
+          url: String(t.url ?? t.endpoint ?? ""),
+          status: String(t.status ?? "healthy"),
+          tools: Number(t.tools ?? 0),
+          lastScan: String(t.last_scan ?? "Never"),
+          findings: { critical: 0, high: 0, medium: 0, low: 0 },
+          riskScore: Number(t.risk_score ?? 0),
+        }))
+      );
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAddServer() {
+    if (!newName || !newUrl) return;
+    try {
+      await createTarget({ name: newName, mcp_server_urls: [newUrl], target_type: "mcp_server" });
+      setNewName("");
+      setNewUrl("");
+      loadServers();
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteTarget(id);
+      loadServers();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => loadServers()}>Retry</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -100,17 +143,17 @@ export function MCPServersPage() {
             <div className="space-y-4 pt-4">
               <div>
                 <Label>Server Name</Label>
-                <Input placeholder="Production MCP Server" className="mt-1" />
+                <Input placeholder="Production MCP Server" className="mt-1" value={newName} onChange={(e) => setNewName(e.target.value)} />
               </div>
               <div>
                 <Label>Server URL</Label>
-                <Input placeholder="https://mcp.example.com:8443" className="mt-1" />
+                <Input placeholder="https://mcp.example.com:8443" className="mt-1" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
               </div>
               <div>
                 <Label>Auth Token (optional)</Label>
                 <Input type="password" placeholder="Bearer token" className="mt-1" />
               </div>
-              <Button className="w-full">Add Server</Button>
+              <Button className="w-full" onClick={handleAddServer}>Add Server</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -141,7 +184,7 @@ export function MCPServersPage() {
                     <DropdownMenuItem>Edit</DropdownMenuItem>
                     <DropdownMenuItem>Scan Now</DropdownMenuItem>
                     <DropdownMenuItem>View History</DropdownMenuItem>
-                    <DropdownMenuItem className="text-red-400">Remove</DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(server.id)}>Remove</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle,
   Download,
@@ -6,6 +6,8 @@ import {
   Filter,
   ArrowUpDown,
   Calendar,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,63 +21,76 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getScans } from "@/api/client";
 
-const MOCK_SCANS = [
-  {
-    id: "scan-a1b2c3",
-    target: "MCP Server Alpha",
-    date: "2026-04-10 14:30 UTC",
-    duration: "4m 23s",
-    agents: 12,
-    findings: { critical: 1, high: 3, medium: 5, low: 2 },
-    status: "completed",
-  },
-  {
-    id: "scan-d4e5f6",
-    target: "AI Agent Bravo",
-    date: "2026-04-09 02:00 UTC",
-    duration: "3m 11s",
-    agents: 12,
-    findings: { critical: 0, high: 2, medium: 4, low: 1 },
-    status: "completed",
-  },
-  {
-    id: "scan-g7h8i9",
-    target: "MCP Server Alpha",
-    date: "2026-04-08 02:00 UTC",
-    duration: "4m 45s",
-    agents: 12,
-    findings: { critical: 2, high: 4, medium: 6, low: 3 },
-    status: "completed",
-  },
-  {
-    id: "scan-j0k1l2",
-    target: "Pipeline Charlie",
-    date: "2026-04-07 22:00 UTC",
-    duration: "2m 58s",
-    agents: 5,
-    findings: { critical: 0, high: 1, medium: 3, low: 0 },
-    status: "completed",
-  },
-  {
-    id: "scan-m3n4o5",
-    target: "Memory Store Delta",
-    date: "2026-04-06 02:00 UTC",
-    duration: "5m 12s",
-    agents: 12,
-    findings: { critical: 3, high: 5, medium: 8, low: 4 },
-    status: "completed",
-  },
-];
+interface CompletedScan {
+  id: string;
+  target: string;
+  date: string;
+  duration: string;
+  agents: number;
+  totalFindings: number;
+  status: string;
+}
 
 export function CompletedScanPage() {
   const [search, setSearch] = useState("");
+  const [scans, setScans] = useState<CompletedScan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = MOCK_SCANS.filter(
-    (s) =>
-      s.target.toLowerCase().includes(search.toLowerCase()) ||
-      s.id.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const params = new URLSearchParams();
+        params.set("status", "completed");
+        if (search) params.set("search", search);
+        const data = await getScans(params.toString());
+        if (cancelled) return;
+        setScans(
+          (data.scans || []).map((s: Record<string, unknown>) => ({
+            id: String(s.id ?? ""),
+            target: String(s.target ?? s.target_name ?? ""),
+            date: String(s.created_at ?? s.date ?? ""),
+            duration: s.duration_seconds ? `${Math.floor(Number(s.duration_seconds) / 60)}m ${Math.round(Number(s.duration_seconds) % 60)}s` : String(s.duration ?? "N/A"),
+            agents: Number(s.agents_deployed ?? s.agents ?? s.agent_count ?? 0),
+            totalFindings: Number(s.total_findings ?? 0),
+            status: String(s.status ?? "completed"),
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading && scans.length === 0) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error && scans.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const filtered = search
+    ? scans.filter(
+        (s) =>
+          s.target.toLowerCase().includes(search.toLowerCase()) ||
+          s.id.toLowerCase().includes(search.toLowerCase())
+      )
+    : scans;
 
   return (
     <div className="space-y-6">
@@ -134,11 +149,6 @@ export function CompletedScanPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((scan) => {
-                const total =
-                  scan.findings.critical +
-                  scan.findings.high +
-                  scan.findings.medium +
-                  scan.findings.low;
                 return (
                   <TableRow key={scan.id}>
                     <TableCell className="font-mono text-xs">{scan.id}</TableCell>
@@ -149,15 +159,7 @@ export function CompletedScanPage() {
                     <TableCell className="text-sm">{scan.duration}</TableCell>
                     <TableCell>{scan.agents}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        {scan.findings.critical > 0 && (
-                          <Badge className="bg-red-600 text-xs">{scan.findings.critical}C</Badge>
-                        )}
-                        {scan.findings.high > 0 && (
-                          <Badge className="bg-orange-600 text-xs">{scan.findings.high}H</Badge>
-                        )}
-                        <span className="text-xs text-muted-foreground">{total} total</span>
-                      </div>
+                      <span className="text-sm font-medium">{scan.totalFindings} findings</span>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="gap-1 text-green-400">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Key,
   Sliders,
@@ -8,6 +8,7 @@ import {
   Brain,
   FileDown,
   Save,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getSettings, saveSettings } from "@/api/client";
 
 type SettingsTab = "api" | "scan" | "llm" | "integrations" | "notifications" | "users" | "cerberus";
 
@@ -37,6 +39,29 @@ const TABS: { key: SettingsTab; label: string; icon: React.ElementType }[] = [
 
 export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("api");
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const data = await getSettings();
+        if (!cancelled) setSettings(data.settings || {});
+      } catch {
+        // Settings endpoint may not exist yet — use defaults
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
 
   return (
     <div className="space-y-6">

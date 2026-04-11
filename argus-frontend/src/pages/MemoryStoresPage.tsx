@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Database,
   Plus,
@@ -5,6 +6,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Key,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,44 +21,80 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getTargets, createTarget } from "@/api/client";
 
-const MOCK_STORES = [
-  {
-    id: "mem-001",
-    name: "Customer Context Store",
-    type: "Vector DB (Pinecone)",
-    endpoint: "https://pinecone.example.com",
-    status: "healthy",
-    boundaryIntegrity: 94,
-    canaryTokens: { planted: 5, leaked: 0 },
-    lastScan: "4 hours ago",
-    findings: { critical: 0, high: 0, medium: 1, low: 2 },
-  },
-  {
-    id: "mem-002",
-    name: "Conversation History",
-    type: "Redis + LangChain Memory",
-    endpoint: "redis://memory.example.com:6379",
-    status: "boundary_leak",
-    boundaryIntegrity: 41,
-    canaryTokens: { planted: 8, leaked: 3 },
-    lastScan: "1 hour ago",
-    findings: { critical: 2, high: 3, medium: 1, low: 0 },
-  },
-  {
-    id: "mem-003",
-    name: "RAG Knowledge Base",
-    type: "ChromaDB",
-    endpoint: "http://chroma.internal:8000",
-    status: "healthy",
-    boundaryIntegrity: 88,
-    canaryTokens: { planted: 4, leaked: 0 },
-    lastScan: "12 hours ago",
-    findings: { critical: 0, high: 1, medium: 2, low: 1 },
-  },
-];
+interface MemoryStore {
+  id: string;
+  name: string;
+  type: string;
+  endpoint: string;
+  status: string;
+  boundaryIntegrity: number;
+  canaryTokens: { planted: number; leaked: number };
+  lastScan: string;
+  findings: { critical: number; high: number; medium: number; low: number };
+}
 
 export function MemoryStoresPage() {
+  const [stores, setStores] = useState<MemoryStore[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("");
+  const [newEndpoint, setNewEndpoint] = useState("");
+
+  useEffect(() => { loadStores(); }, []);
+
+  async function loadStores() {
+    try {
+      setLoading(true);
+      const data = await getTargets();
+      const memTargets = (data.targets || []).filter(
+        (t: Record<string, unknown>) => String(t.target_type ?? t.type ?? "").toLowerCase().includes("memory")
+      );
+      setStores(
+        memTargets.map((t: Record<string, unknown>) => ({
+          id: String(t.id ?? ""),
+          name: String(t.name ?? ""),
+          type: String(t.store_type ?? t.type ?? ""),
+          endpoint: String(t.url ?? t.endpoint ?? ""),
+          status: String(t.status ?? "healthy"),
+          boundaryIntegrity: Number(t.boundary_integrity ?? 100),
+          canaryTokens: { planted: Number((t.canary_tokens as Record<string, unknown>)?.planted ?? 0), leaked: Number((t.canary_tokens as Record<string, unknown>)?.leaked ?? 0) },
+          lastScan: String(t.last_scan ?? "Never"),
+          findings: { critical: 0, high: 0, medium: 0, low: 0 },
+        }))
+      );
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAdd() {
+    if (!newName) return;
+    try {
+      await createTarget({ name: newName, target_type: "memory_store", agent_endpoint: newEndpoint, description: newType ? `Type: ${newType}` : "" });
+      setNewName(""); setNewType(""); setNewEndpoint("");
+      loadStores();
+    } catch { /* ignore */ }
+  }
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => loadStores()}>Retry</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -80,24 +118,24 @@ export function MemoryStoresPage() {
             <div className="space-y-4 pt-4">
               <div>
                 <Label>Store Name</Label>
-                <Input placeholder="Customer Context Store" className="mt-1" />
+                <Input placeholder="Customer Context Store" className="mt-1" value={newName} onChange={(e) => setNewName(e.target.value)} />
               </div>
               <div>
                 <Label>Type</Label>
-                <Input placeholder="Vector DB, Redis, ChromaDB..." className="mt-1" />
+                <Input placeholder="Vector DB, Redis, ChromaDB..." className="mt-1" value={newType} onChange={(e) => setNewType(e.target.value)} />
               </div>
               <div>
                 <Label>Endpoint</Label>
-                <Input placeholder="https://pinecone.example.com" className="mt-1" />
+                <Input placeholder="https://pinecone.example.com" className="mt-1" value={newEndpoint} onChange={(e) => setNewEndpoint(e.target.value)} />
               </div>
-              <Button className="w-full">Add Store</Button>
+              <Button className="w-full" onClick={handleAdd}>Add Store</Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {MOCK_STORES.map((store) => (
+        {stores.map((store) => (
           <Card key={store.id}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">

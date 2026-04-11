@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Gauge,
   Cpu,
@@ -6,8 +7,10 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   LineChart,
@@ -18,30 +21,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-
-const MOCK_METRICS = [
-  { time: "00:00", scans: 2, findings: 8, latency: 120 },
-  { time: "04:00", scans: 1, findings: 3, latency: 95 },
-  { time: "08:00", scans: 3, findings: 12, latency: 145 },
-  { time: "12:00", scans: 4, findings: 15, latency: 180 },
-  { time: "16:00", scans: 2, findings: 7, latency: 110 },
-  { time: "20:00", scans: 3, findings: 9, latency: 130 },
-];
-
-const MOCK_AGENTS_HEALTH = [
-  { code: "PI-01", name: "Prompt Injection", status: "healthy", uptime: "99.9%", lastRun: "2h ago", avgDuration: "45s" },
-  { code: "TP-02", name: "Tool Poisoning", status: "healthy", uptime: "99.8%", lastRun: "2h ago", avgDuration: "38s" },
-  { code: "MP-03", name: "Memory Poisoning", status: "healthy", uptime: "99.9%", lastRun: "2h ago", avgDuration: "52s" },
-  { code: "IS-04", name: "Identity Spoof", status: "healthy", uptime: "99.7%", lastRun: "2h ago", avgDuration: "30s" },
-  { code: "CW-05", name: "Context Window", status: "degraded", uptime: "97.2%", lastRun: "2h ago", avgDuration: "120s" },
-  { code: "CX-06", name: "Cross-Agent Exfil", status: "healthy", uptime: "99.5%", lastRun: "2h ago", avgDuration: "41s" },
-  { code: "PE-07", name: "Privilege Escalation", status: "healthy", uptime: "99.8%", lastRun: "2h ago", avgDuration: "55s" },
-  { code: "RC-08", name: "Race Condition", status: "healthy", uptime: "99.6%", lastRun: "3h ago", avgDuration: "65s" },
-  { code: "SC-09", name: "Supply Chain", status: "healthy", uptime: "99.9%", lastRun: "3h ago", avgDuration: "28s" },
-  { code: "ME-10", name: "Model Extraction", status: "healthy", uptime: "99.4%", lastRun: "2h ago", avgDuration: "48s" },
-  { code: "PH-11", name: "Persona Hijacking", status: "healthy", uptime: "99.8%", lastRun: "1h ago", avgDuration: "90s" },
-  { code: "MB-12", name: "Memory Boundary", status: "healthy", uptime: "99.7%", lastRun: "1h ago", avgDuration: "85s" },
-];
+import { getMonitoringMetrics, getAgentStatus } from "@/api/client";
 
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string }> = {
   healthy: { icon: CheckCircle, color: "text-green-400" },
@@ -50,6 +30,66 @@ const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string }> 
 };
 
 export function MonitoringPage() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [platformStatus, setPlatformStatus] = useState("operational");
+  const [system, setSystem] = useState<Record<string, unknown>>({});
+  const [agentsHealth, setAgentsHealth] = useState<{ code: string; name: string; status: string; last_run: string | null; avg_duration: string }[]>([]);
+  const [metrics] = useState([
+    { time: "00:00", scans: 0, findings: 0 },
+    { time: "04:00", scans: 0, findings: 0 },
+    { time: "08:00", scans: 0, findings: 0 },
+    { time: "12:00", scans: 0, findings: 0 },
+    { time: "16:00", scans: 0, findings: 0 },
+    { time: "20:00", scans: 0, findings: 0 },
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const [mon, agents] = await Promise.all([getMonitoringMetrics(), getAgentStatus()]);
+        if (cancelled) return;
+        setPlatformStatus(mon.platform_status ?? "operational");
+        setSystem(mon.system ?? {});
+        setAgentsHealth(
+          (mon.agents_health ?? agents.agents).map((a: Record<string, unknown>) => ({
+            code: String(a.code ?? ""),
+            name: String(a.name ?? ""),
+            status: String(a.status ?? "healthy"),
+            last_run: a.last_run ? String(a.last_run) : null,
+            avg_duration: String(a.avg_duration ?? "N/A"),
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const cpuPct = Number(system.cpu_percent ?? 0);
+  const memMb = Number(system.memory_mb ?? 0);
+  const memPct = Number(system.memory_percent ?? 0);
+
   return (
     <div className="space-y-6">
       <div>
@@ -66,7 +106,7 @@ export function MonitoringPage() {
             <Gauge className="h-5 w-5 text-green-400" />
             <div>
               <p className="text-sm text-muted-foreground">Platform Status</p>
-              <p className="text-lg font-bold text-green-400">Operational</p>
+              <p className="text-lg font-bold text-green-400 capitalize">{platformStatus}</p>
             </div>
           </CardContent>
         </Card>
@@ -75,8 +115,8 @@ export function MonitoringPage() {
             <Cpu className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="text-sm text-muted-foreground">CPU Usage</p>
-              <p className="text-lg font-bold">23%</p>
-              <Progress value={23} className="mt-1 h-1" />
+              <p className="text-lg font-bold">{cpuPct}%</p>
+              <Progress value={cpuPct} className="mt-1 h-1" />
             </div>
           </CardContent>
         </Card>
@@ -85,8 +125,8 @@ export function MonitoringPage() {
             <HardDrive className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="text-sm text-muted-foreground">Memory</p>
-              <p className="text-lg font-bold">512 MB</p>
-              <Progress value={41} className="mt-1 h-1" />
+              <p className="text-lg font-bold">{memMb} MB</p>
+              <Progress value={memPct} className="mt-1 h-1" />
             </div>
           </CardContent>
         </Card>
@@ -95,7 +135,7 @@ export function MonitoringPage() {
             <Clock className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="text-sm text-muted-foreground">Uptime</p>
-              <p className="text-lg font-bold">14d 7h 23m</p>
+              <p className="text-lg font-bold">{String(system.uptime ?? "N/A")}</p>
             </div>
           </CardContent>
         </Card>
@@ -110,7 +150,7 @@ export function MonitoringPage() {
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={MOCK_METRICS}>
+            <LineChart data={metrics}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 14.9%)" />
               <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
               <YAxis tick={{ fill: "#a1a1aa", fontSize: 12 }} />
@@ -132,12 +172,12 @@ export function MonitoringPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Agent Health — 12 Agents
+            Agent Health — {agentsHealth.length} Agents
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {MOCK_AGENTS_HEALTH.map((agent) => {
+            {agentsHealth.map((agent) => {
               const config = STATUS_CONFIG[agent.status] || STATUS_CONFIG.healthy;
               const StatusIcon = config.icon;
               return (
@@ -152,9 +192,8 @@ export function MonitoringPage() {
                       <span className="truncate text-xs text-muted-foreground">{agent.name}</span>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>Uptime: {agent.uptime}</span>
-                      <span>Avg: {agent.avgDuration}</span>
-                      <span>Last: {agent.lastRun}</span>
+                      <span>Avg: {agent.avg_duration}</span>
+                      <span>Last: {agent.last_run ?? "Never"}</span>
                     </div>
                   </div>
                 </div>

@@ -7,6 +7,7 @@ import {
   TrendingDown,
   TrendingUp,
   Radio,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { getDashboardStats, getAgentStatus, getAlerts, getScheduledScans } from "@/api/client";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "#ef4444",
@@ -34,70 +36,70 @@ const SEVERITY_COLORS: Record<string, string> = {
   info: "#6b7280",
 };
 
-const MOCK_TREND = [
-  { date: "Mar 1", critical: 8, high: 12, medium: 18, low: 5 },
-  { date: "Mar 8", critical: 6, high: 14, medium: 15, low: 8 },
-  { date: "Mar 15", critical: 9, high: 11, medium: 20, low: 6 },
-  { date: "Mar 22", critical: 5, high: 9, medium: 16, low: 4 },
-  { date: "Mar 29", critical: 7, high: 13, medium: 12, low: 7 },
-  { date: "Apr 5", critical: 4, high: 8, medium: 14, low: 3 },
-  { date: "Apr 10", critical: 3, high: 6, medium: 10, low: 2 },
-];
-
-const MOCK_SEVERITY_DIST = [
-  { name: "Critical", value: 3, color: "#ef4444" },
-  { name: "High", value: 6, color: "#f97316" },
-  { name: "Medium", value: 10, color: "#eab308" },
-  { name: "Low", value: 2, color: "#3b82f6" },
-];
-
-const MOCK_AGENTS = [
-  { name: "Prompt Injection", code: "PI-01", findings: 5, status: "idle" },
-  { name: "Tool Poisoning", code: "TP-02", findings: 3, status: "idle" },
-  { name: "Memory Poisoning", code: "MP-03", findings: 2, status: "idle" },
-  { name: "Identity Spoof", code: "IS-04", findings: 4, status: "idle" },
-  { name: "Context Window", code: "CW-05", findings: 1, status: "idle" },
-  { name: "Cross-Agent Exfil", code: "CX-06", findings: 2, status: "idle" },
-  { name: "Privilege Escalation", code: "PE-07", findings: 3, status: "idle" },
-  { name: "Race Condition", code: "RC-08", findings: 0, status: "idle" },
-  { name: "Supply Chain", code: "SC-09", findings: 1, status: "idle" },
-  { name: "Model Extraction", code: "ME-10", findings: 0, status: "idle" },
-  { name: "Persona Hijacking", code: "PH-11", findings: 2, status: "idle" },
-  { name: "Memory Boundary", code: "MB-12", findings: 1, status: "idle" },
-];
-
-const MOCK_ALERTS = [
-  {
-    id: "1",
-    type: "new_critical",
-    title: "New Critical: Persona Drift Detected",
-    time: "2 hours ago",
-    severity: "critical",
-  },
-  {
-    id: "2",
-    type: "regression",
-    title: "Regression: MCP Server Alpha — 3 new findings",
-    time: "5 hours ago",
-    severity: "high",
-  },
-  {
-    id: "3",
-    type: "scan_complete",
-    title: "Scheduled scan completed: Target Bravo",
-    time: "8 hours ago",
-    severity: "info",
-  },
-];
-
 export function DashboardPage() {
   const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof getDashboardStats>> | null>(null);
+  const [agents, setAgents] = useState<{ code: string; name: string; findings: number; status: string }[]>([]);
+  const [alerts, setAlerts] = useState<{ id: string; type: string; title: string; time: string; severity: string }[]>([]);
+  const [schedules, setSchedules] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const [s, a, al, sc] = await Promise.all([
+          getDashboardStats(),
+          getAgentStatus(),
+          getAlerts(10),
+          getScheduledScans(),
+        ]);
+        if (cancelled) return;
+        setStats(s);
+        setAgents(a.agents);
+        setAlerts(al.alerts);
+        setSchedules(sc.schedules);
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load dashboard");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  const severityDist = stats?.severity_distribution ?? [];
+  const trend = stats?.trend ?? [];
 
   return (
     <div className="space-y-6">
@@ -119,32 +121,28 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatsCard
           title="Total Findings"
-          value="21"
-          change="-34%"
-          trend="down"
+          value={String(stats?.total_findings ?? 0)}
           icon={AlertTriangle}
-          subtitle="vs. last month"
+          subtitle={`${stats?.completed_scans ?? 0} scans completed`}
         />
         <StatsCard
           title="Critical"
-          value="3"
-          change="-62%"
-          trend="down"
+          value={String(stats?.critical ?? 0)}
           icon={Shield}
-          subtitle="vs. last month"
+          subtitle={`${stats?.high ?? 0} high severity`}
           valueColor="text-red-500"
         />
         <StatsCard
           title="Active Targets"
-          value="6"
+          value={String(stats?.active_targets ?? 0)}
           icon={Target}
-          subtitle="4 healthy, 2 degraded"
+          subtitle={`${stats?.total_scans ?? 0} total scans`}
         />
         <StatsCard
           title="Compound Chains"
-          value="4"
+          value={String(stats?.compound_chains ?? 0)}
           icon={Link2}
-          subtitle="2 critical paths"
+          subtitle="multi-step attack paths"
         />
       </div>
 
@@ -154,28 +152,29 @@ export function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Finding Trends — Last 6 Weeks
+              Finding Trends — Recent Scans
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={MOCK_TREND}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 14.9%)" />
-                <XAxis dataKey="date" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
-                <YAxis tick={{ fill: "#a1a1aa", fontSize: 12 }} />
-                <Tooltip
-                  contentStyle={{
-                    background: "hsl(0 0% 5.5%)",
-                    border: "1px solid hsl(0 0% 14.9%)",
-                    borderRadius: "6px",
-                  }}
-                />
-                <Line type="monotone" dataKey="critical" stroke={SEVERITY_COLORS.critical} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="high" stroke={SEVERITY_COLORS.high} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="medium" stroke={SEVERITY_COLORS.medium} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="low" stroke={SEVERITY_COLORS.low} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            {trend.length > 0 ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={trend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 14.9%)" />
+                  <XAxis dataKey="date" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                  <YAxis tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "hsl(0 0% 5.5%)",
+                      border: "1px solid hsl(0 0% 14.9%)",
+                      borderRadius: "6px",
+                    }}
+                  />
+                  <Line type="monotone" dataKey="findings" stroke={SEVERITY_COLORS.critical} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="py-16 text-center text-sm text-muted-foreground">No scan data yet — run a scan to see trends</p>
+            )}
           </CardContent>
         </Card>
 
@@ -187,33 +186,39 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie
-                  data={MOCK_SEVERITY_DIST}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={40}
-                  outerRadius={70}
-                  dataKey="value"
-                  strokeWidth={0}
-                >
-                  {MOCK_SEVERITY_DIST.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
+            {severityDist.some((s) => s.value > 0) ? (
+              <>
+                <ResponsiveContainer width="100%" height={160}>
+                  <PieChart>
+                    <Pie
+                      data={severityDist}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={70}
+                      dataKey="value"
+                      strokeWidth={0}
+                    >
+                      {severityDist.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {severityDist.map((s) => (
+                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                      <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                      <span className="text-muted-foreground">{s.name}</span>
+                      <span className="ml-auto font-medium">{s.value}</span>
+                    </div>
                   ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {MOCK_SEVERITY_DIST.map((s) => (
-                <div key={s.name} className="flex items-center gap-2 text-xs">
-                  <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                  <span className="text-muted-foreground">{s.name}</span>
-                  <span className="ml-auto font-medium">{s.value}</span>
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <p className="py-16 text-center text-sm text-muted-foreground">No findings yet</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -224,17 +229,17 @@ export function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Attack Agents — 12 Online
+              Attack Agents — {agents.length} Online
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {MOCK_AGENTS.map((agent) => (
+              {agents.map((agent) => (
                 <div
                   key={agent.code}
                   className="flex items-center gap-2 rounded-md border border-border bg-background p-2 text-xs"
                 >
-                  <div className="h-2 w-2 rounded-full bg-green-500" />
+                  <div className={`h-2 w-2 rounded-full ${agent.status === "running" ? "bg-blue-500 animate-pulse" : agent.status === "error" ? "bg-red-500" : "bg-green-500"}`} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{agent.code}</p>
                     <p className="truncate text-muted-foreground">{agent.name}</p>
@@ -258,22 +263,26 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {MOCK_ALERTS.map((alert) => (
-                <div key={alert.id} className="flex gap-3 rounded-md border border-border bg-background p-3">
-                  <div
-                    className="mt-0.5 h-2 w-2 rounded-full"
-                    style={{
-                      backgroundColor: SEVERITY_COLORS[alert.severity] || "#6b7280",
-                    }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{alert.title}</p>
-                    <p className="text-xs text-muted-foreground">{alert.time}</p>
+            {alerts.length > 0 ? (
+              <div className="space-y-3">
+                {alerts.map((alert) => (
+                  <div key={alert.id} className="flex gap-3 rounded-md border border-border bg-background p-3">
+                    <div
+                      className="mt-0.5 h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor: SEVERITY_COLORS[alert.severity] || "#6b7280",
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{alert.title}</p>
+                      <p className="text-xs text-muted-foreground">{alert.time}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">No alerts — system is quiet</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -291,25 +300,22 @@ export function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              { target: "MCP Server Alpha", freq: "Daily", next: "Tomorrow 02:00 UTC", health: 85 },
-              { target: "AI Agent Bravo", freq: "Weekly", next: "Mon 04:00 UTC", health: 62 },
-              { target: "Pipeline Charlie", freq: "Daily", next: "Tomorrow 02:00 UTC", health: 91 },
-            ].map((sched) => (
-              <div key={sched.target} className="rounded-md border border-border bg-background p-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">{sched.target}</p>
-                  <Badge variant="outline" className="text-xs">{sched.freq}</Badge>
+          {schedules.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {schedules.map((sched, i) => (
+                <div key={i} className="rounded-md border border-border bg-background p-3">
+                  <p className="text-sm font-medium">{String(sched.target || sched.name || `Schedule ${i + 1}`)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {String(sched.frequency || sched.freq || "")}
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">Next: {sched.next}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Progress value={sched.health} className="h-1.5 flex-1" />
-                  <span className="text-xs text-muted-foreground">{sched.health}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No scheduled scans configured — set up recurring scans in Settings
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

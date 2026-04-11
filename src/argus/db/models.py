@@ -52,6 +52,9 @@ class DBTarget(Base):
     name = Column(String(200), nullable=False, index=True)
     description = Column(Text, default="")
     environment = Column(String(50), default="staging")  # staging, production, development
+    target_type = Column(
+        String(50), default="generic", nullable=False, index=True
+    )  # mcp_server, ai_agent, pipeline, memory_store, generic
 
     # MCP targets (JSON-encoded list of URLs)
     mcp_server_urls = Column(Text, default="[]")

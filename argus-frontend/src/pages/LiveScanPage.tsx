@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { startScan as apiStartScan, cancelScan, getAgentStatus, getLiveScanStatus } from "@/api/client";
 
 interface AgentStatus {
   code: string;
@@ -33,27 +34,45 @@ interface AgentStatus {
   currentTechnique?: string;
 }
 
-const INITIAL_AGENTS: AgentStatus[] = [
-  { code: "PI-01", name: "Prompt Injection Hunter", status: "idle", progress: 0, findings: 0, techniques: 7 },
-  { code: "TP-02", name: "Tool Poisoning Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "MP-03", name: "Memory Poisoning Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "IS-04", name: "Identity Spoof Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "CW-05", name: "Context Window Agent", status: "idle", progress: 0, findings: 0, techniques: 7 },
-  { code: "CX-06", name: "Cross-Agent Exfil Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "PE-07", name: "Privilege Escalation Agent", status: "idle", progress: 0, findings: 0, techniques: 6 },
-  { code: "RC-08", name: "Race Condition Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "SC-09", name: "Supply Chain Agent", status: "idle", progress: 0, findings: 0, techniques: 4 },
-  { code: "ME-10", name: "Model Extraction Agent", status: "idle", progress: 0, findings: 0, techniques: 6 },
-  { code: "PH-11", name: "Persona Hijacking Agent", status: "idle", progress: 0, findings: 0, techniques: 5 },
-  { code: "MB-12", name: "Memory Boundary Collapse", status: "idle", progress: 0, findings: 0, techniques: 5 },
-];
-
 export function LiveScanPage() {
-  const [agents, setAgents] = useState<AgentStatus[]>(INITIAL_AGENTS);
+  const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [scanRunning, setScanRunning] = useState(false);
   const [targetUrl, setTargetUrl] = useState("");
   const [scanMode, setScanMode] = useState("full");
+  const [scanError, setScanError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load agent list from API on mount
+  useEffect(() => {
+    async function loadAgents() {
+      try {
+        const data = await getAgentStatus();
+        setAgents(
+          data.agents.map((a) => ({
+            code: a.code,
+            name: a.name,
+            status: "idle" as const,
+            progress: 0,
+            findings: a.findings ?? 0,
+            techniques: a.techniques ?? 5,
+          }))
+        );
+      } catch {
+        // Fallback: populate from known agent list
+        setAgents(
+          ["PI-01", "TP-02", "MP-03", "IS-04", "CW-05", "CX-06", "PE-07", "RC-08", "SC-09", "ME-10", "PH-11", "MB-12"].map((code) => ({
+            code,
+            name: code,
+            status: "idle" as const,
+            progress: 0,
+            findings: 0,
+            techniques: 5,
+          }))
+        );
+      }
+    }
+    loadAgents();
+  }, []);
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -62,46 +81,81 @@ export function LiveScanPage() {
     };
   }, []);
 
-  const startScan = () => {
+  const handleStartScan = async () => {
     if (!targetUrl) return;
-    setAgents(INITIAL_AGENTS);
-    setScanRunning(true);
-    // Simulate agent progression
-    let step = 0;
-    intervalRef.current = setInterval(() => {
-      step++;
-      setAgents((prev) =>
-        prev.map((a, i) => {
-          const delay = i * 3;
-          if (step < delay) return a;
-          const elapsed = step - delay;
-          const progress = Math.min(elapsed * 8, 100);
-          const prevProgress = a.progress;
-          let findings = a.findings;
-          // Add findings at 25% thresholds instead of random each tick
-          for (const threshold of [25, 50, 75, 100]) {
-            if (prevProgress < threshold && progress >= threshold) {
-              findings += Math.floor(Math.random() * 3);
-            }
+    setScanError(null);
+    try {
+      await apiStartScan({
+        target_name: targetUrl,
+        mcp_urls: [targetUrl],
+      });
+      setScanRunning(true);
+      // Poll the in-memory live scan status (NOT the DB-backed /agents/status)
+      let step = 0;
+      intervalRef.current = setInterval(async () => {
+        step++;
+        try {
+          const data = await getLiveScanStatus();
+          // Map in-memory agent state to our AgentStatus interface
+          const agentEntries = Object.values(data.agents || {});
+          if (agentEntries.length > 0) {
+            setAgents((prev) => {
+              // Build a lookup from type to previous agent metadata
+              const prevByType = new Map(prev.map((a) => [a.code, a]));
+              // The in-memory state uses agent_type as keys; map back to codes
+              const codeMap: Record<string, string> = {
+                prompt_injection_hunter: "PI-01", tool_poisoning: "TP-02",
+                memory_poisoning: "MP-03", identity_spoof: "IS-04",
+                context_window: "CW-05", cross_agent_exfiltration: "CX-06",
+                privilege_escalation: "PE-07", race_condition: "RC-08",
+                supply_chain: "SC-09", model_extraction: "ME-10",
+                persona_hijacking: "PH-11", memory_boundary_collapse: "MB-12",
+              };
+              return agentEntries.map((a) => {
+                const code = codeMap[a.type] || a.type;
+                const prevAgent = prevByType.get(code);
+                let status: AgentStatus["status"] = "idle";
+                if (a.status === "running") status = "running";
+                else if (a.status === "completed") status = "completed";
+                else if (a.status === "pending") status = "idle";
+                return {
+                  code,
+                  name: prevAgent?.name || code,
+                  status,
+                  progress: a.status === "completed" ? 100 : a.status === "running" ? Math.min(step * 8, 95) : 0,
+                  findings: a.findings_count ?? 0,
+                  techniques: prevAgent?.techniques ?? 5,
+                  currentTechnique: a.status === "running" ? a.current_action : undefined,
+                };
+              });
+            });
           }
-          return {
-            ...a,
-            status: progress >= 100 ? "completed" : "running",
-            progress,
-            findings,
-            currentTechnique: progress < 100 ? `Technique ${Math.ceil(elapsed / 3)}/${a.techniques}` : undefined,
-          };
-        })
-      );
-      if (step > 60) {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        setScanRunning(false);
-      }
-    }, 500);
+          // Stop polling when scan is done
+          if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            setScanRunning(false);
+          }
+        } catch {
+          // Polling failed, keep trying
+        }
+        if (step > 120) {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          intervalRef.current = null;
+          setScanRunning(false);
+        }
+      }, 2000);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Failed to start scan");
+    }
   };
 
-  const stopScan = () => {
+  const handleStopScan = async () => {
+    try {
+      await cancelScan();
+    } catch {
+      // ignore cancel errors
+    }
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -171,7 +225,7 @@ export function LiveScanPage() {
             </div>
             <div className="flex items-end gap-2">
               {!scanRunning ? (
-                <Button onClick={startScan} disabled={!targetUrl} className="gap-2">
+                <Button onClick={handleStartScan} disabled={!targetUrl} className="gap-2">
                   <Play className="h-4 w-4" />
                   Launch
                 </Button>
@@ -181,7 +235,7 @@ export function LiveScanPage() {
                     <Pause className="h-4 w-4" />
                     Pause
                   </Button>
-                  <Button variant="destructive" onClick={stopScan} className="gap-2">
+                  <Button variant="destructive" onClick={handleStopScan} className="gap-2">
                     <Square className="h-4 w-4" />
                     Abort
                   </Button>
@@ -191,6 +245,14 @@ export function LiveScanPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Scan error banner */}
+      {scanError && (
+        <div className="flex items-center justify-between rounded-md border border-red-500/50 bg-red-950/20 p-3 text-sm text-red-400">
+          <span>{scanError}</span>
+          <Button variant="ghost" size="sm" className="h-6 text-red-400 hover:text-red-300" onClick={() => setScanError(null)}>Dismiss</Button>
+        </div>
+      )}
 
       {/* Stats bar */}
       {scanRunning && (
