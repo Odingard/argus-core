@@ -395,6 +395,15 @@ def create_app() -> FastAPI:
     except Exception as exc:
         logger.warning("Could not initialize production routes: %s", type(exc).__name__)
 
+    # Mount callback beacon router (no auth — targets call back here)
+    try:
+        from argus.beacon.server import create_beacon_router
+
+        app.include_router(create_beacon_router(auth_dependency=require_token))
+        logger.info("Beacon callback router mounted at /beacon/")
+    except Exception as exc:
+        logger.warning("Could not initialize beacon router: %s", type(exc).__name__)
+
     # Mount static assets
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
