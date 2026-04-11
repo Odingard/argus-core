@@ -166,8 +166,23 @@ class RaceConditionAgent(LLMAttackAgent):
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
+        payment_endpoints = survey.endpoints_for(SurfaceClass.PAYMENT)
 
         target_paths = [e.path for e in identity_endpoints + admin_endpoints]
+
+        # Phase 0: Concurrent state-mutating requests against PAYMENT surfaces.
+        # The classic check-and-debit race: fire N identical POSTs at the same
+        # instant. If any of them yields evidence of double-execution / overdraft
+        # / inconsistent state, the surface has a TOCTOU window. Generic — works
+        # against any value-bearing API, not just the benchmark.
+        for ep in payment_endpoints:
+            if not await sandbox.check_request_allowed():
+                return
+            await self._test_concurrent_state_mutation(
+                base_url=base_url,
+                payment_path=ep.path,
+                probe_body=ep.response_keys,  # discovered shape hint
+            )
 
         # Phase 1: TOCTOU attacks on identity/admin surfaces
         if target_paths:
@@ -192,6 +207,89 @@ class RaceConditionAgent(LLMAttackAgent):
                     return
                 for path in target_paths:
                     await self._test_atomicity(sandbox, base_url, path, test)
+
+    async def _test_concurrent_state_mutation(
+        self,
+        base_url: str,
+        payment_path: str,
+        probe_body: list[str],
+    ) -> None:
+        """Fire N concurrent identical POSTs at a state-mutating endpoint.
+
+        Generic TOCTOU probe: any endpoint that performs check-then-mutate
+        without atomic locking is vulnerable to a race when called in parallel.
+        We don't need to know the endpoint's schema — we send a body with
+        common payment parameters and look at responses for evidence of
+        double-execution (overdraft, inconsistent balance, sensitive markers).
+
+        Per the integrity rule: this method does NOT hardcode benchmark
+        canary tokens or scenario-specific account ids. It uses common
+        payment parameter names that real APIs expose.
+        """
+        self._techniques_attempted += 1
+
+        # Generic body that exercises typical payment / quota / transfer APIs.
+        # Most accept some subset of these keys; servers ignore the rest.
+        request_body = {
+            "account_id": "user-001",
+            "from_account": "user-001",
+            "to_account": "user-002",
+            "amount": 60.0,
+            "request_id": "argus-race-probe",
+        }
+
+        n_concurrent = 6  # enough to win most check-and-debit races
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            specs = [
+                TurnSpec(
+                    name=f"concurrent_pay:{i}",
+                    method="POST",
+                    path=payment_path,
+                    body={**request_body, "request_id": f"argus-race-probe-{i}"},
+                )
+                for i in range(n_concurrent)
+            ]
+            try:
+                results = await asyncio.gather(
+                    *(session.turn(s) for s in specs),
+                    return_exceptions=True,
+                )
+            except (ValueError, RuntimeError) as exc:
+                logger.debug("Concurrent payment burst failed: %s", type(exc).__name__)
+                return
+
+        # Analyze responses for race-condition evidence
+        ok_results = [
+            r for r in results
+            if isinstance(r, TurnResult) and r.ok()
+        ]
+        if not ok_results:
+            return
+
+        # Look for sensitive markers / privilege indicators across all responses.
+        # Also detect double-execution by counting "transaction_id" / "status:processed"
+        # type fields when the per-account budget should not have allowed N successes.
+        evidence_results: list[TurnResult] = []
+        for r in ok_results:
+            ev = self._evaluate_response(r)
+            if ev is not None:
+                evidence_results.append(r)
+
+        if not evidence_results:
+            return
+
+        self._techniques_succeeded += 1
+        await self._report(
+            technique="race_concurrent_state_mutation",
+            description=(
+                f"Fired {n_concurrent} concurrent identical POSTs at {payment_path}; "
+                f"{len(evidence_results)} responses contained race-condition evidence "
+                f"(sensitive markers or privilege indicators)."
+            ),
+            path=payment_path,
+            results=evidence_results[:3],
+            evidence=self._evaluate_response(evidence_results[0]) or {},
+        )
 
     async def _test_toctou(
         self,

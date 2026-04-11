@@ -203,16 +203,34 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
+        tool_call_endpoints = survey.endpoints_for(SurfaceClass.TOOL_CALL)
+        tool_catalog_endpoints = survey.endpoints_for(SurfaceClass.TOOLS)
 
         target_paths = [e.path for e in identity_endpoints + admin_endpoints]
         if not target_paths and chat_endpoints:
             target_paths = [chat_endpoints[0].path]
 
-        if not target_paths:
-            logger.debug("PrivilegeEscalation: no attack surfaces at %s", base_url)
-            return
-
         async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            # Phase 0: Generic tool-call chaining — enumerate the tool catalog
+            # and try sequences of tool calls, propagating returned tokens /
+            # session ids between steps. Generic confused-deputy probe.
+            if tool_call_endpoints:
+                catalog_path = tool_catalog_endpoints[0].path if tool_catalog_endpoints else "/tools"
+                for tc in tool_call_endpoints:
+                    if not await sandbox.check_request_allowed():
+                        return
+                    await self._test_tool_call_chain(
+                        session=session,
+                        catalog_path=catalog_path,
+                        tool_call_path=tc.path,
+                    )
+
+            if not target_paths:
+                if tool_call_endpoints:
+                    return  # tool-call phase already ran
+                logger.debug("PrivilegeEscalation: no attack surfaces at %s", base_url)
+                return
+
             # Phase 1: Escalation chains
             for chain in _ESCALATION_CHAINS:
                 if not await sandbox.check_request_allowed():
@@ -233,6 +251,154 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
                     return
                 for path in target_paths:
                     await self._test_exhaustion(sandbox, session, path, exhaustion)
+
+    async def _test_tool_call_chain(
+        self,
+        session: ConversationSession,
+        catalog_path: str,
+        tool_call_path: str,
+    ) -> None:
+        """Generic tool-call chaining attack.
+
+        Enumerates the tool catalog via GET, then fires every tool against
+        ``tool_call_path`` in catalog order. Each call's response is parsed
+        for likely token / session-id / handle values, which are propagated
+        as inputs to subsequent tool calls. This is the generic
+        "confused deputy via tool chaining" pattern: many real systems leak
+        privilege when a low-priv tool's output becomes a high-priv tool's
+        input. The agent does NOT hardcode any specific tool name or chain
+        — it discovers the catalog at runtime and feeds back whatever the
+        target returns.
+        """
+        self._techniques_attempted += 1
+
+        # Step 1: enumerate the tool catalog
+        try:
+            catalog_result = await session.turn(
+                TurnSpec(name="catalog", method="GET", path=catalog_path)
+            )
+        except ValueError:
+            return
+        if not catalog_result.ok() or catalog_result.response_json is None:
+            return
+        tools_field = catalog_result.response_json.get("tools")
+        if not isinstance(tools_field, list) or not tools_field:
+            return
+
+        # Extract tool names — accept either {"name": ...} or string entries
+        tool_names: list[str] = []
+        for entry in tools_field:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                tool_names.append(entry["name"])
+            elif isinstance(entry, str):
+                tool_names.append(entry)
+        if not tool_names:
+            return
+
+        logger.debug(
+            "PrivilegeEscalation: enumerated %d tools at %s%s",
+            len(tool_names), session.base_url, catalog_path,
+        )
+
+        # Step 2: chain through every tool, propagating discovered handles.
+        # We track a small bag of likely tokens/sessions/handles seen so far,
+        # and pass them as candidate values for any string-typed argument.
+        chain_results: list[TurnResult] = []
+        seen_handles: dict[str, str] = {}  # arg_name -> last value seen
+        seen_handles["user_id"] = "argus-privesc-user"
+        seen_handles["agent_id"] = "argus-privesc"
+
+        evidence: dict[str, Any] | None = None
+        for i, tool_name in enumerate(tool_names):
+            args = self._build_chained_args(tool_name, seen_handles)
+            spec = TurnSpec(
+                name=f"toolchain:{i}:{tool_name}",
+                method="POST",
+                path=tool_call_path,
+                body={"name": tool_name, "arguments": args},
+            )
+            try:
+                result = await session.turn(spec)
+            except ValueError:
+                continue
+            chain_results.append(result)
+            if not result.ok():
+                continue
+
+            # Harvest any token/session/handle values from the response
+            self._harvest_handles(result, seen_handles)
+
+            # Check for privilege evidence after each step
+            step_evidence = self._evaluate_response(result)
+            if step_evidence is not None:
+                evidence = step_evidence
+                evidence["chain_step"] = i
+                evidence["tool_name"] = tool_name
+
+        if evidence is not None:
+            self._techniques_succeeded += 1
+            await self._report_tool_chain(
+                tool_call_path=tool_call_path,
+                catalog_path=catalog_path,
+                tool_names=tool_names,
+                results=chain_results,
+                evidence=evidence,
+            )
+
+    @staticmethod
+    def _build_chained_args(tool_name: str, seen_handles: dict[str, str]) -> dict[str, Any]:
+        """Build a generic argument dict for a tool call.
+
+        Uses the running handle bag plus a few sensible defaults that match
+        common parameter naming conventions. The goal is to give the call
+        enough plausible inputs to succeed without hardcoding any specific
+        tool's schema.
+        """
+        defaults: dict[str, Any] = {
+            "user_id": seen_handles.get("user_id", "test-user"),
+            "agent_id": seen_handles.get("agent_id", "argus-test"),
+            "session_id": seen_handles.get("session_id", "test-session"),
+            "token": seen_handles.get("token", ""),
+            "id": seen_handles.get("id", "test"),
+            "name": "test",
+            "target_role": "admin",
+            "role": "admin",
+            "scope": "admin",
+        }
+        # Tools that name themselves with admin / escalate / privileged
+        # words get the admin params bumped — generic naming heuristic.
+        lower = tool_name.lower()
+        if "escalate" in lower or "admin" in lower or "elevate" in lower:
+            defaults["target_role"] = "admin"
+        return defaults
+
+    @staticmethod
+    def _harvest_handles(result: TurnResult, bag: dict[str, str]) -> None:
+        """Pull any string-valued token/session/handle keys out of result."""
+        if result.response_json is None:
+            return
+        # Walk one or two levels deep — most APIs nest under "result"
+        candidates: list[dict[str, Any]] = [result.response_json]
+        nested = result.response_json.get("result")
+        if isinstance(nested, dict):
+            candidates.append(nested)
+
+        # Keys we treat as handles to propagate forward
+        handle_keys = {
+            "token", "session_id", "session", "user_id", "id",
+            "request_id", "transaction_id", "handle", "session_token",
+            "access_token", "refresh_token", "auth_token", "key",
+        }
+        for c in candidates:
+            for k, v in c.items():
+                if k.lower() in handle_keys and isinstance(v, str) and v:
+                    bag[k] = v
+                    # Also mirror under common alias names so the next call
+                    # picks it up regardless of naming convention
+                    if k.lower() in ("token", "access_token", "session_token"):
+                        bag["token"] = v
+                    if k.lower() in ("session_id", "session"):
+                        bag["session_id"] = v
 
     async def _test_chain(
         self,
@@ -390,6 +556,92 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
             "privilege_indicators": priv_indicators,
             "response_excerpt": text[:500],
         }
+
+    async def _report_tool_chain(
+        self,
+        tool_call_path: str,
+        catalog_path: str,
+        tool_names: list[str],
+        results: list[TurnResult],
+        evidence: dict[str, Any],
+    ) -> None:
+        """Emit a finding for a successful generic tool-call chain."""
+        markers = evidence["sensitive_markers"]
+        priv = evidence["privilege_indicators"]
+        chain_step = evidence.get("chain_step", -1)
+        winning_tool = evidence.get("tool_name", "unknown")
+        severity = FindingSeverity.CRITICAL if markers else FindingSeverity.HIGH
+
+        title = (
+            f"Privilege escalation via tool-call chain "
+            f"({len(tool_names)} tools, leak at step {chain_step + 1})"
+        )
+        description = (
+            f"Enumerated the tool catalog at {catalog_path} and chained {len(tool_names)} "
+            f"tool calls through {tool_call_path}. The chain reached privileged data at "
+            f"step {chain_step + 1} via tool '{winning_tool}'. Output handles harvested "
+            f"from earlier responses were propagated as inputs to subsequent calls — "
+            f"the classic confused-deputy pattern. Markers: {markers or 'none'}. "
+            f"Privilege indicators: {priv or 'none'}."
+        )
+
+        attack_chain_steps: list[AttackChainStep] = []
+        for i, (tool_name, result) in enumerate(zip(tool_names, results, strict=False)):
+            attack_chain_steps.append(
+                AttackChainStep(
+                    step_number=i + 1,
+                    agent_type=self.agent_type.value,
+                    technique="privesc_tool_chain",
+                    description=f"Step {i + 1}: invoke tool '{tool_name}' via {tool_call_path}",
+                    input_payload=tool_name,
+                    output_observed=result.response_text[:1000],
+                    target_surface=tool_call_path,
+                )
+            )
+
+        repro = [
+            ReproductionStep(
+                step_number=1,
+                action=f"GET {catalog_path} to enumerate tools",
+                expected_result="catalog returned",
+                actual_result=f"{len(tool_names)} tools discovered",
+            ),
+            ReproductionStep(
+                step_number=2,
+                action=f"POST {tool_call_path} with each tool, propagating output handles",
+                expected_result="Each tool should enforce its own authorization",
+                actual_result=(
+                    results[chain_step].response_text[:500]
+                    if 0 <= chain_step < len(results) else ""
+                ),
+            ),
+        ]
+
+        proof = (
+            f"Tool-call chain privilege escalation at {tool_call_path}: enumerated "
+            f"{len(tool_names)} tools via {catalog_path}, leak at step {chain_step + 1} "
+            f"('{winning_tool}'). Markers: {markers}. Indicators: {priv}."
+        )
+
+        finding = self._build_finding(
+            title=title,
+            description=description,
+            severity=severity,
+            target_surface=tool_call_path,
+            technique="privesc_tool_chain",
+            attack_chain=attack_chain_steps[: chain_step + 1] or attack_chain_steps,
+            reproduction_steps=repro,
+            raw_request=str(tool_names[: chain_step + 1]),
+            raw_response=(
+                results[chain_step].response_text
+                if 0 <= chain_step < len(results) else ""
+            ),
+            owasp_agentic=OWASPAgenticCategory.PRIVILEGE_ESCALATION,
+            owasp_llm=OWASPLLMCategory.EXCESSIVE_AGENCY,
+            direct_evidence=True,
+            proof_of_exploitation=proof,
+        )
+        await self.emit_finding(finding)
 
     async def _report_chain(
         self,

@@ -47,9 +47,14 @@ from pydantic import BaseModel, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from argus.agents import (
+    ContextWindowAgent,
+    CrossAgentExfilAgent,
     IdentitySpoofAgent,
     MemoryPoisoningAgent,
+    ModelExtractionAgent,
+    PrivilegeEscalationAgent,
     PromptInjectionHunter,
+    RaceConditionAgent,
     SupplyChainAgent,
     ToolPoisoningAgent,
 )
@@ -451,6 +456,11 @@ def create_app() -> FastAPI:
         orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
         orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
         orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+        orchestrator.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
+        orchestrator.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
+        orchestrator.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
+        orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+        orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
         state.orchestrator = orchestrator
 
         # Initialize agent state cards

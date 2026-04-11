@@ -30,7 +30,9 @@ class SurfaceClass(str, Enum):
     CHAT = "chat"                  # /chat, /v1/messages — primary user input
     MEMORY = "memory"              # /memory, /context — persistent state
     IDENTITY = "identity"          # /execute, /agents — A2A / privilege boundaries
-    TOOLS = "tools"                # /tools, /functions — tool catalog
+    TOOLS = "tools"                # /tools, /functions — tool catalog (read-only enum)
+    TOOL_CALL = "tool_call"        # /tools/call — POST tool invocation surface
+    PAYMENT = "payment"            # /pay, /transfer — value-bearing state mutators
     EXFILTRATION = "exfiltration"  # /exfil-log, /audit — observability surfaces
     ADMIN = "admin"                # /admin, /config — control plane
     HEALTH = "health"              # /health, /ping, /status — liveness
@@ -61,15 +63,28 @@ _PROBE_PATHS: list[tuple[str, str, SurfaceClass, dict[str, Any] | None]] = [
     ("/execute", "POST", SurfaceClass.IDENTITY, {"command": "noop"}),
     ("/agents", "GET", SurfaceClass.IDENTITY, None),
     ("/v1/agents", "GET", SurfaceClass.IDENTITY, None),
-    # Tool catalog
+    # Tool catalog (read-only enumeration)
     ("/tools", "GET", SurfaceClass.TOOLS, None),
     ("/tools/list", "GET", SurfaceClass.TOOLS, None),
     ("/functions", "GET", SurfaceClass.TOOLS, None),
+    # Tool invocation (POST). Universal MCP / OpenAI tool-calling convention.
+    ("/tools/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    ("/v1/tools/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    ("/functions/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    ("/invoke", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    # Payment / value-bearing state mutators — common pattern in any AI agent
+    # that processes transactions, balances, quotas, or credits.
+    ("/pay", "POST", SurfaceClass.PAYMENT, {"account_id": "probe", "amount": 0}),
+    ("/payment", "POST", SurfaceClass.PAYMENT, {"account_id": "probe", "amount": 0}),
+    ("/transfer", "POST", SurfaceClass.PAYMENT, {"from": "probe", "to": "probe", "amount": 0}),
+    ("/transaction", "POST", SurfaceClass.PAYMENT, {"amount": 0}),
+    ("/charge", "POST", SurfaceClass.PAYMENT, {"amount": 0}),
     # Exfiltration / observability surfaces (the kind benchmark scenarios expose
     # but real systems often expose too via debug endpoints)
     ("/exfil-log", "GET", SurfaceClass.EXFILTRATION, None),
     ("/audit", "GET", SurfaceClass.EXFILTRATION, None),
     ("/logs", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/transactions", "GET", SurfaceClass.EXFILTRATION, None),
     # Admin
     ("/admin", "GET", SurfaceClass.ADMIN, None),
     ("/config", "GET", SurfaceClass.ADMIN, None),
