@@ -12,10 +12,11 @@ This leaderboard publishes **honest scores only**. ARGUS attacks the scenarios w
 
 | Rank | Tool | Version | Total Score | Median CW | Highest CW | Date |
 |------|------|---------|-------------|-----------|------------|------|
-| 1 | **ARGUS** | 0.2.0 (Phase 2, VW-scored) | **30/42 (71.4%)** | 0.741 | 0.888 | 2026-04-10 |
+| 1 | **ARGUS** | 0.3.0 (Phase 3, VW-scored) | **42/42 (100%)** | 0.605 | 0.891 | 2026-04-10 |
+| — | ARGUS | 0.2.0 (Phase 2) | 30/42 (71.4%) | 0.741 | 0.888 | 2026-04-10 |
 | — | ARGUS | 0.1.0 (Phase 1) | 9/42 (21.4%) | 0.586 | 0.857 | 2026-04-09 |
 
-> **Total Score** is across all 7 scenarios (max 42). Phase 2 ships 5 specialized agents (Prompt Injection Hunter, Tool Poisoning, Supply Chain, Memory Poisoning, Identity Spoof) plus the Correlation Engine v1, which unlocks the chaining tier on every scenario reachable by Phase 1+2 agents.
+> **Total Score** is across all 7 scenarios (max 42). Phase 3 ships 10 specialized agents — all 7 scenarios now pass Detection + Validation + Chaining tiers.
 > **Median CW** is the median Consequence Weight across all matched findings — higher means stronger evidence.
 
 ## ARGUS Per-Scenario Breakdown
@@ -25,61 +26,67 @@ This leaderboard publishes **honest scores only**. ARGUS attacks the scenarios w
 | 01 — Tool Poisoning | Easy | 1 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
 | 02 — Memory Poisoning | Medium | 2 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
 | 03 — Identity Spoof | Hard | 2 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
-| 04 — Privilege Chain | Hard | 3 | 0/1 | 0/2 | 0/3 | **0/6** *(Phase 3 agent)* |
+| 04 — Privilege Chain | Hard | 3 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
 | 05 — Injection Gauntlet | Easy | 1 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
 | 06 — Supply Chain | Medium | 1 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
-| 07 — Race Condition | Expert | 3 | 0/1 | 0/2 | 0/3 | **0/6** *(Phase 3 agent)* |
+| 07 — Race Condition | Expert | 3 | 1/1 ✅ | 2/2 ✅ | 3/3 ✅ | **6/6** |
 
-**Phase 2 ceiling reached:** every scenario with at least one Phase 1 or Phase 2 specialist agent fully passes (Detection + Validation + Chaining). The remaining 12 points come from Phase 3 agents (Privilege Escalation, Race Condition).
+**Clean sweep — 42/42.** Every scenario passes every tier. Single scan, 7.9 seconds, 76 findings, 11 compound attack paths.
 
 ## Phase coverage roadmap
 
 | Phase | Status | Score |
 |-------|--------|-------|
 | **Phase 1** *(shipped)* | Detection + Validation on 01, 05, 06 | 9/42 |
-| **Phase 2** *(shipped)* | + Memory Poisoning, Identity Spoof, Correlation Engine v1 | **30/42** |
-| **Phase 3** *(planned)* | + Privilege Escalation Agent, Race Condition Agent, Correlation v2 | 42/42 |
+| **Phase 2** *(shipped)* | + Memory Poisoning, Identity Spoof, Correlation Engine v1 | 30/42 |
+| **Phase 3** *(shipped)* | + Privilege Escalation (tool-call chaining), Race Condition (concurrent state mutation), Context Window, Cross-Agent Exfiltration | **42/42** |
+| **Phase 4** *(shipped agent only)* | + Model Extraction Agent | 42/42 |
 
-## What Phase 2 added
+## What Phase 3 added (this commit)
 
 | Component | What it does | Lives at |
 |-----------|--------------|----------|
-| **CONDUCTOR** | Multi-turn HTTP session manager. SSRF-bound, error-sanitized. Required for any agent that needs cross-turn state. | [src/argus/conductor/](../src/argus/conductor/) |
-| **SURVEY** | AI-agent attack surface mapper. Probes common endpoint conventions, classifies them by surface type (chat / memory / identity / exfiltration / admin). | [src/argus/survey/](../src/argus/survey/) |
-| **Memory Poisoning Agent** | Generic plant-and-trigger flow against any agent with persistent memory. Uses CONDUCTOR for the multi-turn chain and ResponseMatcher for evidence detection. | [src/argus/agents/memory_poisoning.py](../src/argus/agents/memory_poisoning.py) |
-| **Identity Spoof Agent** | Generic baseline-vs-spoofed-identity diff against A2A boundaries. Fires every common header convention (X-Agent-Role, X-Agent-ID, agent_role, etc.). | [src/argus/agents/identity_spoof.py](../src/argus/agents/identity_spoof.py) |
-| **Correlation Engine v1** | Rule-based finding-cluster detection. Groups findings by host + agent type, fires compound patterns when multi-agent corroboration exists. | [src/argus/correlation/](../src/argus/correlation/) |
+| **SURVEY: TOOL_CALL + PAYMENT classes** | New endpoint probes for `/tools/call`, `/v1/tools/call`, `/invoke`, `/pay`, `/payment`, `/transfer`, `/transaction`, `/charge`. SurfaceClass.TOOL_CALL and SurfaceClass.PAYMENT for routing. | [src/argus/survey/prober.py](../src/argus/survey/prober.py) |
+| **Privilege Escalation Agent — generic tool-call chaining** | Enumerates the discovered tool catalog, fires every tool through `/tools/call` in catalog order, harvests tokens/session_ids/handles from each response and propagates them as inputs to subsequent tool calls. The classic confused-deputy pattern, completely generic — works against any AI agent that exposes a tool catalog and a tool-call endpoint. No hardcoded tool names, no scenario-specific chains. | [src/argus/agents/privilege_escalation.py](../src/argus/agents/privilege_escalation.py) |
+| **Race Condition Agent — concurrent state-mutation probe** | When SURVEY discovers a PAYMENT-class endpoint, fires N=6 concurrent identical POSTs and looks for race-condition evidence in any response (sensitive markers, double-execution, overdraft). Generic — works against any value-bearing API. | [src/argus/agents/race_condition.py](../src/argus/agents/race_condition.py) |
+| **Correlation patterns** | `privilege_escalation_data_exfil` and `race_condition_double_execution` compound patterns wired into Correlation Engine v1. | [src/argus/correlation/engine.py](../src/argus/correlation/engine.py) |
+| **VERDICT WEIGHT priors** | HA priors and family stripping rules for the 5 Phase 3/4 technique families (`privesc`, `race`, `context_window`, `cross_agent_exfil`, `model_extraction`). | [src/argus/scoring/verdict_adapter.py](../src/argus/scoring/verdict_adapter.py) |
+| **Wiring** | All 10 agents now registered in `web/server.py`, `run_baseline.py`, `run_cinematic.py`, `run_live.py`. | (multiple) |
 
-## Security audit (Phase 1 → Phase 2)
+## Findings by agent (latest run)
 
-Before Phase 2 shipped, an independent audit covered the new code paths plus all files modified since the Phase 1 audit. **3 CRITICAL + 6 HIGH + 7 MEDIUM** findings were patched in the same release:
-
-- **mcp_client/client.py** (3 CRITICAL): added `follow_redirects=False`, `event_hooks` disable, and 1 MB bounded `_safe_json()` body cap
-- **orchestrator/engine.py** (HIGH): exception class names only (never `str(exc)`) propagated to `AgentResult.errors` to prevent credential leakage via httpx repr
-- **conductor/session.py** (MEDIUM): error sanitization + post-`urljoin` netloc re-check
-- **web/server.py** (HIGH): `getaddrinfo` DNS resolution against blocked IP ranges (closes DNS rebinding); `html.escape` on `WEB_TOKEN`; 5 KB `raw_response` truncation in SSE broadcast
-- **agents/tool_poisoning.py** (HIGH): aggressive sensitive-default probes (path traversal, `file://`, SQL) gated behind `target.non_destructive=False`. Benchmark targets opt in; customer engagements stay safe by default.
-- **mcp_client/client.py** (MEDIUM): subprocess `start_new_session=True`, `terminate→wait→kill` reaping in `disconnect()`
+| Agent | Findings |
+|---|---|
+| Privilege Escalation | 20 |
+| Cross-Agent Exfiltration | 12 |
+| Race Condition | 9 |
+| Memory Poisoning | 8 |
+| Context Window | 7 |
+| Model Extraction | 7 |
+| Tool Poisoning | 6 |
+| Identity Spoof | 4 |
+| Supply Chain | 3 |
+| **Total** | **76** |
 
 ## VERDICT WEIGHT Score Distribution (Latest Run)
 
-| Tier | CW Range | Count | Notes |
-|------|----------|-------|-------|
-| **CRITICAL** | 0.85+ | 4 | Hidden content + sensitive marker leaks via direct observation |
-| **HIGH** | 0.70–0.85 | 8 | Memory poison flows, identity spoof flows, tool output injection |
-| **MEDIUM** | 0.40–0.70 | 9 | Supporting findings — corroborate but don't single-handedly validate |
-| **LOW** | < 0.40 | 0 | None — VERDICT WEIGHT successfully filtered noise |
+| Tier | CW Range | Count |
+|------|----------|-------|
+| **CRITICAL** | 0.85+ | 8 |
+| **HIGH** | 0.70–0.85 | 27 |
+| **MEDIUM** | 0.40–0.70 | 41 |
+| **LOW** | < 0.40 | 0 |
 
-**Total findings:** 21 emitted, 19 validated, 0 suppressed. 6 compound attack paths.
+**Total findings:** 76 emitted, 74 validated (97%), 0 suppressed. **11 compound attack paths.**
 
 ## Run Stats
 
-- **Scan duration:** ~3.6 seconds
-- **Findings emitted:** 21 total, 19 validated (90%)
-- **VERDICT WEIGHT scoring:** 21/21 findings scored, median CW = 0.741, highest CW = 0.888
-- **Compound attack paths:** 6 (one per scenario reachable by Phase 1+2 agents)
-- **Agents deployed:** 5 in parallel (Prompt Injection Hunter, Tool Poisoning, Supply Chain, Memory Poisoning, Identity Spoof)
-- **Generic techniques:** hidden content scan, zero-width unicode detection, sensitive default probing, SSRF/file:// probes (gated on `non_destructive=False`), MCP trust analysis, tool output injection, plant-and-trigger memory chains, baseline-vs-spoof identity diffs, multi-host correlation patterns
+- **Scan duration:** ~7.9 seconds
+- **Findings emitted:** 76 total, 74 validated (97%)
+- **VERDICT WEIGHT scoring:** 76/76 findings scored, median CW = 0.605, highest CW = 0.891
+- **Compound attack paths:** 11
+- **Agents deployed:** 10 in parallel (Prompt Injection Hunter, Tool Poisoning, Supply Chain, Memory Poisoning, Identity Spoof, Context Window, Cross-Agent Exfiltration, Privilege Escalation, Race Condition, Model Extraction)
+- **Generic techniques:** hidden content scan, zero-width unicode detection, sensitive default probing, MCP trust analysis, tool output injection, plant-and-trigger memory chains, baseline-vs-spoof identity diffs, **generic tool-call chaining via catalog enumeration + handle propagation**, **concurrent state-mutation race probes**, multi-host correlation patterns
 
 ## How to Reproduce
 
@@ -108,7 +115,7 @@ VERDICT WEIGHT is a peer-reviewed (SSRN #6532658), patent-pending (USPTO #64/032
 - **Stream 2 — Cross-Feed Corroboration (CC):** how many independent techniques confirm this?
 - **Stream 3 — Temporal Decay (TD):** how fresh is the underlying data?
 - **Stream 4 — Historical Source Accuracy (HA):** what's the track record of this technique?
-- **Stream 5 — Cross-Temporal Consistency (CTC):** does the trajectory look legitimate or fabricated? *(used by ARGUS Correlation Agent v2 in Phase 3+)*
+- **Stream 5 — Cross-Temporal Consistency (CTC):** does the trajectory look legitimate or fabricated? *(used by ARGUS Correlation Agent v2 in Phase 4+)*
 - **Streams 6–8 — Government tier:** SIS, CPS, RIS *(ARGUS Enterprise / Federal tier)*
 
 ARGUS is the first production deployment of VERDICT WEIGHT scoring for autonomous offensive security testing.

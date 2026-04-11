@@ -20,9 +20,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from argus.agents import (
+    ContextWindowAgent,
+    CrossAgentExfilAgent,
     IdentitySpoofAgent,
     MemoryPoisoningAgent,
+    ModelExtractionAgent,
+    PrivilegeEscalationAgent,
     PromptInjectionHunter,
+    RaceConditionAgent,
     SupplyChainAgent,
     ToolPoisoningAgent,
 )
@@ -72,12 +77,17 @@ async def run_benchmark() -> dict:
     orchestrator.register_agent(AgentType.SUPPLY_CHAIN, SupplyChainAgent)
     orchestrator.register_agent(AgentType.MEMORY_POISONING, MemoryPoisoningAgent)
     orchestrator.register_agent(AgentType.IDENTITY_SPOOF, IdentitySpoofAgent)
+    orchestrator.register_agent(AgentType.CONTEXT_WINDOW, ContextWindowAgent)
+    orchestrator.register_agent(AgentType.CROSS_AGENT_EXFIL, CrossAgentExfilAgent)
+    orchestrator.register_agent(AgentType.PRIVILEGE_ESCALATION, PrivilegeEscalationAgent)
+    orchestrator.register_agent(AgentType.RACE_CONDITION, RaceConditionAgent)
+    orchestrator.register_agent(AgentType.MODEL_EXTRACTION, ModelExtractionAgent)
 
     print(f"Target: {target.name}")
     print(f"MCP URLs: {target.mcp_server_urls}")
     print(f"Agent endpoint: {target.agent_endpoint}")
     print()
-    print("Deploying 5 agents simultaneously...")
+    print("Deploying 10 agents simultaneously...")
     print()
 
     result = await orchestrator.run_scan(target=target, timeout=300.0)

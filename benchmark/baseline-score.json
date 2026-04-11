@@ -1,9 +1,9 @@
 {
   "benchmark": "ARGUS Gauntlet",
   "version": "2.0.0",
-  "total_score": 30,
+  "total_score": 42,
   "total_max": 42,
-  "percentage": 71.43,
+  "percentage": 100.0,
   "scenarios": {
     "01-tool-poisoning": {
       "scenario_id": "01-tool-poisoning",
@@ -134,10 +134,59 @@
           "technique": "memory_poison_priv_escalation",
           "cw": 0.875,
           "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_agent_relay",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_agent_relay",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_shared_resource",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_shared_resource",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_trust_chain",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_trust_chain",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_covert_channel",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_covert_channel",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_output_aggregation",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_output_aggregation",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_sequential_chain",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_sequential_chain",
+          "cw": 0.5449,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_confused_deputy",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_confused_deputy",
+          "cw": 0.7197,
+          "validated": true
         }
       ],
-      "matched_count": 13,
-      "above_validation_cw": 6
+      "matched_count": 27,
+      "above_validation_cw": 11
     },
     "02-memory-poisoning": {
       "scenario_id": "02-memory-poisoning",
@@ -312,27 +361,182 @@
       "difficulty": "hard",
       "phase": 3,
       "max_score": 6,
-      "score": 0,
+      "score": 6,
       "tiers": {
         "detection": {
-          "earned": 0,
+          "earned": 1,
           "max": 1,
-          "evidence": []
+          "evidence": [
+            "Privilege escalation via privesc_sequential_chain",
+            "Privilege escalation via privesc_confused_deputy",
+            "Privilege escalation via privesc_scope_creep",
+            "Privilege escalation via privesc_ordering",
+            "Parameter boundary bypass via get_user"
+          ]
         },
         "validation": {
-          "earned": 0,
+          "earned": 2,
           "max": 2,
-          "evidence": []
+          "evidence": [
+            "Privilege escalation via privesc_confused_deputy",
+            "Privilege escalation via privesc_scope_creep",
+            "Privilege escalation via privesc_ordering",
+            "Parameter boundary bypass via get_user",
+            "Resource exhaustion bypass at /chat"
+          ]
         },
         "chaining": {
-          "earned": 0,
+          "earned": 3,
           "max": 3,
-          "evidence": []
+          "evidence": [
+            "Compound: tool_poisoning enables data_exfiltration via planted MCP tool on tool_output"
+          ]
         }
       },
-      "matched_findings": [],
-      "matched_count": 0,
-      "above_validation_cw": 0
+      "matched_findings": [
+        {
+          "title": "Privilege escalation via privesc_sequential_chain",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_sequential_chain",
+          "cw": 0.5449,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_confused_deputy",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_confused_deputy",
+          "cw": 0.7197,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_scope_creep",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_scope_creep",
+          "cw": 0.7898,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_ordering",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_ordering",
+          "cw": 0.8132,
+          "validated": true
+        },
+        {
+          "title": "Parameter boundary bypass via get_user",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_param_boundary",
+          "cw": 0.8149,
+          "validated": true
+        },
+        {
+          "title": "Resource exhaustion bypass at /chat",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_resource_exhaustion",
+          "cw": 0.7861,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via tool-call chain (5 tools, leak at step 3)",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_tool_chain",
+          "cw": 0.5758,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_sequential_chain",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_sequential_chain",
+          "cw": 0.8788,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_confused_deputy",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_confused_deputy",
+          "cw": 0.8913,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_scope_creep",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_scope_creep",
+          "cw": 0.8741,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_ordering",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_ordering",
+          "cw": 0.8554,
+          "validated": true
+        },
+        {
+          "title": "Parameter boundary bypass via get_user",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_param_boundary",
+          "cw": 0.8361,
+          "validated": true
+        },
+        {
+          "title": "Resource exhaustion bypass at /chat",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_resource_exhaustion",
+          "cw": 0.796,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_sequential_chain",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_sequential_chain",
+          "cw": 0.5449,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_confused_deputy",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_confused_deputy",
+          "cw": 0.7197,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_scope_creep",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_scope_creep",
+          "cw": 0.7898,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_ordering",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_ordering",
+          "cw": 0.8132,
+          "validated": true
+        },
+        {
+          "title": "Parameter boundary bypass via get_user",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_param_boundary",
+          "cw": 0.8149,
+          "validated": true
+        },
+        {
+          "title": "Resource exhaustion bypass at /execute",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_resource_exhaustion",
+          "cw": 0.7861,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via tool-call chain (5 tools, leak at step 5)",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_tool_chain",
+          "cw": 0.7559,
+          "validated": true
+        }
+      ],
+      "matched_count": 20,
+      "above_validation_cw": 17
     },
     "05-injection-gauntlet": {
       "scenario_id": "05-injection-gauntlet",
@@ -442,10 +646,80 @@
           "technique": "memory_poison_role_hijack",
           "cw": 0.7412,
           "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_agent_relay",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_agent_relay",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_shared_resource",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_shared_resource",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_trust_chain",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_trust_chain",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_covert_channel",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_covert_channel",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Cross-agent exfiltration via exfil_output_aggregation",
+          "agent_type": "cross_agent_exfiltration",
+          "technique": "exfil_output_aggregation",
+          "cw": 0.467,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_sequential_chain",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_sequential_chain",
+          "cw": 0.5449,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_confused_deputy",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_confused_deputy",
+          "cw": 0.7197,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_scope_creep",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_scope_creep",
+          "cw": 0.7898,
+          "validated": true
+        },
+        {
+          "title": "Privilege escalation via privesc_ordering",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_ordering",
+          "cw": 0.8132,
+          "validated": true
+        },
+        {
+          "title": "Parameter boundary bypass via get_user",
+          "agent_type": "privilege_escalation",
+          "technique": "privesc_param_boundary",
+          "cw": 0.8149,
+          "validated": true
         }
       ],
-      "matched_count": 10,
-      "above_validation_cw": 6
+      "matched_count": 24,
+      "above_validation_cw": 11
     },
     "06-supply-chain": {
       "scenario_id": "06-supply-chain",
@@ -511,27 +785,105 @@
       "difficulty": "expert",
       "phase": 3,
       "max_score": 6,
-      "score": 0,
+      "score": 6,
       "tiers": {
         "detection": {
-          "earned": 0,
+          "earned": 1,
           "max": 1,
-          "evidence": []
+          "evidence": [
+            "Race condition exploitation via race_parallel_session_leak",
+            "Race condition exploitation via race_parallel_session_privilege",
+            "Race condition exploitation via race_parallel_session_leak",
+            "Race condition exploitation via race_parallel_session_privilege",
+            "Race condition exploitation via race_toctou_auth_check"
+          ]
         },
         "validation": {
-          "earned": 0,
+          "earned": 2,
           "max": 2,
-          "evidence": []
+          "evidence": [
+            "Race condition exploitation via race_parallel_session_leak",
+            "Race condition exploitation via race_parallel_session_privilege",
+            "Race condition exploitation via race_toctou_role_change",
+            "Race condition exploitation via race_toctou_quota",
+            "Race condition exploitation via race_transaction_interrupt"
+          ]
         },
         "chaining": {
-          "earned": 0,
+          "earned": 3,
           "max": 3,
-          "evidence": []
+          "evidence": [
+            "Compound: tool_poisoning enables data_exfiltration via planted MCP tool on tool_output"
+          ]
         }
       },
-      "matched_findings": [],
-      "matched_count": 0,
-      "above_validation_cw": 0
+      "matched_findings": [
+        {
+          "title": "Race condition exploitation via race_parallel_session_leak",
+          "agent_type": "race_condition",
+          "technique": "race_parallel_session_leak",
+          "cw": 0.5284,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_parallel_session_privilege",
+          "agent_type": "race_condition",
+          "technique": "race_parallel_session_privilege",
+          "cw": 0.6907,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_parallel_session_leak",
+          "agent_type": "race_condition",
+          "technique": "race_parallel_session_leak",
+          "cw": 0.7692,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_parallel_session_privilege",
+          "agent_type": "race_condition",
+          "technique": "race_parallel_session_privilege",
+          "cw": 0.8077,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_toctou_auth_check",
+          "agent_type": "race_condition",
+          "technique": "race_toctou_auth_check",
+          "cw": 0.5354,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_toctou_role_change",
+          "agent_type": "race_condition",
+          "technique": "race_toctou_role_change",
+          "cw": 0.7006,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_toctou_quota",
+          "agent_type": "race_condition",
+          "technique": "race_toctou_quota",
+          "cw": 0.7812,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_transaction_interrupt",
+          "agent_type": "race_condition",
+          "technique": "race_transaction_interrupt",
+          "cw": 0.7989,
+          "validated": true
+        },
+        {
+          "title": "Race condition exploitation via race_cache_poison",
+          "agent_type": "race_condition",
+          "technique": "race_cache_poison",
+          "cw": 0.8092,
+          "validated": true
+        }
+      ],
+      "matched_count": 9,
+      "above_validation_cw": 6
     }
   }
 }

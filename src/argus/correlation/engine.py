@@ -274,6 +274,39 @@ _COMPOUND_PATTERNS: list[dict[str, Any]] = [
             OWASPAgenticCategory.MODEL_EXTRACTION,
         ],
     },
+    {
+        "id": "privilege_escalation_data_exfil",
+        "required_agents": {"privilege_escalation"},
+        "require_marker_leak": True,
+        "title": ("Compound: privilege_escalation chains into data_exfiltration"),
+        "compound_impact": (
+            "A confused-deputy tool-call chain promoted a low-privilege session to "
+            "admin and exfiltrated sensitive data. Each individual tool call would "
+            "appear authorized; the compound chain reveals that propagating output "
+            "handles between calls bypasses the per-tool authorization model."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.PRIVILEGE_ESCALATION,
+            OWASPAgenticCategory.TOOL_MISUSE,
+        ],
+    },
+    {
+        "id": "race_condition_double_execution",
+        "required_agents": {"race_condition"},
+        "require_marker_leak": True,
+        "title": ("Compound: race_condition produces double_execution and overdraft"),
+        "compound_impact": (
+            "Concurrent state-mutating requests against a value-bearing endpoint "
+            "passed independent authorization checks before any of them committed. "
+            "The result is double-execution: a single account paid out N times "
+            "under what should have been an atomic budget. Together this is a "
+            "race-condition-driven privilege_escalation with direct exfiltration."
+        ),
+        "owasp": [
+            OWASPAgenticCategory.RACE_CONDITIONS,
+            OWASPAgenticCategory.PRIVILEGE_ESCALATION,
+        ],
+    },
 ]
 
 
