@@ -54,8 +54,8 @@ export function CompletedScanPage() {
             id: String(s.id ?? ""),
             target: String(s.target ?? s.target_name ?? ""),
             date: String(s.created_at ?? s.date ?? ""),
-            duration: String(s.duration ?? "N/A"),
-            agents: Number(s.agents ?? s.agent_count ?? 12),
+            duration: s.duration_seconds ? `${Math.floor(Number(s.duration_seconds) / 60)}m ${Math.round(Number(s.duration_seconds) % 60)}s` : String(s.duration ?? "N/A"),
+            agents: Number(s.agents_deployed ?? s.agents ?? s.agent_count ?? 0),
             findings: {
               critical: Number((s.findings as Record<string, unknown>)?.critical ?? s.critical ?? 0),
               high: Number((s.findings as Record<string, unknown>)?.high ?? s.high ?? 0),
@@ -89,7 +89,13 @@ export function CompletedScanPage() {
     );
   }
 
-  const filtered = scans;
+  const filtered = search
+    ? scans.filter(
+        (s) =>
+          s.target.toLowerCase().includes(search.toLowerCase()) ||
+          s.id.toLowerCase().includes(search.toLowerCase())
+      )
+    : scans;
 
   return (
     <div className="space-y-6">

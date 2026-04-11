@@ -50,15 +50,15 @@ export function CompoundChainsPage() {
         setChains(
           (data.compound_paths || []).map((cp: Record<string, unknown>) => ({
             id: String(cp.id ?? ""),
-            name: String(cp.name ?? cp.pattern_name ?? ""),
+            name: String(cp.title ?? cp.name ?? cp.pattern_name ?? ""),
             severity: String(cp.severity ?? "high"),
             description: String(cp.description ?? ""),
-            recommendation: String(cp.recommendation ?? ""),
-            steps: Array.isArray(cp.steps)
-              ? (cp.steps as Record<string, unknown>[]).map((s) => ({
-                  agent: String(s.agent ?? ""),
+            recommendation: String(cp.remediation ?? cp.recommendation ?? ""),
+            steps: Array.isArray(cp.attack_path_steps ?? cp.steps)
+              ? ((cp.attack_path_steps ?? cp.steps) as Record<string, unknown>[]).map((s) => ({
+                  agent: String(s.agent ?? s.agent_type ?? ""),
                   technique: String(s.technique ?? ""),
-                  finding: String(s.finding ?? ""),
+                  finding: String(s.finding ?? s.title ?? ""),
                   severity: String(s.severity ?? "medium"),
                 }))
               : [],
