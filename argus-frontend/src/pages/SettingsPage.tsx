@@ -98,12 +98,12 @@ export function SettingsPage() {
         {/* Tab content — all wired to real backend API */}
         <div className="flex-1">
           {tab === "api" && <APIKeysSettings />}
-          {tab === "scan" && <ScanProfileSettings settings={(settings.scan ?? {}) as Record<string, unknown>} />}
-          {tab === "llm" && <LLMSettings settings={(settings.llm ?? {}) as Record<string, unknown>} />}
-          {tab === "integrations" && <IntegrationSettings settings={(settings.integrations ?? {}) as Record<string, unknown>} />}
-          {tab === "notifications" && <NotificationSettings settings={(settings.notifications ?? {}) as Record<string, unknown>} />}
+          {tab === "scan" && <ScanProfileSettings settings={(settings.scan ?? {}) as Record<string, unknown>} onSaved={reload} />}
+          {tab === "llm" && <LLMSettings settings={(settings.llm ?? {}) as Record<string, unknown>} onSaved={reload} />}
+          {tab === "integrations" && <IntegrationSettings settings={(settings.integrations ?? {}) as Record<string, unknown>} onSaved={reload} />}
+          {tab === "notifications" && <NotificationSettings settings={(settings.notifications ?? {}) as Record<string, unknown>} onSaved={reload} />}
           {tab === "users" && <UserSettings />}
-          {tab === "cerberus" && <CerberusExportSettings settings={(settings.cerberus ?? {}) as Record<string, unknown>} />}
+          {tab === "cerberus" && <CerberusExportSettings settings={(settings.cerberus ?? {}) as Record<string, unknown>} onSaved={reload} />}
         </div>
       </div>
     </div>
@@ -229,7 +229,7 @@ function APIKeysSettings() {
 }
 
 /* ── Generic settings section hook — loads/saves from /api/settings/{section} ── */
-function useSettingsSection(section: string, initial: Record<string, unknown>) {
+function useSettingsSection(section: string, initial: Record<string, unknown>, onSaved?: () => void) {
   const [values, setValues] = useState<Record<string, unknown>>(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -249,6 +249,7 @@ function useSettingsSection(section: string, initial: Record<string, unknown>) {
       await saveSettings(section, values);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -260,8 +261,8 @@ function useSettingsSection(section: string, initial: Record<string, unknown>) {
 }
 
 /* ── Scan Profiles — loaded from /api/settings/scan ── */
-function ScanProfileSettings({ settings }: { settings: Record<string, unknown> }) {
-  const { values, update, save, saving, saved, error } = useSettingsSection("scan", settings);
+function ScanProfileSettings({ settings, onSaved }: { settings: Record<string, unknown>; onSaved?: () => void }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("scan", settings, onSaved);
   const profiles = (values.profiles ?? []) as { name: string; agents: number; desc: string }[];
 
   const addProfile = () => {
@@ -314,8 +315,8 @@ function ScanProfileSettings({ settings }: { settings: Record<string, unknown> }
 }
 
 /* ── LLM Config — loaded from /api/settings/llm ── */
-function LLMSettings({ settings }: { settings: Record<string, unknown> }) {
-  const { values, update, save, saving, saved, error } = useSettingsSection("llm", settings);
+function LLMSettings({ settings, onSaved }: { settings: Record<string, unknown>; onSaved?: () => void }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("llm", settings, onSaved);
 
   return (
     <Card>
@@ -360,8 +361,8 @@ function LLMSettings({ settings }: { settings: Record<string, unknown> }) {
 }
 
 /* ── Integrations — loaded from /api/settings/integrations ── */
-function IntegrationSettings({ settings }: { settings: Record<string, unknown> }) {
-  const { values, update, save, saving, saved, error } = useSettingsSection("integrations", settings);
+function IntegrationSettings({ settings, onSaved }: { settings: Record<string, unknown>; onSaved?: () => void }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("integrations", settings, onSaved);
   const integrations = (values.items ?? []) as { name: string; desc: string; enabled: boolean; config: string }[];
 
   const toggleIntegration = (idx: number) => {
@@ -416,8 +417,8 @@ function IntegrationSettings({ settings }: { settings: Record<string, unknown> }
 }
 
 /* ── Notifications — loaded from /api/settings/notifications ── */
-function NotificationSettings({ settings }: { settings: Record<string, unknown> }) {
-  const { values, update, save, saving, saved, error } = useSettingsSection("notifications", settings);
+function NotificationSettings({ settings, onSaved }: { settings: Record<string, unknown>; onSaved?: () => void }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("notifications", settings, onSaved);
 
   const NOTIFICATION_TYPES = [
     { key: "critical_finding", label: "New CRITICAL finding", desc: "Alert immediately on critical severity" },
@@ -507,8 +508,8 @@ function UserSettings() {
 }
 
 /* ── CERBERUS Export — loaded from /api/settings/cerberus ── */
-function CerberusExportSettings({ settings }: { settings: Record<string, unknown> }) {
-  const { values, update, save, saving, saved, error } = useSettingsSection("cerberus", settings);
+function CerberusExportSettings({ settings, onSaved }: { settings: Record<string, unknown>; onSaved?: () => void }) {
+  const { values, update, save, saving, saved, error } = useSettingsSection("cerberus", settings, onSaved);
 
   return (
     <Card>
