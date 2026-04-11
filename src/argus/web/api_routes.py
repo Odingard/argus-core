@@ -131,11 +131,11 @@ class ScheduledScanCreate(BaseModel):
 
 
 class ScheduledScanUpdate(BaseModel):
-    name: str | None = None
-    cron_expression: str | None = None
+    name: str | None = Field(default=None, max_length=200)
+    cron_expression: str | None = Field(default=None, max_length=100)
     description: str | None = None
     timezone: str | None = None
-    scan_profile: str | None = None
+    scan_profile: str | None = Field(default=None, pattern="^(full|quick|stealth|phase5_only)$")
     non_destructive: bool | None = None
     timeout_seconds: float | None = None
     agents: list[str] | None = None

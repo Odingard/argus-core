@@ -25,6 +25,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -271,6 +272,7 @@ class DBSetting(Base):
     """
 
     __tablename__ = "settings"
+    __table_args__ = (UniqueConstraint("section", "key", name="uq_settings_section_key"),)
 
     id = Column(String(36), primary_key=True, default=_uuid)
     section = Column(String(50), nullable=False, index=True)  # scan, llm, notifications, integrations, cerberus
