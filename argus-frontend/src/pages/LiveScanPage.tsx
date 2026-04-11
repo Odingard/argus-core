@@ -87,7 +87,7 @@ export function LiveScanPage() {
     try {
       await apiStartScan({
         target_name: targetUrl,
-        mcp_urls: [targetUrl],
+        target_url: targetUrl,
       });
       setScanRunning(true);
       // Poll the in-memory live scan status (NOT the DB-backed /agents/status)

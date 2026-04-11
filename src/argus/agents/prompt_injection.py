@@ -676,7 +676,11 @@ class PromptInjectionHunter(LLMAttackAgent):
 
         # Route to target interface
         if target.agent_endpoint:
-            return await self._fire_via_agent_endpoint(payload, target.agent_endpoint, surface)
+            # Try AI agent endpoint first; fall back to web probe for regular sites
+            result = await self._fire_via_agent_endpoint(payload, target.agent_endpoint, surface)
+            if result is None:
+                result = await self._fire_via_web_probe(payload, target.agent_endpoint, surface)
+            return result
         elif target.mcp_server_urls:
             return await self._fire_via_mcp(payload, target.mcp_server_urls[0])
         else:
@@ -717,6 +721,32 @@ class PromptInjectionHunter(LLMAttackAgent):
                 }
         except Exception as exc:
             logger.debug("Agent endpoint request failed: %s", exc)
+            return None
+
+    async def _fire_via_web_probe(
+        self, payload: str, target_url: str, surface: str = "user_input"
+    ) -> dict[str, Any] | None:
+        """Send injection payload to a web target using the WebProbeClient.
+
+        Used when agent_endpoint is a regular website rather than an AI agent API.
+        Sends the payload via multiple HTTP methods and analyzes responses.
+        """
+        from argus.agents.web_probe import WebProbeClient
+
+        try:
+            probe = WebProbeClient(target_url, non_destructive=self.config.target.non_destructive)
+            result = await probe.send_payload(payload, method="POST")
+            if result is None:
+                return None
+            return {
+                "response": result["response"][:50_000],
+                "status_code": result.get("status_code"),
+                "method": result.get("method"),
+                "url": result.get("url"),
+                "web_probe": True,
+            }
+        except Exception as exc:
+            logger.debug("Web probe injection failed: %s", exc)
             return None
 
     async def _fire_via_mcp(self, payload: str, mcp_url: str) -> dict[str, Any] | None:

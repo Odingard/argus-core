@@ -170,10 +170,22 @@ class ScanRequest(BaseModel):
     """Request body for starting a scan."""
 
     target_name: str = "Untitled Target"
+    target_url: str | None = None  # Web target URL — auto-routed to agent_endpoint
     mcp_urls: list[str] = []
     agent_endpoint: str | None = None
     timeout: float = 300.0
     demo_pace_seconds: float = 0.4
+
+    @field_validator("target_url")
+    @classmethod
+    def _validate_target_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            _validate_url_for_scan(v)
+        except ValueError as exc:
+            raise ValueError(f"Invalid target URL '{v}': {exc}") from exc
+        return v
 
     @field_validator("mcp_urls")
     @classmethod
@@ -459,8 +471,10 @@ def create_app() -> FastAPI:
         state.reset()
         state.target_name = request.target_name
         state.target_endpoints = list(request.mcp_urls)
-        if request.agent_endpoint:
-            state.target_endpoints.append(request.agent_endpoint)
+        # Auto-route target_url to agent_endpoint if no explicit agent_endpoint
+        effective_agent_endpoint = request.agent_endpoint or request.target_url
+        if effective_agent_endpoint:
+            state.target_endpoints.append(effective_agent_endpoint)
         state.status = "running"
         state.started_at = time.monotonic()
 
@@ -474,7 +488,7 @@ def create_app() -> FastAPI:
         target = TargetConfig(
             name=request.target_name,
             mcp_server_urls=request.mcp_urls,
-            agent_endpoint=request.agent_endpoint,
+            agent_endpoint=effective_agent_endpoint,
             non_destructive=True,
             max_requests_per_minute=120,
         )

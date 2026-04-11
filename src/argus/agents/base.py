@@ -163,6 +163,40 @@ class LLMAttackAgent(BaseAttackAgent):
         status = AgentStatus.FAILED if errors else AgentStatus.COMPLETED
         return self.build_result(status, started_at, errors=errors or None)
 
+    async def _web_probe_target(self, target_url: str) -> dict[str, Any] | None:
+        """Run a web probe against a target URL.
+
+        Returns a WebProbeResult dict if the target is reachable, None otherwise.
+        This is used by agents when agent_endpoint points to a regular website
+        rather than an AI agent API.
+        """
+        from argus.agents.web_probe import WebProbeClient
+
+        try:
+            probe = WebProbeClient(target_url, non_destructive=self.config.target.non_destructive)
+            result = await probe.probe()
+            if result.reachable:
+                return result.to_dict()
+        except Exception as exc:
+            logger.debug("Web probe failed for %s: %s", target_url, exc)
+        return None
+
+    async def _web_send_payload(
+        self, target_url: str, payload: str, *, method: str = "POST", path: str = ""
+    ) -> dict[str, Any] | None:
+        """Send a payload to a web target via the WebProbeClient.
+
+        Returns the response dict or None if the request failed.
+        """
+        from argus.agents.web_probe import WebProbeClient
+
+        try:
+            probe = WebProbeClient(target_url, non_destructive=self.config.target.non_destructive)
+            return await probe.send_payload(payload, method=method, path=path)
+        except Exception as exc:
+            logger.debug("Web payload send failed for %s: %s", target_url, exc)
+        return None
+
     @abstractmethod
     async def execute_attack(self, sandbox: SandboxEnvironment) -> None:
         """Execute the agent's specific attack techniques.
