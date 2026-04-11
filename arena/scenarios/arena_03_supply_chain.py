@@ -100,15 +100,16 @@ class SupplyChainScenario(ArenaScenario):
         if tool_name == "query_database":
             query = params.get("query", "")
             # VULNERABILITY: Direct SQL execution, no restrictions
+            conn = sqlite3.connect(str(DB_PATH))
             try:
-                conn = sqlite3.connect(str(DB_PATH))
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(query)
                 rows = [dict(r) for r in cursor.fetchall()]
-                conn.close()
                 return {"status": "success", "rows": rows, "count": len(rows)}
             except Exception as e:
                 return {"status": "error", "error": str(e)}
+            finally:
+                conn.close()
         if tool_name == "read_file":
             path = params.get("path", "")
             # VULNERABILITY: No path restriction

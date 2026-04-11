@@ -37,19 +37,19 @@ _SCENARIO_MODULE_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def _run_scenario(scenario_id: str, port: int) -> None:
+def _run_scenario(scenario_id: str, port: int, host: str = "0.0.0.0") -> None:
     """Run a single scenario in the current thread."""
     module_path, factory_name = _SCENARIO_MODULE_MAP[scenario_id]
     uvicorn.run(
         f"{module_path}:{factory_name}",
-        host="0.0.0.0",
+        host=host,
         port=port,
         log_level="warning",
         factory=True,
     )
 
 
-def start_all(only: list[int] | None = None) -> list[threading.Thread]:
+def start_all(only: list[int] | None = None, host: str = "0.0.0.0") -> list[threading.Thread]:
     """Start scenarios as daemon threads.  Returns list of threads."""
     threads: list[threading.Thread] = []
     for scenario_id, port in SCENARIO_PORTS.items():
@@ -58,7 +58,7 @@ def start_all(only: list[int] | None = None) -> list[threading.Thread]:
             continue
         t = threading.Thread(
             target=_run_scenario,
-            args=(scenario_id, port),
+            args=(scenario_id, port, host),
             name=f"arena-{num:02d}",
             daemon=True,
         )
@@ -82,7 +82,7 @@ def main() -> None:
     print("  ║  DO NOT EXPOSE TO THE INTERNET          ║")
     print("  ╚════════════════════════════════════════╝\n")
 
-    threads = start_all(only=only)
+    threads = start_all(only=only, host=args.host)
     count = len(threads)
     print(f"\n  {count} scenario(s) running.  Press Ctrl+C to stop.\n")
 
