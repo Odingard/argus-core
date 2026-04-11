@@ -722,6 +722,13 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         markers = ResponseMatcher.find_sensitive_markers(text)
         priv_indicators = ResponseMatcher.find_privilege_indicators(text)
 
+        # metadata_service alone is weak evidence (the probe itself contains
+        # 169.254.169.254 so an echo-back would match).  Require it to
+        # co-occur with at least one *other* cloud indicator or a sensitive
+        # marker before counting it.
+        if cloud_indicators == ["metadata_service"] and not markers:
+            return None
+
         # Require at least one specific cloud artifact OR standard markers
         if not cloud_indicators and not markers and not priv_indicators:
             return None
