@@ -48,7 +48,7 @@ Continuous security platform — not one-shot. Persistent deployment with scan h
 
 ## Branch Strategy
 - `main` — stable releases
-- Feature branches: `devin/<timestamp>-<descriptive-slug>`
+- Feature branches: `feature/<descriptive-slug>`
 
 ## Key Principles
 - Every finding must have reproducible proof-of-exploitation

@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+recursive-include src/argus/corpus/data *.json
+recursive-include src/argus/web/static *

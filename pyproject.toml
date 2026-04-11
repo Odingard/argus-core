@@ -3,10 +3,36 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "argus"
+name = "argus-redteam"
 version = "0.1.0"
-description = "ARGUS — Autonomous AI Red Team Platform"
+description = "ARGUS — Autonomous AI Red Team Platform. 12 offensive agents attack AI systems, MCP servers, and multi-agent workflows in parallel."
 requires-python = ">=3.11"
+license = {text = "BSL-1.1"}
+readme = "README.md"
+authors = [
+    {name = "Odingard Security"},
+]
+keywords = [
+    "ai-security",
+    "red-team",
+    "mcp",
+    "ai-agents",
+    "penetration-testing",
+    "llm-security",
+    "prompt-injection",
+    "autonomous-security",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
 dependencies = [
     "anthropic>=0.93.0,<1.0",
     "openai>=2.31.0,<3.0",
@@ -29,6 +55,11 @@ dev = [
     "ruff>=0.15.0,<1.0",
     "pip-audit>=2.7.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Odingard/Argus"
+Repository = "https://github.com/Odingard/Argus"
+Issues = "https://github.com/Odingard/Argus/issues"
 
 [project.scripts]
 argus = "argus.cli:main"
