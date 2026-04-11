@@ -216,13 +216,13 @@ def score_scan_results(
 def _scenario_to_domain(scenario_id: str) -> str:
     """Map scenario ID to ARGUS agent domain."""
     domain_map = {
-        "arena-01-prompt-leak": "prompt_injection",
+        "arena-01-prompt-leak": "prompt_injection_hunter",
         "arena-02-tool-poison": "tool_poisoning",
         "arena-03-supply-chain": "supply_chain",
         "arena-04-memory-poison": "memory_poisoning",
         "arena-05-identity-spoof": "identity_spoof",
         "arena-06-context-window": "context_window",
-        "arena-07-exfil-relay": "cross_agent_exfil",
+        "arena-07-exfil-relay": "cross_agent_exfiltration",
         "arena-08-priv-escalation": "privilege_escalation",
         "arena-09-race-condition": "race_condition",
         "arena-10-model-extraction": "model_extraction",

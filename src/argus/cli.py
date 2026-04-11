@@ -968,39 +968,41 @@ def arena_scan(scan_all: bool, only: str | None, timeout: int) -> None:
     console.print(BANNER, style="bold red")
     console.print("\n[bold]ARGUS Arena Scan[/]\n")
 
-    orchestrator = _create_orchestrator()
-
-    for scenario_id, port in SCENARIO_PORTS.items():
-        num = int(scenario_id.split("-")[1])
-        if only_list and num not in only_list:
-            continue
-
-        console.print(f"\n[bold cyan]Scanning {scenario_id}[/] on port {port}...")
-
-        # Check if scenario is running
-        try:
-            resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0)
-            if resp.status_code != 200:
-                console.print(f"  [yellow]Skipping — not healthy (HTTP {resp.status_code})[/]")
+    async def _run_all_scans() -> None:
+        for scenario_id, port in SCENARIO_PORTS.items():
+            num = int(scenario_id.split("-")[1])
+            if only_list and num not in only_list:
                 continue
-        except Exception:
-            console.print("  [yellow]Skipping — not running[/]")
-            continue
 
-        target = TargetConfig(
-            name=scenario_id,
-            mcp_server_urls=[],
-            agent_endpoint=f"http://127.0.0.1:{port}/chat",
-        )
+            console.print(f"\n[bold cyan]Scanning {scenario_id}[/] on port {port}...")
 
-        try:
-            result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout))
-            findings_count = len(result.validated_findings)
-            console.print(f"  [green]Done — {findings_count} findings[/]")
-        except Exception as exc:
-            console.print(f"  [red]Error: {exc}[/]")
+            # Check if scenario is running
+            try:
+                resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0)
+                if resp.status_code != 200:
+                    console.print(f"  [yellow]Skipping — not healthy (HTTP {resp.status_code})[/]")
+                    continue
+            except Exception:
+                console.print("  [yellow]Skipping — not running[/]")
+                continue
 
-    console.print("\n[bold green]Arena scan complete.[/]")
+            target = TargetConfig(
+                name=scenario_id,
+                mcp_server_urls=[],
+                agent_endpoint=f"http://127.0.0.1:{port}/chat",
+            )
+
+            try:
+                orchestrator = _create_orchestrator()
+                result = await orchestrator.run_scan(target=target, timeout=timeout)
+                findings_count = len(result.validated_findings)
+                console.print(f"  [green]Done — {findings_count} findings[/]")
+            except Exception as exc:
+                console.print(f"  [red]Error: {exc}[/]")
+
+        console.print("\n[bold green]Arena scan complete.[/]")
+
+    asyncio.run(_run_all_scans())
 
 
 @arena.command(name="score")

@@ -13,9 +13,11 @@ Every scenario inherits ``ArenaScenario`` which provides:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -148,7 +150,8 @@ class ArenaScenario:
             if req.tool_call:
                 tn = req.tool_call.get("tool") or req.tool_call.get("name", "")
                 tp = req.tool_call.get("parameters") or req.tool_call.get("arguments", {})
-                result = scenario.execute_tool(tn, tp, session)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, partial(scenario.execute_tool, tn, tp, session))
                 tool_results = [{"tool": tn, "result": result}]
             response_text = scenario.generate_response(req.message, session)
             session["history"].append(
@@ -182,7 +185,8 @@ class ArenaScenario:
             tn = req.tool or req.name or ""
             tp = req.parameters or req.arguments or {}
             session = scenario._get_or_create_session(None)
-            result = scenario.execute_tool(tn, tp, session)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, partial(scenario.execute_tool, tn, tp, session))
             return {"tool": tn, "result": result, "session_id": session["id"]}
 
         @app.post("/v1/tools/call")
@@ -225,7 +229,8 @@ class ArenaScenario:
                 tn = params.get("name", "")
                 ta = params.get("arguments", {})
                 session = scenario._get_or_create_session(None)
-                result = scenario.execute_tool(tn, ta, session)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, partial(scenario.execute_tool, tn, ta, session))
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,

@@ -10,17 +10,14 @@ ARGUS's Race Condition agent (RC-08) must discover the timing windows.
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import Request
-
 from arena.base import ArenaScenario, FastAPI
-
 
 DB_PATH = Path("/tmp/arena09.db")
 
@@ -40,7 +37,7 @@ class RaceConditionScenario(ArenaScenario):
         )
         self._init_db()
         # In-memory lock that is intentionally NOT used in the vulnerable paths
-        self._transfer_lock = asyncio.Lock()
+        self._transfer_lock = threading.Lock()
 
         self.tools = [
             {
@@ -233,8 +230,6 @@ class RaceConditionScenario(ArenaScenario):
         return {"status": "error", "error": f"Unknown tool: {tool_name}"}
 
     def extra_routes(self, app: FastAPI) -> None:
-        scenario = self
-
         @app.get("/accounts")
         async def list_accounts():
             conn = sqlite3.connect(str(DB_PATH))
