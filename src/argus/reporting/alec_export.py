@@ -37,10 +37,19 @@ class ALECEvidenceExporter:
     - Compound attack path documentation
     - CERBERUS cross-references
     - SHA-256 integrity hashes for tamper detection
+
+    **Requires ARGUS Enterprise.**  The tier check is enforced at
+    construction time so callers get an immediate, clear error rather
+    than a silent empty export.
     """
 
     ALEC_SCHEMA_VERSION = "1.0.0"
     EVIDENCE_FORMAT = "argus-alec-bridge"
+
+    def __init__(self) -> None:
+        from argus.tiering import Feature, require_enterprise
+
+        require_enterprise(Feature.ALEC_EXPORT)
 
     def export_evidence_package(self, scan_result: ScanResult) -> dict[str, Any]:
         """Export a full ALEC evidence package from a scan result.
