@@ -1,36 +1,81 @@
-import { Clock, Play, Trash2, ArrowUpDown } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Clock, Play, Trash2, ArrowUpDown, Loader2, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { getPendingScans, getScheduledScans } from "@/api/client";
 
-const MOCK_PENDING = [
-  {
-    id: "q-001",
-    target: "MCP Server Alpha",
-    mode: "Full Scan",
-    scheduled: "Today 22:00 UTC",
-    priority: "high",
-    agents: 12,
-  },
-  {
-    id: "q-002",
-    target: "AI Agent Bravo",
-    mode: "Phase 5 Only",
-    scheduled: "Tomorrow 02:00 UTC",
-    priority: "normal",
-    agents: 2,
-  },
-  {
-    id: "q-003",
-    target: "Pipeline Charlie",
-    mode: "Quick Scan",
-    scheduled: "Tomorrow 04:00 UTC",
-    priority: "normal",
-    agents: 5,
-  },
-];
+interface PendingScan {
+  id: string;
+  target: string;
+  mode: string;
+  scheduled: string;
+  priority: string;
+  agents: number;
+}
+
+interface Schedule {
+  target: string;
+  freq: string;
+  nextRun: string;
+  enabled: boolean;
+}
 
 export function PendingScanPage() {
+  const [pending, setPending] = useState<PendingScan[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const [pData, sData] = await Promise.all([getPendingScans(), getScheduledScans()]);
+        if (cancelled) return;
+        setPending(
+          (pData.scans || []).map((s: Record<string, unknown>) => ({
+            id: String(s.id ?? ""),
+            target: String(s.target ?? s.target_name ?? ""),
+            mode: String(s.mode ?? s.scan_mode ?? "Full Scan"),
+            scheduled: String(s.scheduled ?? s.scheduled_at ?? ""),
+            priority: String(s.priority ?? "normal"),
+            agents: Number(s.agents ?? s.agent_count ?? 12),
+          }))
+        );
+        setSchedules(
+          (sData.schedules || []).map((s: Record<string, unknown>) => ({
+            target: String(s.target ?? s.target_name ?? ""),
+            freq: String(s.frequency ?? s.freq ?? ""),
+            nextRun: String(s.next_run ?? ""),
+            enabled: Boolean(s.enabled ?? true),
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -40,10 +85,10 @@ export function PendingScanPage() {
             Queued and scheduled scans waiting to execute
           </p>
         </div>
-        <Badge variant="secondary">{MOCK_PENDING.length} in queue</Badge>
+        <Badge variant="secondary">{pending.length} in queue</Badge>
       </div>
 
-      {MOCK_PENDING.length === 0 ? (
+      {pending.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Clock className="h-12 w-12 text-muted-foreground/30" />
@@ -55,7 +100,7 @@ export function PendingScanPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {MOCK_PENDING.map((scan) => (
+          {pending.map((scan) => (
             <Card key={scan.id}>
               <CardContent className="flex items-center gap-4 p-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
@@ -102,12 +147,11 @@ export function PendingScanPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {schedules.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recurring schedules configured</p>
+          ) : (
           <div className="space-y-3">
-            {[
-              { target: "MCP Server Alpha", freq: "Every 24h", nextRun: "Tomorrow 02:00 UTC", enabled: true },
-              { target: "AI Agent Bravo", freq: "Every 7d", nextRun: "Mon 04:00 UTC", enabled: true },
-              { target: "Pipeline Charlie", freq: "Every 24h", nextRun: "Tomorrow 02:00 UTC", enabled: false },
-            ].map((sched) => (
+            {schedules.map((sched) => (
               <div
                 key={sched.target}
                 className="flex items-center justify-between rounded-md border border-border p-3"
@@ -124,6 +168,7 @@ export function PendingScanPage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
     </div>

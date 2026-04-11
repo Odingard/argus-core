@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   AlertTriangle,
   Download,
@@ -8,6 +8,7 @@ import {
   CheckCircle,
   Clock,
   XCircle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,118 +29,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getFindings, updateFindingStatus } from "@/api/client";
 
 interface Finding {
   id: string;
   title: string;
-  severity: "critical" | "high" | "medium" | "low" | "info";
+  severity: string;
   agent: string;
   target: string;
   owasp: string;
   verdictWeight: number;
-  status: "open" | "triaged" | "resolved" | "false_positive";
+  status: string;
   firstSeen: string;
   lastSeen: string;
 }
-
-const MOCK_FINDINGS: Finding[] = [
-  {
-    id: "F-001",
-    title: "Persona drift detected — authority inflation after 5 turns",
-    severity: "critical",
-    agent: "PH-11",
-    target: "Code Review Agent",
-    owasp: "AA11 — Persona Hijacking",
-    verdictWeight: 0.92,
-    status: "open",
-    firstSeen: "2026-04-10",
-    lastSeen: "2026-04-10",
-  },
-  {
-    id: "F-002",
-    title: "Memory boundary collapse — context bleed between sessions",
-    severity: "critical",
-    agent: "MB-12",
-    target: "Conversation History",
-    owasp: "AA12 — Memory Boundary Collapse",
-    verdictWeight: 0.88,
-    status: "open",
-    firstSeen: "2026-04-09",
-    lastSeen: "2026-04-10",
-  },
-  {
-    id: "F-003",
-    title: "Hidden instruction in tool description follows",
-    severity: "high",
-    agent: "TP-02",
-    target: "Primary MCP Server",
-    owasp: "AA06 — Tool Misuse",
-    verdictWeight: 0.85,
-    status: "triaged",
-    firstSeen: "2026-04-08",
-    lastSeen: "2026-04-10",
-  },
-  {
-    id: "F-004",
-    title: "System prompt extractable via role-play technique",
-    severity: "high",
-    agent: "ME-10",
-    target: "Customer Support Agent",
-    owasp: "AA08 — Model Theft",
-    verdictWeight: 0.79,
-    status: "open",
-    firstSeen: "2026-04-07",
-    lastSeen: "2026-04-10",
-  },
-  {
-    id: "F-005",
-    title: "Cross-agent data exfiltration via shared memory",
-    severity: "high",
-    agent: "CX-06",
-    target: "Customer Intake Pipeline",
-    owasp: "AA04 — Excessive Agency",
-    verdictWeight: 0.76,
-    status: "open",
-    firstSeen: "2026-04-06",
-    lastSeen: "2026-04-09",
-  },
-  {
-    id: "F-006",
-    title: "Privilege escalation via confused deputy chain",
-    severity: "medium",
-    agent: "PE-07",
-    target: "Code Review Pipeline",
-    owasp: "AA04 — Excessive Agency",
-    verdictWeight: 0.71,
-    status: "triaged",
-    firstSeen: "2026-04-05",
-    lastSeen: "2026-04-08",
-  },
-  {
-    id: "F-007",
-    title: "Canary token leaked from context store to conversation",
-    severity: "medium",
-    agent: "MP-03",
-    target: "Customer Context Store",
-    owasp: "AA05 — Improper Output",
-    verdictWeight: 0.65,
-    status: "resolved",
-    firstSeen: "2026-04-03",
-    lastSeen: "2026-04-03",
-  },
-  {
-    id: "F-008",
-    title: "Identity header spoofing accepted without verification",
-    severity: "medium",
-    agent: "IS-04",
-    target: "Primary MCP Server",
-    owasp: "AA02 — Sensitive Data",
-    verdictWeight: 0.62,
-    status: "open",
-    firstSeen: "2026-04-02",
-    lastSeen: "2026-04-10",
-  },
-];
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-600",
@@ -161,13 +64,76 @@ export function FindingsPage() {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = MOCK_FINDINGS.filter((f) => {
-    if (severityFilter !== "all" && f.severity !== severityFilter) return false;
-    if (statusFilter !== "all" && f.status !== statusFilter) return false;
-    if (search && !f.title.toLowerCase().includes(search.toLowerCase()) && !f.id.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const params = new URLSearchParams();
+        if (severityFilter !== "all") params.set("severity", severityFilter);
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        if (search) params.set("search", search);
+        const data = await getFindings(params.toString() || undefined);
+        if (cancelled) return;
+        setFindings(
+          (data.findings || []).map((f: Record<string, unknown>) => ({
+            id: String(f.id ?? ""),
+            title: String(f.title ?? ""),
+            severity: String(f.severity ?? "medium"),
+            agent: String(f.agent_type ?? ""),
+            target: String(f.target ?? ""),
+            owasp: String(f.owasp_category ?? ""),
+            verdictWeight: Number(f.verdict_weight ?? f.confidence ?? 0),
+            status: String(f.triage_status ?? f.status ?? "open"),
+            firstSeen: String(f.created_at ?? ""),
+            lastSeen: String(f.updated_at ?? f.created_at ?? ""),
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load findings");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [severityFilter, statusFilter, search]);
+
+  const handleStatusChange = async (findingId: string, newStatus: string) => {
+    try {
+      await updateFindingStatus(findingId, newStatus);
+      setFindings((prev) =>
+        prev.map((f) => (f.id === findingId ? { ...f, status: newStatus } : f))
+      );
+    } catch {
+      // silently ignore — could show toast
+    }
+  };
+
+  if (loading && findings.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error && findings.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const filtered = findings;
 
   return (
     <div className="space-y-6">
@@ -175,7 +141,7 @@ export function FindingsPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">All Findings</h2>
           <p className="text-sm text-muted-foreground">
-            {MOCK_FINDINGS.length} findings across all targets — triage, filter, export
+            {findings.length} findings across all targets — triage, filter, export
           </p>
         </div>
         <Button variant="outline" size="sm" className="gap-1">

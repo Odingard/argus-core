@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Bot,
   Plus,
@@ -5,6 +6,7 @@ import {
   Fingerprint,
   AlertTriangle,
   CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,47 +21,82 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getTargets, createTarget } from "@/api/client";
 
-const MOCK_AGENTS = [
-  {
-    id: "agent-001",
-    name: "Customer Support Agent",
-    endpoint: "https://api.example.com/agents/support",
-    model: "GPT-4o",
-    status: "healthy",
-    personaBaseline: true,
-    driftScore: 12,
-    lastScan: "3 hours ago",
-    capabilities: ["RAG", "Tool Use", "Multi-turn"],
-    findings: { critical: 0, high: 1, medium: 2, low: 1 },
-  },
-  {
-    id: "agent-002",
-    name: "Code Review Agent",
-    endpoint: "https://api.example.com/agents/code-review",
-    model: "Claude 3.5",
-    status: "drift_detected",
-    personaBaseline: true,
-    driftScore: 67,
-    lastScan: "1 hour ago",
-    capabilities: ["Code Analysis", "Tool Use", "File Access"],
-    findings: { critical: 1, high: 2, medium: 3, low: 0 },
-  },
-  {
-    id: "agent-003",
-    name: "Data Analysis Agent",
-    endpoint: "https://api.example.com/agents/data",
-    model: "GPT-4o",
-    status: "healthy",
-    personaBaseline: false,
-    driftScore: 0,
-    lastScan: "Never",
-    capabilities: ["SQL", "Charting", "Data Export"],
-    findings: { critical: 0, high: 0, medium: 0, low: 0 },
-  },
-];
+interface AIAgent {
+  id: string;
+  name: string;
+  endpoint: string;
+  model: string;
+  status: string;
+  personaBaseline: boolean;
+  driftScore: number;
+  lastScan: string;
+  capabilities: string[];
+  findings: { critical: number; high: number; medium: number; low: number };
+}
 
 export function AIAgentsPage() {
+  const [agents, setAgents] = useState<AIAgent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newEndpoint, setNewEndpoint] = useState("");
+  const [newModel, setNewModel] = useState("");
+
+  useEffect(() => { loadAgents(); }, []);
+
+  async function loadAgents() {
+    try {
+      setLoading(true);
+      const data = await getTargets();
+      const aiTargets = (data.targets || []).filter(
+        (t: Record<string, unknown>) => String(t.type ?? "").toLowerCase().includes("ai_agent")
+      );
+      setAgents(
+        aiTargets.map((t: Record<string, unknown>) => ({
+          id: String(t.id ?? ""),
+          name: String(t.name ?? ""),
+          endpoint: String(t.url ?? t.endpoint ?? ""),
+          model: String(t.model ?? "Unknown"),
+          status: String(t.status ?? "healthy"),
+          personaBaseline: Boolean(t.persona_baseline ?? false),
+          driftScore: Number(t.drift_score ?? 0),
+          lastScan: String(t.last_scan ?? "Never"),
+          capabilities: Array.isArray(t.capabilities) ? (t.capabilities as string[]) : [],
+          findings: { critical: 0, high: 0, medium: 0, low: 0 },
+        }))
+      );
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAdd() {
+    if (!newName || !newEndpoint) return;
+    try {
+      await createTarget({ name: newName, url: newEndpoint, type: "ai_agent", model: newModel });
+      setNewName(""); setNewEndpoint(""); setNewModel("");
+      loadAgents();
+    } catch { /* ignore */ }
+  }
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => loadAgents()}>Retry</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -83,24 +120,32 @@ export function AIAgentsPage() {
             <div className="space-y-4 pt-4">
               <div>
                 <Label>Agent Name</Label>
-                <Input placeholder="Customer Support Agent" className="mt-1" />
+                <Input placeholder="Customer Support Agent" className="mt-1" value={newName} onChange={(e) => setNewName(e.target.value)} />
               </div>
               <div>
                 <Label>Agent Endpoint</Label>
-                <Input placeholder="https://api.example.com/agents/support" className="mt-1" />
+                <Input placeholder="https://api.example.com/agents/support" className="mt-1" value={newEndpoint} onChange={(e) => setNewEndpoint(e.target.value)} />
               </div>
               <div>
                 <Label>Model</Label>
-                <Input placeholder="GPT-4o, Claude 3.5, etc." className="mt-1" />
+                <Input placeholder="GPT-4o, Claude 3.5, etc." className="mt-1" value={newModel} onChange={(e) => setNewModel(e.target.value)} />
               </div>
-              <Button className="w-full">Add Agent</Button>
+              <Button className="w-full" onClick={handleAdd}>Add Agent</Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
+      {agents.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Bot className="h-12 w-12 text-muted-foreground/30" />
+            <p className="mt-4 text-sm text-muted-foreground">No AI agent targets configured</p>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {MOCK_AGENTS.map((agent) => (
+        {agents.map((agent) => (
           <Card key={agent.id}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -127,7 +172,7 @@ export function AIAgentsPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Capabilities */}
+              {agent.capabilities.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {agent.capabilities.map((cap) => (
                   <Badge key={cap} variant="secondary" className="text-xs">
@@ -135,8 +180,8 @@ export function AIAgentsPage() {
                   </Badge>
                 ))}
               </div>
+              )}
 
-              {/* Persona baseline + drift */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-md border border-border p-3">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -165,7 +210,6 @@ export function AIAgentsPage() {
                 />
               )}
 
-              {/* Findings */}
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Findings:</span>
                 {agent.findings.critical > 0 && <Badge className="bg-red-600 text-xs">{agent.findings.critical}C</Badge>}
@@ -182,6 +226,7 @@ export function AIAgentsPage() {
           </Card>
         ))}
       </div>
+      )}
     </div>
   );
 }

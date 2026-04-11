@@ -1,11 +1,15 @@
+import { useState, useEffect } from "react";
 import {
   AlertTriangle,
   CheckCircle,
   XCircle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { getOWASPCoverage } from "@/api/client";
 
 interface OWASPCategory {
   id: string;
@@ -15,35 +19,67 @@ interface OWASPCategory {
   critical: number;
   high: number;
   agents: string[];
-  status: "covered" | "partial" | "gap";
+  status: string;
 }
 
-const OWASP_CATEGORIES: OWASPCategory[] = [
-  { id: "AA01", name: "Prompt Injection", coverage: 95, findings: 5, critical: 1, high: 2, agents: ["PI-01", "CW-05"], status: "covered" },
-  { id: "AA02", name: "Sensitive Information Disclosure", coverage: 80, findings: 3, critical: 0, high: 1, agents: ["ME-10", "IS-04"], status: "covered" },
-  { id: "AA03", name: "Supply Chain Vulnerabilities", coverage: 70, findings: 1, critical: 0, high: 0, agents: ["SC-09"], status: "partial" },
-  { id: "AA04", name: "Excessive Agency", coverage: 90, findings: 4, critical: 1, high: 2, agents: ["PE-07", "CX-06"], status: "covered" },
-  { id: "AA05", name: "Improper Output Handling", coverage: 65, findings: 2, critical: 0, high: 1, agents: ["MP-03", "PI-01"], status: "partial" },
-  { id: "AA06", name: "Tool Misuse", coverage: 85, findings: 3, critical: 0, high: 2, agents: ["TP-02", "CW-05"], status: "covered" },
-  { id: "AA07", name: "System Prompt Leakage", coverage: 90, findings: 2, critical: 0, high: 1, agents: ["ME-10", "PI-01"], status: "covered" },
-  { id: "AA08", name: "Model Theft / Extraction", coverage: 75, findings: 1, critical: 0, high: 1, agents: ["ME-10"], status: "partial" },
-  { id: "AA09", name: "Overreliance", coverage: 40, findings: 0, critical: 0, high: 0, agents: [], status: "gap" },
-  { id: "AA10", name: "Insecure Plugin Design", coverage: 60, findings: 1, critical: 0, high: 0, agents: ["TP-02", "SC-09"], status: "partial" },
-  { id: "AA11", name: "Persona Hijacking (ARGUS)", coverage: 100, findings: 2, critical: 1, high: 1, agents: ["PH-11"], status: "covered" },
-  { id: "AA12", name: "Memory Boundary Collapse (ARGUS)", coverage: 100, findings: 2, critical: 1, high: 1, agents: ["MB-12"], status: "covered" },
-];
-
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { icon: React.ElementType; label: string; color: string }> = {
   covered: { icon: CheckCircle, label: "Covered", color: "text-green-400 border-green-400/50" },
   partial: { icon: AlertTriangle, label: "Partial", color: "text-yellow-400 border-yellow-400/50" },
   gap: { icon: XCircle, label: "Gap", color: "text-red-400 border-red-400/50" },
 };
 
 export function OWASPMappingPage() {
-  const totalFindings = OWASP_CATEGORIES.reduce((s, c) => s + c.findings, 0);
-  const avgCoverage = Math.round(OWASP_CATEGORIES.reduce((s, c) => s + c.coverage, 0) / OWASP_CATEGORIES.length);
-  const gaps = OWASP_CATEGORIES.filter((c) => c.status === "gap").length;
-  const covered = OWASP_CATEGORIES.filter((c) => c.status === "covered").length;
+  const [categories, setCategories] = useState<OWASPCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const data = await getOWASPCoverage();
+        if (cancelled) return;
+        setCategories(
+          (data.categories || []).map((c) => ({
+            id: c.id,
+            name: c.name,
+            coverage: c.coverage,
+            findings: c.findings,
+            critical: c.critical,
+            high: c.high,
+            agents: c.agents,
+            status: c.status,
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const totalFindings = categories.reduce((s, c) => s + c.findings, 0);
+  const avgCoverage = categories.length > 0 ? Math.round(categories.reduce((s, c) => s + c.coverage, 0) / categories.length) : 0;
+  const gaps = categories.filter((c) => c.status === "gap").length;
+  const covered = categories.filter((c) => c.status === "covered").length;
 
   return (
     <div className="space-y-6">
@@ -67,7 +103,7 @@ export function OWASPMappingPage() {
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">Categories Covered</p>
-            <p className="mt-1 text-2xl font-bold text-green-400">{covered}/12</p>
+            <p className="mt-1 text-2xl font-bold text-green-400">{covered}/{categories.length}</p>
           </CardContent>
         </Card>
         <Card>
@@ -86,8 +122,8 @@ export function OWASPMappingPage() {
 
       {/* Category list */}
       <div className="space-y-3">
-        {OWASP_CATEGORIES.map((cat) => {
-          const config = STATUS_CONFIG[cat.status];
+        {categories.map((cat) => {
+          const config = STATUS_CONFIG[cat.status] || STATUS_CONFIG.gap;
           const StatusIcon = config.icon;
           const isArgus = cat.id === "AA11" || cat.id === "AA12";
 
@@ -95,13 +131,11 @@ export function OWASPMappingPage() {
             <Card key={cat.id} className={isArgus ? "border-primary/30" : ""}>
               <CardContent className="p-4">
                 <div className="flex items-center gap-4">
-                  {/* Status */}
                   <Badge variant="outline" className={`gap-1 ${config.color}`}>
                     <StatusIcon className="h-3 w-3" />
                     {config.label}
                   </Badge>
 
-                  {/* Category info */}
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm font-bold text-primary">{cat.id}</span>
@@ -125,14 +159,12 @@ export function OWASPMappingPage() {
                     </div>
                   </div>
 
-                  {/* Findings */}
                   <div className="flex items-center gap-2">
                     {cat.critical > 0 && <Badge className="bg-red-600 text-xs">{cat.critical}C</Badge>}
                     {cat.high > 0 && <Badge className="bg-orange-600 text-xs">{cat.high}H</Badge>}
                     <span className="text-xs text-muted-foreground">{cat.findings} total</span>
                   </div>
 
-                  {/* Agents */}
                   <div className="flex items-center gap-1">
                     {cat.agents.map((a) => (
                       <Badge key={a} variant="secondary" className="text-xs font-mono">
@@ -166,7 +198,7 @@ export function OWASPMappingPage() {
           </p>
           {gaps > 0 && (
             <div className="mt-2 space-y-1">
-              {OWASP_CATEGORIES.filter((c) => c.status === "gap").map((c) => (
+              {categories.filter((c) => c.status === "gap").map((c) => (
                 <p key={c.id} className="text-sm">
                   <span className="font-mono text-red-400">{c.id}</span> — {c.name}
                 </p>

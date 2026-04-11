@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   BookOpen,
   Search,
   Plus,
   Zap,
   Target,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { getCorpusPatterns } from "@/api/client";
 
 interface CorpusPattern {
   id: string;
@@ -31,21 +34,6 @@ interface CorpusPattern {
   lastUsed: string;
   description: string;
 }
-
-const MOCK_PATTERNS: CorpusPattern[] = [
-  { id: "cp-001", name: "DAN Jailbreak Variant", category: "prompt_injection", agent: "PI-01", effectiveness: 72, timesUsed: 45, lastUsed: "2 hours ago", description: "Do Anything Now prompt injection with escalating authority claims" },
-  { id: "cp-002", name: "Zero-Width Unicode Hiding", category: "tool_poisoning", agent: "TP-02", effectiveness: 85, timesUsed: 32, lastUsed: "4 hours ago", description: "Hide instructions using zero-width Unicode characters in tool definitions" },
-  { id: "cp-003", name: "Gradual Trust Accumulation", category: "context_window", agent: "CW-05", effectiveness: 68, timesUsed: 28, lastUsed: "6 hours ago", description: "Build trust over multiple turns before injecting adversarial content" },
-  { id: "cp-004", name: "Identity Header Spoof", category: "identity_spoof", agent: "IS-04", effectiveness: 91, timesUsed: 51, lastUsed: "1 hour ago", description: "Forge agent identity headers to bypass A2A authentication" },
-  { id: "cp-005", name: "Memory Canary Plant", category: "memory_poisoning", agent: "MP-03", effectiveness: 78, timesUsed: 38, lastUsed: "3 hours ago", description: "Plant canary tokens in memory stores to detect boundary violations" },
-  { id: "cp-006", name: "Confused Deputy Chain", category: "privilege_escalation", agent: "PE-07", effectiveness: 64, timesUsed: 22, lastUsed: "8 hours ago", description: "Chain tool calls to escalate privileges via confused deputy pattern" },
-  { id: "cp-007", name: "TOCTOU Session Race", category: "race_condition", agent: "RC-08", effectiveness: 55, timesUsed: 18, lastUsed: "12 hours ago", description: "Exploit time-of-check/time-of-use gaps in session validation" },
-  { id: "cp-008", name: "System Prompt Extraction", category: "model_extraction", agent: "ME-10", effectiveness: 82, timesUsed: 42, lastUsed: "2 hours ago", description: "Extract system prompts via role-play and completion techniques" },
-  { id: "cp-009", name: "Persona Drift via Flattery", category: "persona_hijacking", agent: "PH-11", effectiveness: 76, timesUsed: 15, lastUsed: "1 hour ago", description: "Gradually shift agent identity through flattery and authority assertion" },
-  { id: "cp-010", name: "Cross-Session Canary Bleed", category: "memory_boundary", agent: "MB-12", effectiveness: 88, timesUsed: 12, lastUsed: "30 min ago", description: "Plant content in one session, verify it bleeds to another" },
-  { id: "cp-011", name: "Shared Resource Poisoning", category: "cross_agent_exfil", agent: "CX-06", effectiveness: 71, timesUsed: 20, lastUsed: "5 hours ago", description: "Poison shared resources between agents to exfiltrate data" },
-  { id: "cp-012", name: "Dependency Trust Abuse", category: "supply_chain", agent: "SC-09", effectiveness: 60, timesUsed: 14, lastUsed: "1 day ago", description: "Test trust assumptions in external dependency chains" },
-];
 
 const CATEGORY_COLORS: Record<string, string> = {
   prompt_injection: "bg-red-600/20 text-red-400",
@@ -64,13 +52,52 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export function CorpusPage() {
   const [search, setSearch] = useState("");
+  const [patterns, setPatterns] = useState<CorpusPattern[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = MOCK_PATTERNS.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase()) ||
-      p.agent.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const data = await getCorpusPatterns(search || undefined);
+        if (cancelled) return;
+        setPatterns(
+          (data.patterns || []).map((p) => ({
+            id: p.id,
+            name: p.name,
+            category: p.category,
+            agent: p.agent,
+            effectiveness: p.effectiveness,
+            timesUsed: p.timesUsed,
+            lastUsed: p.lastUsed ?? "Never",
+            description: p.description,
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [search]);
+
+  if (loading && patterns.length === 0) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error && patterns.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -78,7 +105,7 @@ export function CorpusPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Attack Corpus</h2>
           <p className="text-sm text-muted-foreground">
-            {MOCK_PATTERNS.length} attack patterns — browse, add custom, track effectiveness
+            {patterns.length} attack patterns — browse, add custom, track effectiveness
           </p>
         </div>
         <Dialog>
@@ -130,7 +157,7 @@ export function CorpusPage() {
 
       {/* Pattern grid */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {filtered.map((pattern) => (
+        {patterns.map((pattern) => (
           <Card key={pattern.id}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">

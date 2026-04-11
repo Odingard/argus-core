@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Sword,
   Play,
@@ -6,39 +6,27 @@ import {
   XCircle,
   Clock,
   Download,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { getGauntletScenarios } from "@/api/client";
 
 interface BenchmarkScenario {
   id: string;
   name: string;
   agent: string;
   category: string;
-  status: "passed" | "failed" | "pending" | "running";
+  status: string;
   score: number;
   maxScore: number;
   description: string;
 }
 
-const MOCK_SCENARIOS: BenchmarkScenario[] = [
-  { id: "BM-01", name: "Basic Prompt Injection", agent: "PI-01", category: "prompt_injection", status: "passed", score: 95, maxScore: 100, description: "Tests detection of standard injection patterns" },
-  { id: "BM-02", name: "Unicode Hidden Instructions", agent: "TP-02", category: "tool_poisoning", status: "passed", score: 88, maxScore: 100, description: "Tests detection of zero-width character hiding" },
-  { id: "BM-03", name: "Memory Store Poisoning", agent: "MP-03", category: "memory_poisoning", status: "passed", score: 82, maxScore: 100, description: "Tests adversarial content planting and retrieval" },
-  { id: "BM-04", name: "Identity Header Forgery", agent: "IS-04", category: "identity_spoof", status: "passed", score: 91, maxScore: 100, description: "Tests A2A authentication bypass via header spoofing" },
-  { id: "BM-05", name: "Context Window Overflow", agent: "CW-05", category: "context_window", status: "failed", score: 45, maxScore: 100, description: "Tests long-con multi-turn context manipulation" },
-  { id: "BM-06", name: "Cross-Agent Data Relay", agent: "CX-06", category: "cross_agent_exfil", status: "passed", score: 77, maxScore: 100, description: "Tests data leakage between agent boundaries" },
-  { id: "BM-07", name: "Confused Deputy Escalation", agent: "PE-07", category: "privilege_escalation", status: "passed", score: 84, maxScore: 100, description: "Tests chained tool-call privilege escalation" },
-  { id: "BM-08", name: "TOCTOU Race Condition", agent: "RC-08", category: "race_condition", status: "pending", score: 0, maxScore: 100, description: "Tests time-of-check/time-of-use exploitation" },
-  { id: "BM-09", name: "Supply Chain Dependency", agent: "SC-09", category: "supply_chain", status: "pending", score: 0, maxScore: 100, description: "Tests external dependency trust verification" },
-  { id: "BM-10", name: "System Prompt Extraction", agent: "ME-10", category: "model_extraction", status: "passed", score: 86, maxScore: 100, description: "Tests system prompt and config fingerprinting" },
-  { id: "BM-11", name: "Persona Drift Induction", agent: "PH-11", category: "persona_hijacking", status: "passed", score: 92, maxScore: 100, description: "Tests identity drift via multi-turn adversarial pressure" },
-  { id: "BM-12", name: "Memory Boundary Bleed", agent: "MB-12", category: "memory_boundary", status: "passed", score: 89, maxScore: 100, description: "Tests cross-session memory boundary enforcement" },
-];
-
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { icon: React.ElementType; label: string; color: string }> = {
   passed: { icon: CheckCircle, label: "Passed", color: "text-green-400 border-green-400/50" },
   failed: { icon: XCircle, label: "Failed", color: "text-red-400 border-red-400/50" },
   pending: { icon: Clock, label: "Pending", color: "text-muted-foreground border-border" },
@@ -46,7 +34,52 @@ const STATUS_CONFIG = {
 };
 
 export function GauntletPage() {
-  const [scenarios] = useState(MOCK_SCENARIOS);
+  const [scenarios, setScenarios] = useState<BenchmarkScenario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const data = await getGauntletScenarios();
+        if (cancelled) return;
+        setScenarios(
+          (data.scenarios || []).map((s) => ({
+            id: s.id,
+            name: s.name,
+            agent: s.agent,
+            category: s.category,
+            status: s.status,
+            score: s.score,
+            maxScore: s.maxScore,
+            description: s.description,
+          }))
+        );
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (<div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  }
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-red-500" />
+        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
 
   const passed = scenarios.filter((s) => s.status === "passed").length;
   const failed = scenarios.filter((s) => s.status === "failed").length;
@@ -108,7 +141,7 @@ export function GauntletPage() {
       {/* Scenarios */}
       <div className="space-y-3">
         {scenarios.map((scenario) => {
-          const config = STATUS_CONFIG[scenario.status];
+          const config = STATUS_CONFIG[scenario.status] || STATUS_CONFIG.pending;
           const StatusIcon = config.icon;
 
           return (
