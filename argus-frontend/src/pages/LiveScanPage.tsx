@@ -246,6 +246,14 @@ export function LiveScanPage() {
         </CardContent>
       </Card>
 
+      {/* Scan error banner */}
+      {scanError && (
+        <div className="flex items-center justify-between rounded-md border border-red-500/50 bg-red-950/20 p-3 text-sm text-red-400">
+          <span>{scanError}</span>
+          <Button variant="ghost" size="sm" className="h-6 text-red-400 hover:text-red-300" onClick={() => setScanError(null)}>Dismiss</Button>
+        </div>
+      )}
+
       {/* Stats bar */}
       {scanRunning && (
         <div className="grid grid-cols-4 gap-4">

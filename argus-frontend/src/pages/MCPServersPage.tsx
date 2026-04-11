@@ -184,7 +184,7 @@ export function MCPServersPage() {
                     <DropdownMenuItem>Edit</DropdownMenuItem>
                     <DropdownMenuItem>Scan Now</DropdownMenuItem>
                     <DropdownMenuItem>View History</DropdownMenuItem>
-                    <DropdownMenuItem className="text-red-400">Remove</DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(server.id)}>Remove</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
