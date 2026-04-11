@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Request
+from fastapi import Header, Request
 
 from arena.base import ArenaScenario, FastAPI
 

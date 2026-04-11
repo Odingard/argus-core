@@ -179,8 +179,15 @@ def score_scan_results(
             expected_vulns=expected,
         )
 
-        # Check each finding for this scenario's domain
+        # Check each finding — only process findings whose agent_type matches
+        # this scenario's domain to avoid cross-scenario false positives.
+        domain = score.agent_domain
         for f in findings:
+            # Filter by domain: skip findings from other agents
+            finding_agent = str(f.get("agent_type", "")).lower()
+            if finding_agent and finding_agent != domain:
+                continue
+
             evidence_text = str(f.get("evidence", "")) + str(f.get("details", ""))
 
             # Check for canary flag in evidence
