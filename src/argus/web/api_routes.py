@@ -381,6 +381,21 @@ def create_production_router() -> APIRouter:
             repo.close()
 
     # ------------------------------------------------------------------
+    # Tier info
+    # ------------------------------------------------------------------
+
+    @router.get("/system/tier", dependencies=[Depends(require_role("read"))])
+    async def tier_info() -> dict[str, Any]:
+        """Return the active ARGUS tier and feature matrix."""
+        from argus.tiering import FEATURE_MATRIX, current_tier
+
+        t = current_tier()
+        return {
+            **t.info(),
+            "feature_matrix": FEATURE_MATRIX,
+        }
+
+    # ------------------------------------------------------------------
     # System info
     # ------------------------------------------------------------------
 

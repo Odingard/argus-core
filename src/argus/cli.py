@@ -38,6 +38,7 @@ from argus.models.agents import AgentType, TargetConfig
 from argus.orchestrator.engine import Orchestrator
 from argus.reporting.alec_export import ALECEvidenceExporter
 from argus.reporting.renderer import ReportRenderer
+from argus.tiering import Feature, TierRestricted, current_tier
 
 
 def _create_orchestrator() -> Orchestrator:
@@ -162,11 +163,14 @@ def status() -> None:
     orch = _create_orchestrator()
     agent_count = len(orch.get_registered_agents())
     agent_names = [a.value for a in orch.get_registered_agents()]
+    tier = current_tier()
+
+    tier_label = "[bold green]Enterprise[/]" if tier.is_enterprise else "[bold cyan]Core (Open Source)[/]"
 
     console.print(
         Panel.fit(
             f"[bold red]ARGUS[/] v{__version__}\n\n"
-            f"[bold]Phase:[/] 1 — First Wave Agents\n"
+            f"[bold]Tier:[/] {tier_label}\n"
             f"[bold]Agents Registered:[/] {agent_count}\n"
             f"[bold]Agents:[/] {', '.join(agent_names)}\n"
             "[bold]Corpus Status:[/] Checking...",
@@ -339,7 +343,15 @@ def alec_export(
     (Autonomous Legal Evidence Chain) for legal-grade incident
     documentation. Includes SHA-256 integrity hashes, chain-of-custody
     metadata, and CERBERUS cross-references.
+
+    Requires ARGUS Enterprise.
     """
+    try:
+        current_tier().require(Feature.ALEC_EXPORT)
+    except TierRestricted as exc:
+        console.print(f"[bold red]Enterprise Feature:[/] {exc}")
+        raise SystemExit(1) from None
+
     for url in mcp_url:
         _validate_url(url)
     if agent_endpoint:
@@ -379,6 +391,41 @@ def alec_export(
     console.print(f"\n[green]ALEC evidence package written to {output_path}[/]")
     console.print(f"[dim]Validated findings: {len(result.validated_findings)}[/]")
     console.print(f"[dim]Compound paths: {len(result.compound_paths)}[/]")
+
+
+@main.command()
+def tier() -> None:
+    """Show the active ARGUS tier and feature matrix."""
+    from argus.tiering import FEATURE_MATRIX
+
+    t = current_tier()
+    tier_label = "[bold green]Enterprise[/]" if t.is_enterprise else "[bold cyan]Core (Open Source)[/]"
+
+    console.print(
+        Panel.fit(
+            f"[bold red]ARGUS[/] v{__version__}\n\n"
+            f"[bold]Active Tier:[/] {tier_label}\n"
+            f"[bold]Features Available:[/] {len(t.available_features)}/{len(Feature)}",
+            title="Tier Status",
+        )
+    )
+
+    table = Table(title="Feature Matrix")
+    table.add_column("Feature", style="white")
+    table.add_column("Category", style="dim")
+    table.add_column("Core", justify="center")
+    table.add_column("Enterprise", justify="center")
+
+    for row in FEATURE_MATRIX:
+        core_mark = "[green]\u2713[/]" if row["core"] else "[dim]-[/]"
+        ent_mark = "[green]\u2713[/]" if row["enterprise"] else "[dim]-[/]"
+        table.add_row(str(row["feature"]), str(row["category"]), core_mark, ent_mark)
+
+    console.print(table)
+
+    if t.is_core:
+        console.print("\n[dim]Upgrade to Enterprise: set ARGUS_TIER=enterprise or provide ARGUS_LICENSE_KEY[/]")
+        console.print("[dim]Learn more: https://github.com/Odingard/Argus#enterprise[/]")
 
 
 @main.command()
