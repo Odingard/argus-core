@@ -194,7 +194,7 @@ def status() -> None:
 @main.command()
 @click.argument("target_name")
 @click.option("--mcp-url", multiple=True, help="MCP server URL(s) to test")
-@click.option("--agent-endpoint", help="Target agent endpoint URL")
+@click.option("--target", "--agent-endpoint", "agent_endpoint", help="Target agent endpoint URL")
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option(
     "--demo",
@@ -263,7 +263,7 @@ def live(
 @main.command()
 @click.argument("target_name")
 @click.option("--mcp-url", multiple=True, help="MCP server URL(s) to test")
-@click.option("--agent-endpoint", help="Target agent endpoint URL")
+@click.option("--target", "--agent-endpoint", "agent_endpoint", help="Target agent endpoint URL")
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", help="Output file path for JSON report")
 def scan(
@@ -327,7 +327,7 @@ def scan(
 @main.command(name="alec-export")
 @click.argument("target_name")
 @click.option("--mcp-url", multiple=True, help="MCP server URL(s) to test")
-@click.option("--agent-endpoint", help="Target agent endpoint URL")
+@click.option("--target", "--agent-endpoint", "agent_endpoint", help="Target agent endpoint URL")
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", required=True, help="Output file path for ALEC evidence package")
 def alec_export(
@@ -513,7 +513,7 @@ def target() -> None:
 @target.command(name="create")
 @click.argument("name")
 @click.option("--mcp-url", multiple=True, help="MCP server URL(s)")
-@click.option("--agent-endpoint", help="Agent endpoint URL")
+@click.option("--target", "--agent-endpoint", "agent_endpoint", help="Agent endpoint URL")
 @click.option("--environment", default="staging", help="Target environment")
 @click.option("--description", default="", help="Target description")
 @click.option("--rpm", default=60, help="Max requests per minute")
