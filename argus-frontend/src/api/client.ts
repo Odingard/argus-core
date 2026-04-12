@@ -110,6 +110,9 @@ export const getFinding = (id: string) =>
 export const updateFindingStatus = (id: string, status: string) =>
   api.put<Record<string, unknown>>(`/api/findings/${id}/status`, { status });
 
+export const getScanFindings = (scanId: string, params?: string) =>
+  api.get<{ findings: Record<string, unknown>[]; total: number }>(`/api/scans/${scanId}/findings${params ? `?${params}` : ""}`);
+
 // Compound paths
 export const getCompoundPaths = (limit = 50) =>
   api.get<{ compound_paths: Record<string, unknown>[]; total: number }>(`/api/compound-paths?limit=${limit}`);

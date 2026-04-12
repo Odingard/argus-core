@@ -116,14 +116,14 @@ class IdentitySpoofAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         if not identity_endpoints:
             logger.debug("IdentitySpoof: %s exposes no identity surface", base_url)
             return
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
             for endpoint in identity_endpoints:
                 if not await sandbox.check_request_allowed():
                     return

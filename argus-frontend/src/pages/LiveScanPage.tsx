@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Radio,
   Play,
@@ -8,6 +9,7 @@ import {
   CheckCircle,
   Clock,
   Loader2,
+  Eye,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,10 +37,14 @@ interface AgentStatus {
 }
 
 export function LiveScanPage() {
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [scanRunning, setScanRunning] = useState(false);
+  const [scanComplete, setScanComplete] = useState(false);
+  const [scanId, setScanId] = useState<string | null>(null);
   const [targetUrl, setTargetUrl] = useState("");
   const [scanMode, setScanMode] = useState("full");
+  const [targetToken, setTargetToken] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,11 +90,22 @@ export function LiveScanPage() {
   const handleStartScan = async () => {
     if (!targetUrl) return;
     setScanError(null);
+    setScanComplete(false);
+    setScanId(null);
     try {
-      await apiStartScan({
+      const scanBody: Record<string, unknown> = {
         target_name: targetUrl,
         mcp_urls: [targetUrl],
-      });
+        agent_endpoint: targetUrl,
+        demo_pace_seconds: 1.5,
+      };
+      if (targetToken.trim()) {
+        scanBody.agent_api_key = targetToken.trim();
+      }
+      console.log("[ARGUS] scan request:", JSON.stringify(scanBody));
+      const result = await apiStartScan(scanBody);
+      const newScanId = result.scan_id ? String(result.scan_id) : null;
+      setScanId(newScanId);
       setScanRunning(true);
       // Poll the in-memory live scan status (NOT the DB-backed /agents/status)
       let step = 0;
@@ -135,6 +152,7 @@ export function LiveScanPage() {
             if (intervalRef.current) clearInterval(intervalRef.current);
             intervalRef.current = null;
             setScanRunning(false);
+            if (data.status === "completed") setScanComplete(true);
           }
         } catch {
           // Polling failed, keep trying
@@ -182,12 +200,20 @@ export function LiveScanPage() {
             Deploy all 12 agents against a target simultaneously
           </p>
         </div>
-        {scanRunning && (
-          <Badge variant="outline" className="gap-2 text-green-400 border-green-400/50">
-            <Radio className="h-3 w-3 animate-pulse" />
-            Scan Active
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {scanRunning && (
+            <Badge variant="outline" className="gap-2 text-green-400 border-green-400/50">
+              <Radio className="h-3 w-3 animate-pulse" />
+              Scan Active
+            </Badge>
+          )}
+          {scanComplete && scanId && (
+            <Button size="sm" className="gap-1" onClick={() => navigate(`/scan/${scanId}`)}>
+              <Eye className="h-3 w-3" />
+              View Results
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Scan configuration */}
@@ -207,6 +233,16 @@ export function LiveScanPage() {
                 onChange={(e) => setTargetUrl(e.target.value)}
                 disabled={scanRunning}
                 className="mt-1"
+              />
+            </div>
+            <div className="flex-1">
+              <Label className="text-xs">Target Auth Token {targetToken ? "(set)" : "(optional)"}</Label>
+              <Input
+                placeholder="JWT or Bearer token for authenticated scanning"
+                value={targetToken}
+                onChange={(e) => setTargetToken(e.target.value)}
+                disabled={scanRunning}
+                className="mt-1 font-mono text-xs"
               />
             </div>
             <div className="w-48">

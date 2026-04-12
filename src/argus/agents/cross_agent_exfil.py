@@ -169,7 +169,7 @@ class CrossAgentExfilAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
@@ -180,7 +180,7 @@ class CrossAgentExfilAgent(LLMAttackAgent):
         # Phase 1: Chat-based relay attacks
         if chat_endpoints:
             chat_path = chat_endpoints[0].path
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 for payload in _RELAY_PAYLOADS:
                     if not await sandbox.check_request_allowed():
                         return
@@ -189,7 +189,7 @@ class CrossAgentExfilAgent(LLMAttackAgent):
         # Phase 2: Cross-surface data access via identity/admin endpoints
         cross_surfaces = identity_endpoints + admin_endpoints
         if cross_surfaces:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 for endpoint in cross_surfaces:
                     if not await sandbox.check_request_allowed():
                         return
@@ -197,7 +197,7 @@ class CrossAgentExfilAgent(LLMAttackAgent):
 
         # Phase 3: Check exfiltration surfaces for leaked data
         if exfil_endpoints and chat_endpoints:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 await self._test_exfil_surfaces(
                     session,
                     chat_endpoints[0].path,
@@ -206,12 +206,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
 
         # Phase 4: DNS/HTTP beacon exfiltration
         if chat_endpoints:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 await self._test_beacon_exfil(sandbox, session, chat_endpoints[0].path)
 
         # Phase 5: Multi-hop agent chain exploitation
         if chat_endpoints:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 await self._test_multi_hop_chain(sandbox, session, chat_endpoints[0].path)
 
     async def _test_relay(

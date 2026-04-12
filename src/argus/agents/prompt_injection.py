@@ -873,7 +873,7 @@ class PromptInjectionHunter(LLMAttackAgent):
         from argus.mcp_client import MCPAttackClient, MCPServerConfig
 
         try:
-            config = MCPServerConfig(
+            config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                 name="injection-target",
                 transport="streamable-http",
                 url=mcp_url,

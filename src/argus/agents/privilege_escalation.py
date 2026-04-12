@@ -243,7 +243,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
 
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
@@ -256,7 +256,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         if not target_paths and chat_endpoints:
             target_paths = [chat_endpoints[0].path]
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
             # Phase 0: Generic tool-call chaining — enumerate the tool catalog
             # and try sequences of tool calls, propagating returned tokens /
             # session ids between steps. Generic confused-deputy probe.

@@ -44,51 +44,205 @@ class SurfaceClass(str, Enum):
 # The classifier in CapabilityMapper does the heavy lifting; this list is
 # just the seed set of things to try.
 _PROBE_PATHS: list[tuple[str, str, SurfaceClass, dict[str, Any] | None]] = [
-    # Health / liveness
+    # ── HEALTH / LIVENESS ──────────────────────────────────────────────
     ("/health", "GET", SurfaceClass.HEALTH, None),
     ("/healthz", "GET", SurfaceClass.HEALTH, None),
+    ("/livez", "GET", SurfaceClass.HEALTH, None),
+    ("/readyz", "GET", SurfaceClass.HEALTH, None),
     ("/ping", "GET", SurfaceClass.HEALTH, None),
     ("/status", "GET", SurfaceClass.HEALTH, None),
-    # Chat surfaces
+    ("/info", "GET", SurfaceClass.HEALTH, None),
+    ("/version", "GET", SurfaceClass.HEALTH, None),
+    ("/v2/health/live", "GET", SurfaceClass.HEALTH, None),        # KServe V2
+    ("/v2/health/ready", "GET", SurfaceClass.HEALTH, None),       # KServe V2
+    ("/health/readiness", "GET", SurfaceClass.HEALTH, None),      # LiteLLM
+    ("/health/liveliness", "GET", SurfaceClass.HEALTH, None),     # LiteLLM
+    # ── CHAT / COMPLETIONS — every convention in the wild ──────────────
+    # Generic chat
     ("/chat", "POST", SurfaceClass.CHAT, {"message": "hello"}),
     ("/v1/chat", "POST", SurfaceClass.CHAT, {"message": "hello"}),
-    ("/v1/messages", "POST", SurfaceClass.CHAT, {"message": "hello"}),
     ("/api/chat", "POST", SurfaceClass.CHAT, {"message": "hello"}),
     ("/conversation", "POST", SurfaceClass.CHAT, {"message": "hello"}),
-    # Memory surfaces
+    ("/query", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/ask", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/message", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/prompt", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    # OpenAI-compatible
+    ("/v1/chat/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    ("/v1/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "prompt": "hello"}),
+    ("/v1/messages", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    ("/chat/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    ("/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "prompt": "hello"}),
+    ("/v1/responses", "POST", SurfaceClass.CHAT, {"model": "probe", "input": "hello"}),
+    # Gateway / proxy prefixes
+    ("/proxy/chat/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    ("/api/v1/chat/completions", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    # Inference servers (vLLM, TGI, Ollama)
+    ("/generate", "POST", SurfaceClass.CHAT, {"prompt": "hello"}),
+    ("/generate_stream", "POST", SurfaceClass.CHAT, {"prompt": "hello"}),
+    ("/infer", "POST", SurfaceClass.CHAT, {"prompt": "hello"}),
+    ("/predict", "POST", SurfaceClass.CHAT, {"instances": [{"input": "hello"}]}),
+    ("/api/generate", "POST", SurfaceClass.CHAT, {"model": "probe", "prompt": "hello"}),
+    ("/api/chat", "POST", SurfaceClass.CHAT, {"model": "probe", "messages": [{"role": "user", "content": "hello"}]}),
+    # KServe / Seldon
+    ("/v2/models/model/infer", "POST", SurfaceClass.CHAT, {"inputs": [{"name": "input", "data": ["hello"]}]}),
+    ("/api/v1.0/predictions", "POST", SurfaceClass.CHAT, {"data": {"ndarray": ["hello"]}}),
+    # LangChain / LangServe
+    ("/invoke", "POST", SurfaceClass.CHAT, {"input": "hello"}),
+    ("/batch", "POST", SurfaceClass.CHAT, {"inputs": ["hello"]}),
+    ("/stream", "POST", SurfaceClass.CHAT, {"input": "hello"}),
+    # Domain-specific interaction surfaces
+    ("/review", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/triage", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/analyze", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/orchestrate", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/assess", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/evaluate", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/process", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/submit", "POST", SurfaceClass.CHAT, {"message": "hello"}),
+    ("/run", "POST", SurfaceClass.CHAT, {"input": "hello"}),
+    ("/kickoff", "POST", SurfaceClass.CHAT, {"input": "hello"}),
+    # ── MEMORY / CONTEXT / SESSION / DOCUMENTS ─────────────────────────
     ("/memory", "GET", SurfaceClass.MEMORY, None),
     ("/memory/list", "GET", SurfaceClass.MEMORY, None),
+    ("/memory/search", "POST", SurfaceClass.MEMORY, {"query": "probe"}),
     ("/context", "GET", SurfaceClass.MEMORY, None),
-    # Identity / A2A / execution
+    ("/session", "GET", SurfaceClass.MEMORY, None),
+    ("/sessions", "GET", SurfaceClass.MEMORY, None),
+    ("/history", "GET", SurfaceClass.MEMORY, None),
+    ("/threads", "GET", SurfaceClass.MEMORY, None),
+    ("/conversations", "GET", SurfaceClass.MEMORY, None),
+    ("/state", "GET", SurfaceClass.MEMORY, None),
+    # Document / RAG / knowledge base surfaces
+    ("/documents", "GET", SurfaceClass.MEMORY, None),
+    ("/documents/upload", "POST", SurfaceClass.MEMORY, None),
+    ("/documents/load", "POST", SurfaceClass.MEMORY, None),
+    ("/knowledge", "GET", SurfaceClass.MEMORY, None),
+    ("/upload", "POST", SurfaceClass.MEMORY, None),
+    ("/ingest", "POST", SurfaceClass.MEMORY, None),
+    ("/index", "POST", SurfaceClass.MEMORY, None),
+    ("/search", "POST", SurfaceClass.MEMORY, {"query": "probe"}),
+    ("/retrieve", "POST", SurfaceClass.MEMORY, {"query": "probe"}),
+    # Vector store APIs (Chroma, Qdrant, Pinecone)
+    ("/api/v1/collections", "GET", SurfaceClass.MEMORY, None),
+    ("/api/v1/heartbeat", "GET", SurfaceClass.MEMORY, None),
+    ("/collections", "GET", SurfaceClass.MEMORY, None),
+    ("/describe_index_stats", "GET", SurfaceClass.MEMORY, None),
+    # File APIs
+    ("/v1/files", "GET", SurfaceClass.MEMORY, None),
+    ("/v1/vector_stores", "GET", SurfaceClass.MEMORY, None),
+    ("/api/files", "GET", SurfaceClass.MEMORY, None),
+    # ── IDENTITY / A2A / AGENT MANAGEMENT ──────────────────────────────
     ("/execute", "POST", SurfaceClass.IDENTITY, {"command": "noop"}),
     ("/agents", "GET", SurfaceClass.IDENTITY, None),
     ("/v1/agents", "GET", SurfaceClass.IDENTITY, None),
-    # Tool catalog (read-only enumeration)
+    ("/internal/agent-message", "POST", SurfaceClass.IDENTITY, {"message": "probe"}),
+    ("/connect", "POST", SurfaceClass.IDENTITY, {}),
+    # OpenAI Assistants API
+    ("/v1/assistants", "GET", SurfaceClass.IDENTITY, None),
+    ("/v1/threads", "GET", SurfaceClass.IDENTITY, None),
+    # A2A protocol
+    ("/.well-known/agent.json", "GET", SurfaceClass.IDENTITY, None),
+    ("/tasks/send", "POST", SurfaceClass.IDENTITY, {"message": "probe"}),
+    # CrewAI / AutoGen
+    ("/api/agents", "GET", SurfaceClass.IDENTITY, None),
+    ("/api/agents/run", "POST", SurfaceClass.IDENTITY, {"input": "probe"}),
+    ("/api/sessions", "GET", SurfaceClass.IDENTITY, None),
+    ("/api/runs", "GET", SurfaceClass.IDENTITY, None),
+    ("/api/crew/status", "GET", SurfaceClass.IDENTITY, None),
+    # ── TOOL CATALOG (read-only enumeration) ───────────────────────────
     ("/tools", "GET", SurfaceClass.TOOLS, None),
     ("/tools/list", "GET", SurfaceClass.TOOLS, None),
     ("/functions", "GET", SurfaceClass.TOOLS, None),
-    # Tool invocation (POST). Universal MCP / OpenAI tool-calling convention.
+    ("/functions/list", "GET", SurfaceClass.TOOLS, None),
+    ("/plugins", "GET", SurfaceClass.TOOLS, None),
+    ("/actions", "GET", SurfaceClass.TOOLS, None),
+    ("/skills", "GET", SurfaceClass.TOOLS, None),
+    ("/supported-languages", "GET", SurfaceClass.TOOLS, None),
+    ("/v1/models", "GET", SurfaceClass.TOOLS, None),
+    ("/models", "GET", SurfaceClass.TOOLS, None),
+    ("/api/tags", "GET", SurfaceClass.TOOLS, None),                # Ollama
+    ("/api/ps", "GET", SurfaceClass.TOOLS, None),                  # Ollama running models
+    ("/input_schema", "GET", SurfaceClass.TOOLS, None),            # LangServe
+    ("/output_schema", "GET", SurfaceClass.TOOLS, None),           # LangServe
+    ("/kernel/plugins", "GET", SurfaceClass.TOOLS, None),          # Semantic Kernel
+    # ── TOOL INVOCATION (POST) ─────────────────────────────────────────
     ("/tools/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    ("/tool/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
+    ("/tool/execute", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
     ("/v1/tools/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
     ("/functions/call", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
     ("/invoke", "POST", SurfaceClass.TOOL_CALL, {"name": "noop", "arguments": {}}),
-    # Payment / value-bearing state mutators — common pattern in any AI agent
-    # that processes transactions, balances, quotas, or credits.
+    ("/confirm", "POST", SurfaceClass.TOOL_CALL, {}),
+    ("/actions", "POST", SurfaceClass.TOOL_CALL, {"action": "noop"}),
+    ("/kernel/invoke", "POST", SurfaceClass.TOOL_CALL, {"skill": "noop"}),
+    # ── MCP PROTOCOL ──────────────────────────────────────────────────
+    ("/mcp", "POST", SurfaceClass.TOOL_CALL, {"jsonrpc": "2.0", "method": "initialize", "params": {"capabilities": {}}, "id": 1}),
+    ("/sse", "GET", SurfaceClass.TOOLS, None),
+    ("/message", "POST", SurfaceClass.TOOL_CALL, {"jsonrpc": "2.0", "method": "tools/list", "id": 1}),
+    ("/.well-known/mcp.json", "GET", SurfaceClass.TOOLS, None),
+    ("/rpc", "POST", SurfaceClass.TOOL_CALL, {"jsonrpc": "2.0", "method": "initialize", "id": 1}),
+    ("/jsonrpc", "POST", SurfaceClass.TOOL_CALL, {"jsonrpc": "2.0", "method": "initialize", "id": 1}),
+    # ── PAYMENT / VALUE-BEARING STATE MUTATORS ─────────────────────────
     ("/pay", "POST", SurfaceClass.PAYMENT, {"account_id": "probe", "amount": 0}),
     ("/payment", "POST", SurfaceClass.PAYMENT, {"account_id": "probe", "amount": 0}),
     ("/transfer", "POST", SurfaceClass.PAYMENT, {"from": "probe", "to": "probe", "amount": 0}),
     ("/transaction", "POST", SurfaceClass.PAYMENT, {"amount": 0}),
     ("/charge", "POST", SurfaceClass.PAYMENT, {"amount": 0}),
-    # Exfiltration / observability surfaces (the kind benchmark scenarios expose
-    # but real systems often expose too via debug endpoints)
+    # ── EXFILTRATION / OBSERVABILITY ───────────────────────────────────
     ("/exfil-log", "GET", SurfaceClass.EXFILTRATION, None),
     ("/audit", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/audit/log", "GET", SurfaceClass.EXFILTRATION, None),
     ("/logs", "GET", SurfaceClass.EXFILTRATION, None),
     ("/transactions", "GET", SurfaceClass.EXFILTRATION, None),
-    # Admin
+    ("/metrics", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/stats", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/debug", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/debug/vars", "GET", SurfaceClass.EXFILTRATION, None),
+    ("/spend/logs", "GET", SurfaceClass.EXFILTRATION, None),       # LiteLLM
+    ("/global/spend", "GET", SurfaceClass.EXFILTRATION, None),     # LiteLLM
+    ("/v1/organization/usage", "GET", SurfaceClass.EXFILTRATION, None),
+    # ── GUARDRAILS / SAFETY ────────────────────────────────────────────
+    ("/v1/moderations", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/moderate", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/safety/check", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/guardrails/check", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/guardrails/validate", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/filter", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/classify", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/validate", "POST", SurfaceClass.TOOLS, {"input": "test"}),
+    ("/policies", "GET", SurfaceClass.TOOLS, None),
+    # ── ADMIN / CONFIG / SCHEMA DISCOVERY ──────────────────────────────
     ("/admin", "GET", SurfaceClass.ADMIN, None),
+    ("/admin/config", "GET", SurfaceClass.ADMIN, None),
     ("/config", "GET", SurfaceClass.ADMIN, None),
+    ("/settings", "GET", SurfaceClass.ADMIN, None),
     ("/v1/admin", "GET", SurfaceClass.ADMIN, None),
+    ("/internal/config", "GET", SurfaceClass.ADMIN, None),
+    # Schema / docs
+    ("/openapi.json", "GET", SurfaceClass.ADMIN, None),
+    ("/swagger.json", "GET", SurfaceClass.ADMIN, None),
+    ("/docs", "GET", SurfaceClass.ADMIN, None),
+    ("/redoc", "GET", SurfaceClass.ADMIN, None),
+    ("/api-docs", "GET", SurfaceClass.ADMIN, None),
+    ("/.well-known/openapi.json", "GET", SurfaceClass.ADMIN, None),
+    ("/schema", "GET", SurfaceClass.ADMIN, None),
+    ("/graphql", "POST", SurfaceClass.ADMIN, {"query": "{__schema{types{name}}}"}),
+    # Key / user management (LiteLLM, gateways)
+    ("/key/info", "GET", SurfaceClass.ADMIN, None),
+    ("/key/list", "GET", SurfaceClass.ADMIN, None),
+    ("/user/info", "GET", SurfaceClass.ADMIN, None),
+    ("/team/info", "GET", SurfaceClass.ADMIN, None),
+    ("/model/info", "GET", SurfaceClass.ADMIN, None),
+    # Batch / async jobs
+    ("/v1/batch", "GET", SurfaceClass.ADMIN, None),
+    ("/jobs", "GET", SurfaceClass.ADMIN, None),
+    ("/tasks", "GET", SurfaceClass.ADMIN, None),
+    ("/queue", "GET", SurfaceClass.ADMIN, None),
+    # Well-known discovery
+    ("/.well-known/ai-plugin.json", "GET", SurfaceClass.ADMIN, None),
+    ("/.well-known/ready", "GET", SurfaceClass.HEALTH, None),      # Weaviate
+    ("/.well-known/live", "GET", SurfaceClass.HEALTH, None),       # Weaviate
 ]
 
 
@@ -144,6 +298,7 @@ class EndpointProber:
         timeout_seconds: float = 5.0,
         max_concurrent: int = 8,
         transport: httpx.AsyncBaseTransport | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         parsed = urlparse(self.base_url)
@@ -153,6 +308,7 @@ class EndpointProber:
         self.timeout_seconds = timeout_seconds
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._transport = transport
+        self._default_headers = default_headers or {}
 
     async def probe_all(self) -> SurveyReport:
         """Probe the full default path set against the base URL.
@@ -210,7 +366,7 @@ class EndpointProber:
             )
         async with self._semaphore:
             try:
-                resp = await client.request(method, url, json=body)
+                resp = await client.request(method, url, json=body, headers=self._default_headers)
             except httpx.HTTPError as exc:
                 return DiscoveredEndpoint(
                     base_url=self.base_url,

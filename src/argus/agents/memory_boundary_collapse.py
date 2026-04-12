@@ -192,7 +192,7 @@ class MemoryBoundaryCollapseAgent(LLMAttackAgent):
             return
 
         # SURVEY — discover memory and chat surfaces
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
@@ -208,7 +208,7 @@ class MemoryBoundaryCollapseAgent(LLMAttackAgent):
             if derived not in memory_write_paths:
                 memory_write_paths.append(derived)
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
             # Phase 1: Context bleed testing
             for payload in _CONTEXT_BLEED_PAYLOADS:
                 if not await sandbox.check_request_allowed():

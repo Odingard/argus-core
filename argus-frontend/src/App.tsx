@@ -16,6 +16,7 @@ import { CorpusPage } from "./pages/CorpusPage";
 import { GauntletPage } from "./pages/GauntletPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ScanDetailPage } from "./pages/ScanDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("argus_token");
@@ -43,6 +44,7 @@ function App() {
           <Route path="scan/live" element={<LiveScanPage />} />
           <Route path="scan/pending" element={<PendingScanPage />} />
           <Route path="scan/completed" element={<CompletedScanPage />} />
+          <Route path="scan/:scanId" element={<ScanDetailPage />} />
           {/* Targets */}
           <Route path="targets/mcp-servers" element={<MCPServersPage />} />
           <Route path="targets/ai-agents" element={<AIAgentsPage />} />

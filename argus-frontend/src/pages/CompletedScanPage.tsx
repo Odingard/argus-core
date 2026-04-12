@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   CheckCircle,
   Download,
@@ -34,6 +35,7 @@ interface CompletedScan {
 }
 
 export function CompletedScanPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [scans, setScans] = useState<CompletedScan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,8 +152,8 @@ export function CompletedScanPage() {
             <TableBody>
               {filtered.map((scan) => {
                 return (
-                  <TableRow key={scan.id}>
-                    <TableCell className="font-mono text-xs">{scan.id}</TableCell>
+                  <TableRow key={scan.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/scan/${scan.id}`)}>
+                    <TableCell className="font-mono text-xs">{scan.id.slice(0, 8)}</TableCell>
                     <TableCell className="font-medium">{scan.target}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {scan.date}
@@ -169,10 +171,10 @@ export function CompletedScanPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="sm">
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/scan/${scan.id}`)}>
                           <Eye className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="sm">
+                        <Button variant="ghost" size="sm" onClick={() => window.open(`/api/scans/${scan.id}/report?format=json`, "_blank")}>
                           <Download className="h-3 w-3" />
                         </Button>
                       </div>

@@ -172,6 +172,7 @@ class ScanRequest(BaseModel):
     target_name: str = "Untitled Target"
     mcp_urls: list[str] = []
     agent_endpoint: str | None = None
+    agent_api_key: str | None = None
     timeout: float = 300.0
     demo_pace_seconds: float = 0.4
 
@@ -484,6 +485,7 @@ def create_app() -> FastAPI:
             name=request.target_name,
             mcp_server_urls=request.mcp_urls,
             agent_endpoint=request.agent_endpoint,
+            agent_api_key=request.agent_api_key,
             non_destructive=True,
             max_requests_per_minute=120,
         )

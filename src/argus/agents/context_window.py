@@ -233,7 +233,7 @@ class ContextWindowAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
@@ -289,7 +289,7 @@ class ContextWindowAgent(LLMAttackAgent):
         """Execute a single context window attack: setup turns + trigger."""
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
             # Setup phase: send benign/priming turns
             setup_results: list[TurnResult] = []
             for i, msg in enumerate(attack["setup_turns"]):
@@ -462,7 +462,7 @@ class ContextWindowAgent(LLMAttackAgent):
         """
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
             all_results: list[TurnResult] = []
 
             # Padding phase — fill the context window with benign turns

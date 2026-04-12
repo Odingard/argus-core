@@ -86,7 +86,7 @@ class SupplyChainAgent(LLMAttackAgent):
             self._techniques_attempted += 1
 
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"trust-analysis-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -177,7 +177,7 @@ class SupplyChainAgent(LLMAttackAgent):
             self._techniques_attempted += 1
 
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"integrity-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -278,7 +278,7 @@ class SupplyChainAgent(LLMAttackAgent):
 
         for mcp_url in self.config.target.mcp_server_urls:
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"depconfusion-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -378,7 +378,7 @@ class SupplyChainAgent(LLMAttackAgent):
             self._techniques_attempted += 1
 
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"blind-trust-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -504,7 +504,7 @@ class SupplyChainAgent(LLMAttackAgent):
         server_names: list[tuple[str, str]] = []
         for mcp_url in self.config.target.mcp_server_urls:
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"typosquat-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,

@@ -58,6 +58,14 @@ class LLMAttackAgent(BaseAttackAgent):
         """The shared LLM client. Check `agent.llm.available` before LLM-augmented work."""
         return self._llm
 
+    @property
+    def _target_auth_headers(self) -> dict[str, str]:
+        """Build auth headers for the target if an API key is configured."""
+        key = self.config.target.agent_api_key
+        if key:
+            return {"Authorization": f"Bearer {key}"}
+        return {}
+
     async def _llm_generate(
         self,
         system_prompt: str,

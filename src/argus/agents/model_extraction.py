@@ -189,7 +189,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0, default_headers=self._target_auth_headers)
         survey = await prober.probe_all()
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
@@ -199,7 +199,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 1: Chat-based extraction (system prompt, tools, etc.)
         if chat_endpoints:
             chat_path = chat_endpoints[0].path
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 for attack in _EXTRACTION_ATTACKS:
                     if not await sandbox.check_request_allowed():
                         return
@@ -208,7 +208,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 2: Direct admin/identity extraction
         admin_paths = [e.path for e in admin_endpoints + identity_endpoints]
         if admin_paths:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 for path in admin_paths:
                     if not await sandbox.check_request_allowed():
                         return
@@ -217,7 +217,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 3: Credential/token harvesting via tool responses
         if chat_endpoints:
             chat_path = chat_endpoints[0].path
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with ConversationSession(base_url=base_url, timeout_seconds=15.0, default_headers=self._target_auth_headers) as session:
                 await self._test_credential_harvesting(sandbox, session, chat_path)
 
     async def _test_extraction(

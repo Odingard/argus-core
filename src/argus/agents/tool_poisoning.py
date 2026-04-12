@@ -105,7 +105,7 @@ class ToolPoisoningAgent(LLMAttackAgent):
 
             self._techniques_attempted += 1
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"scan-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -211,7 +211,7 @@ class ToolPoisoningAgent(LLMAttackAgent):
                 break
 
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"output-scan-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -724,7 +724,7 @@ class ToolPoisoningAgent(LLMAttackAgent):
 
         for mcp_url in self.config.target.mcp_server_urls:
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"shadow-scan-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
@@ -795,7 +795,7 @@ class ToolPoisoningAgent(LLMAttackAgent):
             # Test 1: Does the agent verify tool definitions haven't changed?
             # (enumerated at start vs. now)
             try:
-                config = MCPServerConfig(
+                config = MCPServerConfig(api_key=self.config.target.agent_api_key, 
                     name=f"trust-{mcp_url}",
                     transport="streamable-http",
                     url=mcp_url,
