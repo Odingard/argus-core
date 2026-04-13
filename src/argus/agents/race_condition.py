@@ -25,7 +25,6 @@ from typing import Any
 
 from argus.agents.base import LLMAttackAgent
 from argus.conductor import (
-    ConversationSession,
     ResponseMatcher,
     TurnResult,
     TurnSpec,
@@ -39,7 +38,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +159,10 @@ class RaceConditionAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
 
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
@@ -239,7 +240,7 @@ class RaceConditionAgent(LLMAttackAgent):
         }
 
         n_concurrent = 6  # enough to win most check-and-debit races
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             specs = [
                 TurnSpec(
                     name=f"concurrent_pay:{i}",
@@ -298,7 +299,7 @@ class RaceConditionAgent(LLMAttackAgent):
         """Test TOCTOU race: fire check and use simultaneously."""
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             # Fire check and use requests in parallel
             check_spec = TurnSpec(
                 name=f"toctou_check:{attack['technique']}",
@@ -359,8 +360,8 @@ class RaceConditionAgent(LLMAttackAgent):
 
         try:
             async with (
-                ConversationSession(base_url=base_url, timeout_seconds=15.0) as session_a,
-                ConversationSession(base_url=base_url, timeout_seconds=15.0) as session_b,
+                self._make_session(base_url) as session_a,
+                self._make_session(base_url) as session_b,
             ):
                 # Session A: plant data
                 spec_a = TurnSpec(
@@ -418,7 +419,7 @@ class RaceConditionAgent(LLMAttackAgent):
         """Test transaction atomicity — partial transactions and state checks."""
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             results: list[TurnResult] = []
 
             # Execute partial transaction steps

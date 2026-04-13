@@ -90,6 +90,7 @@ class ConversationSession:
         default_headers: dict[str, str] | None = None,
         timeout_seconds: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        auth_token: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         parsed = urlparse(self.base_url)
@@ -98,6 +99,8 @@ class ConversationSession:
         self._allowed_host = parsed.netloc
         self.session_id = session_id
         self.default_headers = default_headers or {}
+        if auth_token:
+            self.default_headers.setdefault("Authorization", f"Bearer {auth_token}")
         self.timeout_seconds = timeout_seconds
         self._transport = transport
         self.history: list[TurnResult] = []

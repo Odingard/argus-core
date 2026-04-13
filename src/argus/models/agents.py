@@ -33,6 +33,7 @@ class AgentStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    SKIPPED = "skipped"  # target returned 401/403 on all probes — auth missing or invalid
 
 
 class AgentConfig(BaseModel):

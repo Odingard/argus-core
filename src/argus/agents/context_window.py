@@ -24,7 +24,6 @@ from typing import Any
 
 from argus.agents.base import LLMAttackAgent
 from argus.conductor import (
-    ConversationSession,
     ResponseMatcher,
     TurnResult,
     TurnSpec,
@@ -38,7 +37,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +232,10 @@ class ContextWindowAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         if not chat_endpoints:
@@ -289,7 +290,7 @@ class ContextWindowAgent(LLMAttackAgent):
         """Execute a single context window attack: setup turns + trigger."""
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             # Setup phase: send benign/priming turns
             setup_results: list[TurnResult] = []
             for i, msg in enumerate(attack["setup_turns"]):
@@ -462,7 +463,7 @@ class ContextWindowAgent(LLMAttackAgent):
         """
         self._techniques_attempted += 1
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             all_results: list[TurnResult] = []
 
             # Padding phase — fill the context window with benign turns

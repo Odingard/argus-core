@@ -16,6 +16,7 @@ from abc import abstractmethod
 from datetime import UTC, datetime
 from typing import Any
 
+from argus.conductor import ConversationSession
 from argus.corpus.manager import AttackCorpus, AttackPattern
 from argus.llm import LLMClient, get_llm_client
 from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType
@@ -28,8 +29,10 @@ from argus.models.findings import (
     ValidationResult,
 )
 from argus.orchestrator.engine import BaseAttackAgent
-from argus.orchestrator.signal_bus import SignalBus
+from argus.orchestrator.signal_bus import Signal, SignalBus, SignalType
 from argus.sandbox.environment import SandboxConfig, SandboxEnvironment
+from argus.survey import EndpointProber
+from argus.survey.prober import SurveyReport
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,8 @@ class LLMAttackAgent(BaseAttackAgent):
         self._llm: LLMClient = get_llm_client()
         self._corpus = AttackCorpus()
         self._sandbox: SandboxEnvironment | None = None
+        self._bases_skipped = 0  # count of base URLs skipped due to auth failures
+        self._bases_attempted = 0  # count of base URLs that passed auth and were attacked
 
     @property
     def llm(self) -> LLMClient:
@@ -82,6 +87,58 @@ class LLMAttackAgent(BaseAttackAgent):
         """Load attack patterns relevant to this agent from the corpus."""
         self._corpus.load()
         return self._corpus.get_patterns(agent_type=agent_type or self.agent_type.value)
+
+    @property
+    def _target_auth_token(self) -> str | None:
+        """Return the target's API key for HTTP auth, or None."""
+        return self.config.target.agent_api_key
+
+    def _make_prober(self, base_url: str, timeout_seconds: float = 5.0) -> EndpointProber:
+        """Create an EndpointProber with the target's auth token pre-wired."""
+        return EndpointProber(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            auth_token=self._target_auth_token,
+        )
+
+    def _make_session(self, base_url: str, timeout_seconds: float = 15.0) -> ConversationSession:
+        """Create a ConversationSession with the target's auth token pre-wired."""
+        return ConversationSession(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            auth_token=self._target_auth_token,
+        )
+
+    async def _check_survey_auth(self, survey: SurveyReport) -> bool:
+        """Return True if the survey indicates the target requires auth we don't have.
+
+        When True, the caller should abort early — there is no attack surface
+        to operate on because every probe was rejected.
+        """
+        if not survey.auth_required:
+            self._bases_attempted += 1
+            return False
+        logger.warning(
+            "%s: target %s rejected %d/%d probes with 401/403 — skipping " "(set agent_api_key to authenticate)",
+            self.agent_type.value,
+            survey.target_base_url,
+            survey.auth_failure_count,
+            len(survey.discovered),
+        )
+        self._bases_skipped += 1
+        await self.signal_bus.emit(
+            Signal(
+                signal_type=SignalType.AGENT_STATUS,
+                source_agent=self.agent_type.value,
+                source_instance=self.config.instance_id,
+                data={
+                    "status": "skipped",
+                    "reason": f"Target returned 401/403 on {survey.auth_failure_count}/"
+                    f"{len(survey.discovered)} probes — authentication required",
+                },
+            )
+        )
+        return True
 
     def _build_finding(
         self,
@@ -160,7 +217,13 @@ class LLMAttackAgent(BaseAttackAgent):
                 logger.debug("Agent %s full error: %s", self.agent_type.value, exc_msg)
                 errors.append(f"{type(exc).__name__}: {exc_msg}")
 
-        status = AgentStatus.FAILED if errors else AgentStatus.COMPLETED
+        if errors:
+            status = AgentStatus.FAILED
+        elif self._bases_skipped > 0 and self._bases_attempted == 0 and not self.findings:
+            # Every base URL was rejected with 401/403 and no findings were produced
+            status = AgentStatus.SKIPPED
+        else:
+            status = AgentStatus.COMPLETED
         return self.build_result(status, started_at, errors=errors or None)
 
     @abstractmethod

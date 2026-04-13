@@ -172,7 +172,18 @@ class ScanRequest(BaseModel):
     target_name: str = "Untitled Target"
     mcp_urls: list[str] = []
     agent_endpoint: str | None = None
+    agent_api_key: str | None = None
     timeout: float = 300.0
+
+    @field_validator("agent_api_key")
+    @classmethod
+    def _validate_agent_api_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if len(v) > 2000:
+            raise ValueError("agent_api_key too long (max 2000 chars)")
+        return v
+
     demo_pace_seconds: float = 0.4
 
     @field_validator("mcp_urls")
@@ -484,6 +495,7 @@ def create_app() -> FastAPI:
             name=request.target_name,
             mcp_server_urls=request.mcp_urls,
             agent_endpoint=request.agent_endpoint,
+            agent_api_key=request.agent_api_key,
             non_destructive=True,
             max_requests_per_minute=120,
         )

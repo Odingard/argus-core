@@ -40,7 +40,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +189,10 @@ class ModelExtractionAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
@@ -199,7 +201,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 1: Chat-based extraction (system prompt, tools, etc.)
         if chat_endpoints:
             chat_path = chat_endpoints[0].path
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with self._make_session(base_url) as session:
                 for attack in _EXTRACTION_ATTACKS:
                     if not await sandbox.check_request_allowed():
                         return
@@ -208,7 +210,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 2: Direct admin/identity extraction
         admin_paths = [e.path for e in admin_endpoints + identity_endpoints]
         if admin_paths:
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with self._make_session(base_url) as session:
                 for path in admin_paths:
                     if not await sandbox.check_request_allowed():
                         return
@@ -217,7 +219,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         # Phase 3: Credential/token harvesting via tool responses
         if chat_endpoints:
             chat_path = chat_endpoints[0].path
-            async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+            async with self._make_session(base_url) as session:
                 await self._test_credential_harvesting(sandbox, session, chat_path)
 
     async def _test_extraction(

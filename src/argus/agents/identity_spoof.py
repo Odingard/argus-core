@@ -42,7 +42,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -116,14 +116,16 @@ class IdentitySpoofAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         if not identity_endpoints:
             logger.debug("IdentitySpoof: %s exposes no identity surface", base_url)
             return
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             for endpoint in identity_endpoints:
                 if not await sandbox.check_request_allowed():
                     return
@@ -152,7 +154,13 @@ class IdentitySpoofAgent(LLMAttackAgent):
             baseline_markers = ResponseMatcher.find_sensitive_markers(baseline_result.response_text)
 
             # SPOOF: each header variant
-            for spoof_headers in _SPOOF_HEADER_VARIANTS:
+            # When target auth is configured, skip spoof variants that include
+            # an Authorization header — they would overwrite the real token in
+            # default_headers, causing 401 on the spoof request and silently
+            # disabling the comparison.
+            has_auth = self._target_auth_token is not None
+            variants = [v for v in _SPOOF_HEADER_VARIANTS if not (has_auth and "Authorization" in v)]
+            for spoof_headers in variants:
                 spoof_spec = TurnSpec(
                     name=f"spoof:{command}:{','.join(spoof_headers.keys())}",
                     method="POST",

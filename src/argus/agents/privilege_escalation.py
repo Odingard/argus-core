@@ -38,7 +38,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +243,10 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         if not await sandbox.check_request_allowed():
             return
 
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
 
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
@@ -256,7 +258,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         if not target_paths and chat_endpoints:
             target_paths = [chat_endpoints[0].path]
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             # Phase 0: Generic tool-call chaining — enumerate the tool catalog
             # and try sequences of tool calls, propagating returned tokens /
             # session ids between steps. Generic confused-deputy probe.

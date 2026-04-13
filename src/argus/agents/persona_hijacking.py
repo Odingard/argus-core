@@ -42,7 +42,7 @@ from argus.models.findings import (
     ReproductionStep,
 )
 from argus.sandbox.environment import SandboxEnvironment
-from argus.survey import EndpointProber, SurfaceClass
+from argus.survey import SurfaceClass
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +204,10 @@ class PersonaHijackingAgent(LLMAttackAgent):
             return
 
         # SURVEY — discover chat surfaces
-        prober = EndpointProber(base_url=base_url, timeout_seconds=5.0)
+        prober = self._make_prober(base_url)
         survey = await prober.probe_all()
+        if await self._check_survey_auth(survey):
+            return
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         if not chat_endpoints:
@@ -214,7 +216,7 @@ class PersonaHijackingAgent(LLMAttackAgent):
 
         chat_path = chat_endpoints[0].path
 
-        async with ConversationSession(base_url=base_url, timeout_seconds=15.0) as session:
+        async with self._make_session(base_url) as session:
             # Phase 1: Establish behavioral baseline
             baseline = await self._establish_baseline(session, chat_path, sandbox)
             if not baseline:

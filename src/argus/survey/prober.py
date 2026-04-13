@@ -123,12 +123,32 @@ class SurveyReport(BaseModel):
         default_factory=dict,
         description="Map of surface_class -> list of paths discovered",
     )
+    auth_failure_count: int = Field(
+        default=0,
+        description="Number of probes that returned 401/403 — indicates missing or invalid auth",
+    )
+
+    @property
+    def auth_required(self) -> bool:
+        """True when the majority of probes were rejected with 401/403.
+
+        This is a strong signal that the target requires authentication
+        and the scan is running without valid credentials.
+        """
+        responded = [d for d in self.discovered if d.status_code is not None]
+        if not responded:
+            return False
+        return self.auth_failure_count > len(responded) * 0.5
 
     def endpoints_for(self, surface: SurfaceClass) -> list[DiscoveredEndpoint]:
-        return [d for d in self.discovered if d.surface_class == surface and d.is_live()]
+        return [
+            d for d in self.discovered if d.surface_class == surface and d.is_live() and d.status_code not in (401, 403)
+        ]
 
     def has_surface(self, surface: SurfaceClass) -> bool:
-        return any(d.surface_class == surface and d.is_live() for d in self.discovered)
+        return any(
+            d.surface_class == surface and d.is_live() and d.status_code not in (401, 403) for d in self.discovered
+        )
 
 
 class EndpointProber:
@@ -144,6 +164,7 @@ class EndpointProber:
         timeout_seconds: float = 5.0,
         max_concurrent: int = 8,
         transport: httpx.AsyncBaseTransport | None = None,
+        auth_token: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         parsed = urlparse(self.base_url)
@@ -153,6 +174,7 @@ class EndpointProber:
         self.timeout_seconds = timeout_seconds
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._transport = transport
+        self._auth_token = auth_token
 
     async def probe_all(self) -> SurveyReport:
         """Probe the full default path set against the base URL.
@@ -166,6 +188,8 @@ class EndpointProber:
         }
         if self._transport is not None:
             kwargs["transport"] = self._transport
+        if self._auth_token:
+            kwargs["headers"] = {"Authorization": f"Bearer {self._auth_token}"}
 
         async with httpx.AsyncClient(**kwargs) as client:
             tasks = [
@@ -173,19 +197,32 @@ class EndpointProber:
             ]
             discoveries = await asyncio.gather(*tasks)
 
+        auth_failures = 0
         report = SurveyReport(target_base_url=self.base_url)
         for d in discoveries:
             report.discovered.append(d)
-            if d.is_live():
+            if d.status_code in (401, 403):
+                auth_failures += 1
+            elif d.is_live():
                 report.by_surface.setdefault(d.surface_class.value, []).append(d.path)
+        report.auth_failure_count = auth_failures
 
+        live_count = sum(1 for d in discoveries if d.is_live())
         logger.info(
             "SURVEY %s — %d/%d endpoints live across %d surface classes",
             self.base_url,
-            sum(1 for d in discoveries if d.is_live()),
+            live_count,
             len(discoveries),
             len(report.by_surface),
         )
+        if report.auth_required:
+            logger.warning(
+                "SURVEY %s — %d/%d probes returned 401/403; target likely requires "
+                "authentication. Set agent_api_key in the scan request to authenticate.",
+                self.base_url,
+                auth_failures,
+                len(discoveries),
+            )
         return report
 
     async def _probe_one(
