@@ -30,6 +30,7 @@ from argus.conductor import (
     ResponseMatcher,
     TurnResult,
     TurnSpec,
+    quick_eval,
 )
 from argus.models.agents import AgentType
 from argus.models.findings import (
@@ -312,6 +313,13 @@ class ModelExtractionAgent(LLMAttackAgent):
     ) -> dict[str, Any] | None:
         """Check response for evidence of model/config extraction."""
         text = result.response_text
+
+        # Layer 1: New behavior-first evaluation engine
+        evidence = quick_eval(text)
+        if evidence is not None:
+            return evidence
+
+        # Layer 2: Legacy pattern + technique-specific matching
         markers = ResponseMatcher.find_sensitive_markers(text)
         priv_indicators = ResponseMatcher.find_privilege_indicators(text)
 

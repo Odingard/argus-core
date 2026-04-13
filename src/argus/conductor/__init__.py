@@ -24,6 +24,14 @@ Design notes:
     target-specific paths. Per the no-benchmark-gaming rule.
 """
 
+from argus.conductor.evaluation import (
+    BehaviorEvaluator,
+    EvalResult,
+    EvalSpec,
+    RunRecord,
+    ToolCall,
+    quick_eval,
+)
 from argus.conductor.session import (
     AttackSequence,
     ConversationSession,
@@ -34,8 +42,14 @@ from argus.conductor.session import (
 
 __all__ = [
     "AttackSequence",
+    "BehaviorEvaluator",
     "ConversationSession",
+    "EvalResult",
+    "EvalSpec",
     "ResponseMatcher",
+    "RunRecord",
+    "ToolCall",
     "TurnResult",
     "TurnSpec",
+    "quick_eval",
 ]

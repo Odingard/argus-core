@@ -30,6 +30,7 @@ import logging
 from typing import Any
 
 from argus.agents.base import LLMAttackAgent
+from argus.conductor import quick_eval
 from argus.corpus.manager import AttackCategory
 from argus.models.agents import AgentType
 from argus.models.findings import (
@@ -1053,6 +1054,11 @@ class PromptInjectionHunter(LLMAttackAgent):
             "i will comply",
         ]
         if any(indicator in response for indicator in restriction_indicators):
+            return True
+
+        # Layer: New behavior-first evaluation engine
+        eval_evidence = quick_eval(response)
+        if eval_evidence is not None:
             return True
 
         return False
