@@ -224,6 +224,7 @@ def status() -> None:
     is_flag=True,
     help="Use the cinematic retro-terminal dashboard (for demos/recordings)",
 )
+@click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
 def live(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -232,6 +233,7 @@ def live(
     demo: bool,
     pace: float,
     cinematic: bool,
+    agent_api_key: str | None,
 ) -> None:
     """Run an ARGUS scan with the LIVE streaming dashboard.
 
@@ -250,6 +252,7 @@ def live(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
+        agent_api_key=agent_api_key,
     )
 
     from argus.ui import CinematicDashboard, LiveDashboard
@@ -278,12 +281,14 @@ def live(
 @click.option("--target", "--agent-endpoint", "agent_endpoint", help="Target agent endpoint URL")
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", help="Output file path for JSON report")
+@click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
 def scan(
     target_name: str,
     mcp_url: tuple[str, ...],
     agent_endpoint: str | None,
     timeout: int,
     output: str | None,
+    agent_api_key: str | None,
 ) -> None:
     """Run an ARGUS scan against a target AI system."""
     # Validate all URLs
@@ -301,12 +306,14 @@ def scan(
     console.print(f"\n[bold]Target:[/] {target_name}")
     console.print(f"[bold]MCP URLs:[/] {', '.join(mcp_url) if mcp_url else 'None'}")
     console.print(f"[bold]Agent Endpoint:[/] {agent_endpoint or 'None'}")
+    console.print(f"[bold]API Key:[/] {'***' + agent_api_key[-4:] if agent_api_key else 'None'}")
     console.print(f"[bold]Timeout:[/] {timeout}s\n")
 
     target = TargetConfig(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
+        agent_api_key=agent_api_key,
     )
 
     orchestrator = _create_orchestrator()
@@ -351,12 +358,14 @@ def scan(
 @click.option("--target", "--agent-endpoint", "agent_endpoint", help="Target agent endpoint URL")
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", required=True, help="Output file path for ALEC evidence package")
+@click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
 def alec_export(
     target_name: str,
     mcp_url: tuple[str, ...],
     agent_endpoint: str | None,
     timeout: int,
     output: str,
+    agent_api_key: str | None,
 ) -> None:
     """Run a scan and export an ALEC evidence package.
 
@@ -389,6 +398,7 @@ def alec_export(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
+        agent_api_key=agent_api_key,
     )
 
     orchestrator = _create_orchestrator()
