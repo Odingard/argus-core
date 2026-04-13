@@ -103,6 +103,7 @@ export function LiveScanPage() {
   const feedContainerRef = useRef<HTMLDivElement>(null);
   const activitySeenRef = useRef<number>(0);
   const userScrolledUpRef = useRef(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   // Auto-scroll feed to bottom ONLY when user hasn't scrolled up
   useEffect(() => {
@@ -116,6 +117,7 @@ export function LiveScanPage() {
     const el = e.currentTarget;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     userScrolledUpRef.current = !atBottom;
+    setShowJumpToLatest(!atBottom);
   }, []);
 
   useEffect(() => {
@@ -172,6 +174,8 @@ export function LiveScanPage() {
     setScanId(null);
     setActivityLog([]);
     activitySeenRef.current = 0;
+    userScrolledUpRef.current = false;
+    setShowJumpToLatest(false);
     setElapsedSeconds(0);
     try {
       const scanBody: Record<string, unknown> = {
@@ -455,11 +459,12 @@ export function LiveScanPage() {
                 <span className="text-[11px] font-mono text-green-400 font-semibold">LIVE FEED</span>
               </div>
               <div className="flex items-center gap-2">
-                {userScrolledUpRef.current && (
+                {showJumpToLatest && (
                   <button
                     className="text-[10px] font-mono text-yellow-400 hover:text-yellow-300"
                     onClick={() => {
                       userScrolledUpRef.current = false;
+                      setShowJumpToLatest(false);
                       feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
                     }}
                   >
