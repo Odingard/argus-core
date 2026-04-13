@@ -270,12 +270,25 @@ class RaceConditionAgent(LLMAttackAgent):
         evidence_results: list[TurnResult] = []
         for r in ok_results:
             ev = self._evaluate_response(r)
+            ev = await self._llm_eval_fallback(
+                ev,
+                "race_condition",
+                "concurrent_state_mutation",
+                r.response_text,
+            )
             if ev is not None:
                 evidence_results.append(r)
 
         if not evidence_results:
             return
 
+        first_ev = self._evaluate_response(evidence_results[0])
+        first_ev = await self._llm_eval_fallback(
+            first_ev,
+            "race_condition",
+            "concurrent_state_mutation",
+            evidence_results[0].response_text,
+        )
         self._techniques_succeeded += 1
         await self._report(
             technique="race_concurrent_state_mutation",
@@ -286,7 +299,7 @@ class RaceConditionAgent(LLMAttackAgent):
             ),
             path=payment_path,
             results=evidence_results[:3],
-            evidence=self._evaluate_response(evidence_results[0]) or {},
+            evidence=first_ev or {},
         )
 
     async def _test_toctou(
@@ -336,6 +349,12 @@ class RaceConditionAgent(LLMAttackAgent):
                 return
 
             evidence = self._evaluate_response(use_result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "race_condition_toctou",
+                attack["use_command"],
+                use_result.response_text,
+            )
             if evidence is None:
                 return
 
@@ -395,6 +414,12 @@ class RaceConditionAgent(LLMAttackAgent):
                     return
 
                 evidence = self._evaluate_response(result_b)
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "race_condition_parallel_sessions",
+                    test["session_b_message"],
+                    result_b.response_text,
+                )
                 if evidence is None:
                     return
 
@@ -461,6 +486,12 @@ class RaceConditionAgent(LLMAttackAgent):
                     return
 
                 evidence = self._evaluate_response(check_result)
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "race_condition_atomicity",
+                    test["check_command"],
+                    check_result.response_text,
+                )
             else:
                 # Check the last step result
                 if not results:
@@ -469,6 +500,12 @@ class RaceConditionAgent(LLMAttackAgent):
                 if not last.ok():
                     return
                 evidence = self._evaluate_response(last)
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "race_condition_atomicity",
+                    str(test["steps"][-1]),
+                    last.response_text,
+                )
 
             if evidence is None:
                 return

@@ -330,6 +330,13 @@ class ContextWindowAgent(LLMAttackAgent):
                 return
 
             evidence = self._evaluate_response(trigger_result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "context_window_exploitation",
+                attack["trigger"],
+                trigger_result.response_text,
+                context=f"Setup turns: {attack['setup_turns'][0][:500]}",
+            )
             if evidence is None:
                 return
 
@@ -543,6 +550,13 @@ class ContextWindowAgent(LLMAttackAgent):
                 return
 
             evidence = self._evaluate_response(trigger_result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "context_window_overflow",
+                overflow["injection_turn"],
+                trigger_result.response_text,
+                context=f"Trigger: {overflow['trigger'][:500]}",
+            )
             if evidence is None:
                 return
 

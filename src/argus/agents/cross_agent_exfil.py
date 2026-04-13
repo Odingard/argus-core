@@ -255,6 +255,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "cross_agent_exfiltration",
+                msg,
+                result.response_text,
+            )
             if evidence is None:
                 continue
 
@@ -297,6 +303,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "cross_agent_exfiltration",
+                str(cmd),
+                result.response_text,
+            )
             if evidence is None:
                 continue
 
@@ -351,6 +363,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "cross_agent_exfiltration",
+                "ARGUS-EXFIL-MARKER-42",
+                result.response_text,
+            )
             if evidence is None:
                 continue
 
@@ -462,6 +480,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
 
             # Also check the response itself for evidence
             evidence = self._evaluate_response(result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "cross_agent_exfiltration",
+                message,
+                result.response_text,
+            )
             if evidence is not None and hit is None:
                 self._techniques_succeeded += 1
                 await self._report(
@@ -630,6 +654,12 @@ class CrossAgentExfilAgent(LLMAttackAgent):
                     continue
 
                 evidence = self._evaluate_response(result)
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "cross_agent_exfiltration",
+                    msg,
+                    result.response_text,
+                )
                 if evidence is None:
                     continue
 

@@ -386,6 +386,13 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
             # Check for privilege evidence after each step
             step_evidence = self._evaluate_response(result)
+            step_evidence = await self._llm_eval_fallback(
+                step_evidence,
+                "privilege_escalation",
+                str(args),
+                result.response_text,
+                context=f"Tool: {tool_name}",
+            )
             if step_evidence is not None:
                 evidence = step_evidence
                 evidence["chain_step"] = i
@@ -503,6 +510,12 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
             # Check if a step that should be denied was actually granted
             if step.get("expect") == "denied" and result.ok():
                 evidence = self._evaluate_response(result)
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "privilege_escalation",
+                    step["command"],
+                    result.response_text,
+                )
                 if evidence is not None:
                     escalation_evidence = evidence
                     escalation_evidence["escalation_step"] = i
@@ -546,6 +559,12 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "privilege_escalation",
+                str(variant),
+                result.response_text,
+            )
             if evidence is None:
                 continue
 
@@ -590,6 +609,12 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
                 # it may indicate a fallback with weaker controls
                 if result.ok():
                     evidence = self._evaluate_response(result)
+                    evidence = await self._llm_eval_fallback(
+                        evidence,
+                        "privilege_escalation",
+                        exhaustion["command"],
+                        result.response_text,
+                    )
                     if evidence is not None:
                         fallback_result = result
                         break
@@ -598,6 +623,12 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
         if fallback_result is not None:
             evidence = self._evaluate_response(fallback_result)
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "privilege_escalation",
+                exhaustion["command"],
+                fallback_result.response_text,
+            )
             if evidence is not None:
                 self._techniques_succeeded += 1
                 await self._report_exhaustion(

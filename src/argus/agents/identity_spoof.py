@@ -183,6 +183,20 @@ class IdentitySpoofAgent(LLMAttackAgent):
                     baseline_priv=baseline_priv,
                     baseline_markers=baseline_markers,
                 )
+                evidence = await self._llm_eval_fallback(
+                    evidence,
+                    "identity_spoofing",
+                    f"command={command} headers={spoof_headers}",
+                    spoof_result.response_text,
+                    context=f"Baseline response: {baseline_result.response_text[:500]}",
+                    evidence_template={
+                        "new_privilege_indicators": [],
+                        "new_sensitive_markers": [],
+                        "status_change": False,
+                        "baseline_status": baseline_result.status_code,
+                        "spoofed_status": spoof_result.status_code,
+                    },
+                )
                 if evidence is None:
                     continue
 

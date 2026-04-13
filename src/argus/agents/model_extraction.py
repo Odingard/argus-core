@@ -250,6 +250,13 @@ class ModelExtractionAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result, attack["technique"])
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "model_extraction",
+                msg,
+                result.response_text,
+                context=f"Technique: {attack['technique']}",
+            )
             if evidence is None:
                 continue
 
@@ -291,6 +298,12 @@ class ModelExtractionAgent(LLMAttackAgent):
                 continue
 
             evidence = self._evaluate_response(result, "extract_admin_direct")
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "model_extraction",
+                cmd["command"],
+                result.response_text,
+            )
             if evidence is None:
                 continue
 
@@ -564,6 +577,13 @@ class ModelExtractionAgent(LLMAttackAgent):
 
             # Also check standard extraction evidence
             evidence = self._evaluate_response(result, harvest["technique"])
+            evidence = await self._llm_eval_fallback(
+                evidence,
+                "model_extraction",
+                harvest["prompt"],
+                result.response_text,
+                context=f"Technique: {harvest['technique']}",
+            )
 
             if found_creds or (evidence and evidence.get("sensitive_markers")):
                 self._techniques_succeeded += 1
