@@ -306,7 +306,10 @@ def scan(
     console.print(f"\n[bold]Target:[/] {target_name}")
     console.print(f"[bold]MCP URLs:[/] {', '.join(mcp_url) if mcp_url else 'None'}")
     console.print(f"[bold]Agent Endpoint:[/] {agent_endpoint or 'None'}")
-    console.print(f"[bold]API Key:[/] {'***' + agent_api_key[-4:] if agent_api_key else 'None'}")
+    key_display = "None"
+    if agent_api_key:
+        key_display = "***" + agent_api_key[-4:] if len(agent_api_key) > 4 else "****"
+    console.print(f"[bold]API Key:[/] {key_display}")
     console.print(f"[bold]Timeout:[/] {timeout}s\n")
 
     target = TargetConfig(
