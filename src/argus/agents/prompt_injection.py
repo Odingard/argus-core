@@ -421,7 +421,7 @@ class PromptInjectionHunter(LLMAttackAgent):
                         f"This payload was crafted using intelligence extracted by model_extraction agent. "
                         f"Intel: {intel.summary()[:200]}"
                     ),
-                    severity=self._classify_severity(result, payload_info["payload"]),
+                    severity=self._classify_severity(result),
                     surface="user_input",
                     technique=payload_info["technique"],
                     payload=payload_info["payload"],
