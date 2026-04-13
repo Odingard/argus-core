@@ -186,11 +186,14 @@ export function LiveScanPage() {
           const data = await getLiveScanStatus();
           setElapsedSeconds(Math.round(data.elapsed_seconds || 0));
 
-          const serverLog = data.activity_log || [];
-          if (serverLog.length > activitySeenRef.current) {
-            const newEntries = serverLog.slice(activitySeenRef.current);
-            activitySeenRef.current = serverLog.length;
-            setActivityLog((prev) => [...prev, ...newEntries]);
+          const serverLog: ActivityEntry[] = data.activity_log || [];
+          if (serverLog.length > 0) {
+            const lastSeenSeq = activitySeenRef.current;
+            const newEntries = serverLog.filter((e) => (e.seq ?? 0) > lastSeenSeq);
+            if (newEntries.length > 0) {
+              activitySeenRef.current = Math.max(...newEntries.map((e) => e.seq ?? 0));
+              setActivityLog((prev) => [...prev, ...newEntries]);
+            }
           }
 
           const agentEntries = Object.values(data.agents || {});

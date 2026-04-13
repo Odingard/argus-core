@@ -185,6 +185,7 @@ export const getCorpusPatterns = (search?: string) =>
 export interface ActivityEntry {
   agent: string;
   ts: number;
+  seq?: number;
   category: "status" | "probe" | "finding" | "technique" | "recon";
   action: string;
   detail: string;

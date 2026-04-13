@@ -272,6 +272,7 @@ class ScanState:
         self.findings: list[dict[str, Any]] = []
         self.signals: list[dict[str, Any]] = []
         self.activity_log: list[dict[str, Any]] = []  # per-agent activity feed
+        self._activity_seq: int = 0  # monotonic sequence counter
         self.events_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.subscribers: list[asyncio.Queue[dict[str, Any]]] = []
         self.scan_task: asyncio.Task | None = None
@@ -289,6 +290,7 @@ class ScanState:
         self.findings = []
         self.signals = []
         self.activity_log = []
+        self._activity_seq = 0
         # Don't clear subscribers — they're long-lived
 
     def add_finding(self, finding_data: dict[str, Any]) -> None:
@@ -306,6 +308,8 @@ class ScanState:
 
     def add_activity(self, entry: dict[str, Any]) -> None:
         """Append an activity log entry (bounded to last 500 per scan)."""
+        self._activity_seq += 1
+        entry["seq"] = self._activity_seq
         self.activity_log.append(entry)
         if len(self.activity_log) > 500:
             self.activity_log = self.activity_log[-500:]
@@ -349,6 +353,7 @@ class ScanState:
             "recent_findings": self.findings[-MAX_RECENT_FINDINGS_RETURNED:],
             "signal_count": len(self.signals),
             "activity_log": self.activity_log[-200:],
+            "activity_log_total": self._activity_seq,
         }
 
     async def broadcast(self, event_type: str, payload: Any) -> None:
@@ -549,7 +554,7 @@ def create_app() -> FastAPI:
                 {
                     "type": signal.signal_type.value,
                     "source_agent": signal.source_agent,
-                    "ts": signal.timestamp.isoformat(),
+                    "ts": signal.timestamp.timestamp(),
                 }
             )
 
@@ -566,7 +571,7 @@ def create_app() -> FastAPI:
                         state.add_activity(
                             {
                                 "agent": agent_id,
-                                "ts": signal.timestamp.isoformat(),
+                                "ts": signal.timestamp.timestamp(),
                                 "category": "status",
                                 "action": "Agent deployed",
                                 "detail": "Beginning attack sequence...",
@@ -579,7 +584,7 @@ def create_app() -> FastAPI:
                         state.add_activity(
                             {
                                 "agent": agent_id,
-                                "ts": signal.timestamp.isoformat(),
+                                "ts": signal.timestamp.timestamp(),
                                 "category": "status",
                                 "action": "Mission complete",
                                 "detail": f"{agent.get('findings_count', 0)} findings reported",
@@ -590,7 +595,7 @@ def create_app() -> FastAPI:
                         state.add_activity(
                             {
                                 "agent": agent_id,
-                                "ts": signal.timestamp.isoformat(),
+                                "ts": signal.timestamp.timestamp(),
                                 "category": "status",
                                 "action": "Skipped",
                                 "detail": reason,
@@ -610,7 +615,7 @@ def create_app() -> FastAPI:
                     state.add_activity(
                         {
                             "agent": agent_id,
-                            "ts": signal.timestamp.isoformat(),
+                            "ts": signal.timestamp.timestamp(),
                             "category": "finding",
                             "action": f"VULN FOUND: {title[:100]}",
                             "detail": f"Severity: {severity} | Technique: {technique}",
@@ -636,7 +641,7 @@ def create_app() -> FastAPI:
                     state.add_activity(
                         {
                             "agent": agent_id,
-                            "ts": signal.timestamp.isoformat(),
+                            "ts": signal.timestamp.timestamp(),
                             "category": "probe",
                             "action": f"Probing: {data_summary}",
                             "detail": str(signal.data.get("summary", ""))[:120],
@@ -651,7 +656,7 @@ def create_app() -> FastAPI:
                     state.add_activity(
                         {
                             "agent": agent_id,
-                            "ts": signal.timestamp.isoformat(),
+                            "ts": signal.timestamp.timestamp(),
                             "category": category,
                             "action": action,
                             "detail": detail,
@@ -664,7 +669,7 @@ def create_app() -> FastAPI:
                     "activity",
                     {
                         "agent": signal.source_agent,
-                        "ts": signal.timestamp.isoformat(),
+                        "ts": signal.timestamp.timestamp(),
                         "category": signal.data.get("category", "technique"),
                         "action": signal.data.get("action", "")[:120],
                         "detail": signal.data.get("detail", "")[:200],
