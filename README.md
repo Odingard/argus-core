@@ -78,16 +78,17 @@ pip install -e ".[dev]"
 ### Run Your First Scan
 
 ```bash
-# Set your LLM API key
+# Set your LLM API key (required for advanced attack generation)
 export ANTHROPIC_API_KEY=your-key-here
 # or
 export OPENAI_API_KEY=your-key-here
 
 # Scan an AI agent endpoint
-argus scan "My AI Agent" --mcp-url https://your-agent.com/api/chat --output report.json
+# First arg is a label/name, --target is the actual URL to probe
+argus scan "My AI Agent" --target https://your-agent.com/api/chat --output report.json
 
 # Or use the cinematic terminal dashboard
-argus live "My AI Agent" --mcp-url https://your-agent.com/api/chat --cinematic
+argus live "My AI Agent" --target https://your-agent.com/api/chat --cinematic
 ```
 
 ### Test with the Built-in Target
@@ -97,7 +98,7 @@ argus live "My AI Agent" --mcp-url https://your-agent.com/api/chat --cinematic
 argus test-target start --port 9999
 
 # In another terminal, scan it
-argus scan "Mock Target" --mcp-url http://localhost:9999 --output mock-report.json
+argus scan "Mock Target" --target http://localhost:9999/chat --output mock-report.json
 ```
 
 ### Start the Web Platform
@@ -127,7 +128,7 @@ cd argus-frontend && npm install && npm run dev
 ### CLI View
 
 ```
-$ argus scan https://target-ai-agent.example.com --target https://target-ai-agent.example.com --timeout 120
+$ argus scan "Target AI Agent" --target https://target-ai-agent.example.com --timeout 120
 
     ╔═══════════════════════════════════════════════════╗
     ║                                                   ║
@@ -143,7 +144,7 @@ $ argus scan https://target-ai-agent.example.com --target https://target-ai-agen
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
 
-Target: https://target-ai-agent.example.com
+Target: Target AI Agent
 Agent Endpoint: https://target-ai-agent.example.com
 Timeout: 120s
 
@@ -255,7 +256,7 @@ ARGUS ships with **Arena** — 12 intentionally vulnerable AI agent targets for 
 cd arena && docker-compose up -d
 
 # Point ARGUS at Arena
-argus scan "Arena" --mcp-url http://localhost:9001
+argus scan "Arena" --target http://localhost:9001
 ```
 
 ---
