@@ -100,14 +100,51 @@ export function LiveScanPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
+  const feedContainerRef = useRef<HTMLDivElement>(null);
   const activitySeenRef = useRef<number>(0);
+  const userScrolledUpRef = useRef(false);
+  const isAutoScrollingRef = useRef(false);
+  const autoScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollTopRef = useRef(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
-  // Auto-scroll feed to bottom on new entries
+  // Auto-scroll feed to bottom ONLY when user hasn't scrolled up
   useEffect(() => {
-    if (feedEndRef.current) {
+    if (!userScrolledUpRef.current && feedEndRef.current) {
+      isAutoScrollingRef.current = true;
+      // Safety timeout: reset flag if smooth scroll doesn't reach bottom within 1s
+      if (autoScrollTimerRef.current) clearTimeout(autoScrollTimerRef.current);
+      autoScrollTimerRef.current = setTimeout(() => {
+        isAutoScrollingRef.current = false;
+      }, 1000);
       feedEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [activityLog.length]);
+
+  // Detect when user scrolls up in the feed
+  const handleFeedScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const currentTop = el.scrollTop;
+    const atBottom = el.scrollHeight - currentTop - el.clientHeight < 40;
+    // If this scroll event is from programmatic auto-scroll, check for user interruption
+    if (isAutoScrollingRef.current) {
+      // User scrolled upward against the auto-scroll — treat as intentional
+      if (currentTop < lastScrollTopRef.current - 5) {
+        isAutoScrollingRef.current = false;
+        if (autoScrollTimerRef.current) clearTimeout(autoScrollTimerRef.current);
+        userScrolledUpRef.current = true;
+        setShowJumpToLatest(true);
+      } else if (atBottom) {
+        isAutoScrollingRef.current = false;
+        if (autoScrollTimerRef.current) clearTimeout(autoScrollTimerRef.current);
+      }
+      lastScrollTopRef.current = currentTop;
+      return;
+    }
+    lastScrollTopRef.current = currentTop;
+    userScrolledUpRef.current = !atBottom;
+    setShowJumpToLatest(!atBottom);
+  }, []);
 
   useEffect(() => {
     async function loadAgents() {
@@ -163,6 +200,8 @@ export function LiveScanPage() {
     setScanId(null);
     setActivityLog([]);
     activitySeenRef.current = 0;
+    userScrolledUpRef.current = false;
+    setShowJumpToLatest(false);
     setElapsedSeconds(0);
     try {
       const scanBody: Record<string, unknown> = {
@@ -396,45 +435,84 @@ export function LiveScanPage() {
         </div>
       )}
 
+      {/* War Room: side-by-side agents + feed */}
       {(scanRunning || scanComplete || activityLog.length > 0) && (
-        <div className="flex gap-1 border-b border-border pb-0">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeView === "feed" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setActiveView("feed")}
-          >
-            <Terminal className="inline h-4 w-4 mr-1.5 -mt-0.5" />
-            Agent Activity
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeView === "agents" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setActiveView("agents")}
-          >
-            <Shield className="inline h-4 w-4 mr-1.5 -mt-0.5" />
-            Agent Grid
-          </button>
-        </div>
-      )}
-
-      {activeView === "feed" && (scanRunning || scanComplete || activityLog.length > 0) && (
-        <Card className="overflow-hidden border-primary/20">
-          <CardHeader className="pb-2 bg-black/30">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Terminal className="h-4 w-4 text-green-400" />
-                <CardTitle className="text-sm font-mono text-green-400">
-                  ARGUS &mdash; Live Agent Activity
-                </CardTitle>
-              </div>
-              <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
-                {activityLog.length} events
-              </Badge>
+        <div className="grid grid-cols-12 gap-3" style={{ height: "calc(100vh - 320px)", minHeight: "400px" }}>
+          {/* Left: Agent Grid (compact) */}
+          <div className="col-span-4 overflow-y-auto space-y-1.5 pr-1">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Shield className="h-3.5 w-3.5 text-primary" />
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">Agents</span>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[420px] bg-black/40">
-              <div className="p-3 font-mono text-xs space-y-0.5">
+            {agents.map((agent) => {
+              const agentEvents = activityByAgent[agent.type] || [];
+              const findingCount = agentEvents.filter((e) => e.category === "finding").length;
+              const isExpanded = expandedAgents.has(agent.type);
+              return (
+                <div key={agent.code}>
+                  <button
+                    onClick={() => toggleAgent(agent.type)}
+                    className={`w-full flex items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${
+                      agent.status === "running" ? "bg-blue-950/40 border border-blue-500/30" :
+                      agent.status === "completed" ? "bg-green-950/20 border border-green-500/20" :
+                      "bg-muted/20 border border-transparent"
+                    } hover:bg-muted/30`}
+                  >
+                    <StatusDot status={agent.status} />
+                    <span className="font-mono text-[11px] font-bold text-primary w-10">{agent.code}</span>
+                    <span className="text-[11px] text-muted-foreground truncate flex-1">{agent.name}</span>
+                    {agent.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-blue-400 shrink-0" />}
+                    {findingCount > 0 && <span className="text-[10px] font-bold text-red-400 shrink-0">{findingCount}F</span>}
+                    {agent.status === "completed" && <CheckCircle className="h-3 w-3 text-green-400 shrink-0" />}
+                  </button>
+                  {isExpanded && agentEvents.length > 0 && (
+                    <div className="ml-2 mt-0.5 mb-1 rounded border border-border/30 bg-black/30 p-1.5 max-h-28 overflow-y-auto">
+                      {agentEvents.slice(-10).map((entry, i) => (
+                        <ActivityLine key={i} entry={entry} compact />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Right: Activity Feed */}
+          <div className="col-span-8 flex flex-col rounded-lg border border-primary/20 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-black/40 border-b border-border/30">
+              <div className="flex items-center gap-1.5">
+                <Terminal className="h-3.5 w-3.5 text-green-400" />
+                <span className="text-[11px] font-mono text-green-400 font-semibold">LIVE FEED</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {showJumpToLatest && (
+                  <button
+                    className="text-[10px] font-mono text-yellow-400 hover:text-yellow-300"
+                    onClick={() => {
+                      userScrolledUpRef.current = false;
+                      isAutoScrollingRef.current = true;
+                      if (autoScrollTimerRef.current) clearTimeout(autoScrollTimerRef.current);
+                      autoScrollTimerRef.current = setTimeout(() => {
+                        isAutoScrollingRef.current = false;
+                      }, 1000);
+                      setShowJumpToLatest(false);
+                      feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    ↓ Jump to latest
+                  </button>
+                )}
+                <span className="font-mono text-[10px] text-muted-foreground">{activityLog.length} events</span>
+              </div>
+            </div>
+            <div
+              ref={feedContainerRef}
+              className="flex-1 overflow-y-auto bg-black/40 p-2"
+              onScroll={handleFeedScroll}
+            >
+              <div className="font-mono space-y-px">
                 {activityLog.length === 0 && scanRunning && (
-                  <div className="text-muted-foreground animate-pulse py-8 text-center">
+                  <div className="text-muted-foreground animate-pulse py-8 text-center text-[11px]">
                     Waiting for agent activity...
                   </div>
                 )}
@@ -443,88 +521,42 @@ export function LiveScanPage() {
                 ))}
                 <div ref={feedEndRef} />
               </div>
-            </ScrollArea>
-
-            <div className="border-t border-border/50 bg-black/20 px-3 py-2">
-              <div className="flex flex-wrap gap-2">
-                {agents
-                  .filter((a) => a.status !== "idle")
-                  .map((agent) => {
-                    const agentEvents = activityByAgent[agent.type] || [];
-                    const findingCount = agentEvents.filter((e) => e.category === "finding").length;
-                    return (
-                      <button
-                        key={agent.code}
-                        onClick={() => toggleAgent(agent.type)}
-                        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${expandedAgents.has(agent.type) ? "bg-primary/20 text-primary" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"}`}
-                      >
-                        <StatusDot status={agent.status} />
-                        <span className="font-mono font-bold">{agent.code}</span>
-                        {findingCount > 0 && (
-                          <span className="text-red-400 font-bold">{findingCount}</span>
-                        )}
-                        {expandedAgents.has(agent.type) ? (
-                          <ChevronDown className="h-3 w-3" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3" />
-                        )}
-                      </button>
-                    );
-                  })}
-              </div>
-
-              {Array.from(expandedAgents).map((agentType) => {
-                const agentEvents = activityByAgent[agentType] || [];
-                if (agentEvents.length === 0) return null;
-                return (
-                  <div key={agentType} className="mt-2 rounded border border-border/50 bg-black/30 p-2">
-                    <div className="text-xs font-mono text-primary mb-1">
-                      {AGENT_LABELS[agentType] || agentType} &mdash; {agentEvents.length} events
-                    </div>
-                    <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                      {agentEvents.slice(-15).map((entry, i) => (
-                        <ActivityLine key={i} entry={entry} compact />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
-      {(activeView === "agents" || (!scanRunning && !scanComplete && activityLog.length === 0)) && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {(!scanRunning && !scanComplete && activityLog.length === 0) && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {agents.map((agent) => (
           <Card key={agent.code} className="overflow-hidden">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <StatusDot status={agent.status} />
-                  <span className="text-sm font-bold text-primary">{agent.code}</span>
+                  <span className="text-xs font-bold text-primary">{agent.code}</span>
                 </div>
                 {agent.findings > 0 && (
-                  <Badge variant="destructive" className="text-xs">
-                    {agent.findings} findings
+                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                    {agent.findings}
                   </Badge>
                 )}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">{agent.name}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">{agent.name}</p>
               {agent.status === "running" && (
-                <div className="mt-3 space-y-1">
-                  <Progress value={agent.progress} className="h-1.5" />
-                  <p className="text-xs text-muted-foreground">{agent.currentTechnique}</p>
+                <div className="mt-2 space-y-1">
+                  <Progress value={agent.progress} className="h-1" />
+                  <p className="text-[10px] text-muted-foreground truncate">{agent.currentTechnique}</p>
                 </div>
               )}
               {agent.status === "completed" && (
-                <div className="mt-3 flex items-center gap-1 text-xs text-green-400">
-                  <CheckCircle className="h-3 w-3" />
-                  Complete &mdash; {agent.techniques} techniques tested
+                <div className="mt-2 flex items-center gap-1 text-[10px] text-green-400">
+                  <CheckCircle className="h-2.5 w-2.5" />
+                  {agent.techniques} techniques
                 </div>
               )}
               {agent.status === "idle" && (
-                <div className="mt-3 text-xs text-muted-foreground">
+                <div className="mt-2 text-[10px] text-muted-foreground">
                   {agent.techniques} techniques ready
                 </div>
               )}
@@ -543,19 +575,20 @@ function ActivityLine({ entry, compact }: { entry: ActivityEntry; compact?: bool
   const agentLabel = compact ? "" : `[${AGENT_LABELS[entry.agent] || entry.agent}]`;
   const time = new Date(entry.ts * 1000);
   const timeStr = time.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const fontSize = compact ? "text-[10px]" : "text-[11px]";
 
   return (
-    <div className="flex items-start gap-1.5 leading-tight py-0.5 hover:bg-white/5 rounded px-1 group">
-      <span className="text-muted-foreground/60 shrink-0 w-[60px]">{timeStr}</span>
-      <Icon className={`h-3 w-3 mt-0.5 shrink-0 ${style.color}`} />
-      <span className={`shrink-0 font-bold ${style.color} w-[72px]`}>{style.label}</span>
+    <div className={`flex items-start gap-1 leading-tight py-px hover:bg-white/5 rounded px-1 group ${fontSize}`}>
+      <span className="text-muted-foreground/60 shrink-0 w-[52px]">{timeStr}</span>
+      <Icon className={`h-2.5 w-2.5 mt-[2px] shrink-0 ${style.color}`} />
+      <span className={`shrink-0 font-semibold ${style.color} w-[56px] uppercase`}>{style.label}</span>
       {!compact && (
-        <span className="text-primary/80 shrink-0">{agentLabel}</span>
+        <span className="text-primary/70 shrink-0 max-w-[120px] truncate">{agentLabel}</span>
       )}
-      <span className="text-foreground">{entry.action}</span>
+      <span className="text-foreground/90 truncate">{entry.action}</span>
       {entry.detail && (
-        <span className="text-muted-foreground/70 truncate hidden group-hover:inline">
-          &#8212; {entry.detail}
+        <span className="text-muted-foreground/60 truncate hidden group-hover:inline">
+          — {entry.detail}
         </span>
       )}
     </div>
