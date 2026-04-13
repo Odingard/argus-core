@@ -457,7 +457,7 @@ class PersonaHijackingAgent(LLMAttackAgent):
         # evidence — they have high false-positive rates because refusal responses
         # naturally contain words like 'admin'. Require drift_signals or markers
         # as primary evidence; priv_indicators only escalate severity.
-        if not drift_signals and not markers and eval_evidence is None:
+        if not drift_signals and not markers:
             return None
 
         result: dict[str, Any] = {

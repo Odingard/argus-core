@@ -228,7 +228,7 @@ class IdentitySpoofAgent(LLMAttackAgent):
             and 200 <= spoofed.status_code < 300
         )
 
-        if not new_priv and not new_markers and not status_change and eval_evidence is None:
+        if not new_priv and not new_markers and not status_change:
             return None
 
         result: dict[str, Any] = {

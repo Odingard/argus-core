@@ -774,7 +774,7 @@ def quick_eval(
     # If the evaluator detected a finding (failed or matched signatures)
     if not result.passed or result.matched_signatures:
         return {
-            "sensitive_markers": result.matched_signatures,
+            "sensitive_markers": [],
             "privilege_indicators": result.fail_reasons,
             "eval_score": result.score,
             "hard_fail": result.hard_fail,
