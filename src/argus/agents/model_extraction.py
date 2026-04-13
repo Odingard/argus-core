@@ -314,12 +314,6 @@ class ModelExtractionAgent(LLMAttackAgent):
         """Check response for evidence of model/config extraction."""
         text = result.response_text
 
-        # Layer 1: New behavior-first evaluation engine
-        evidence = quick_eval(text)
-        if evidence is not None:
-            return evidence
-
-        # Layer 2: Legacy pattern + technique-specific matching
         markers = ResponseMatcher.find_sensitive_markers(text)
         priv_indicators = ResponseMatcher.find_privilege_indicators(text)
 
@@ -377,6 +371,11 @@ class ModelExtractionAgent(LLMAttackAgent):
 
         # Require at least one indicator category to have matches
         if not markers and not priv_indicators and not extraction_indicators:
+            # Fallback: behavior-first evaluation engine catches patterns
+            # that technique-specific keywords miss (e.g. signature matches).
+            eval_evidence = quick_eval(text)
+            if eval_evidence is not None and eval_evidence.get("matched_signatures"):
+                return eval_evidence
             return None
 
         return {

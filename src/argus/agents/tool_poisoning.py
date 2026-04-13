@@ -30,7 +30,6 @@ import re
 from typing import Any
 
 from argus.agents.base import LLMAttackAgent
-from argus.conductor import quick_eval
 from argus.mcp_client import MCPAttackClient, MCPServerConfig
 from argus.mcp_client.client import ZERO_WIDTH_CHARS
 from argus.models.agents import AgentType
@@ -409,9 +408,6 @@ class ToolPoisoningAgent(LLMAttackAgent):
         for pattern in cls._SENSITIVE_MARKER_PATTERNS:
             if re.search(pattern, text):
                 return True
-        # Layer: New behavior-first evaluation engine
-        if quick_eval(text) is not None:
-            return True
         return False
 
     @classmethod
