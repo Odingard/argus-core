@@ -295,11 +295,25 @@ class TestMCPScannerAgent:
     def test_analyze_injection_response_detects_cloud_metadata(self):
         from argus.agents.mcp_scanner import MCPScannerAgent
 
+        # Output contains ami- and instance-id which are NOT in the payload
         result = MCPScannerAgent._analyze_injection_response(
             '{"instance": "ami-12345", "instance-id": "i-abc"}',
             "http://169.254.169.254/latest/meta-data/",
         )
         assert result is not None
+        assert "ami-" in result["reason"] or "instance-id" in result["reason"]
+
+    def test_analyze_injection_response_ssrf_echo_not_false_positive(self):
+        """SSRF check should not flag when the tool just echoes the payload back."""
+        from argus.agents.mcp_scanner import MCPScannerAgent
+
+        result = MCPScannerAgent._analyze_injection_response(
+            '{"error": "URL not allowed: http://169.254.169.254/latest/meta-data/"}',
+            "http://169.254.169.254/latest/meta-data/",
+        )
+        # 169.254.169.254 is in the payload, so it should be excluded
+        # No other SSRF indicators present, so result should be None
+        assert result is None
 
     def test_analyze_injection_response_none_for_clean(self):
         from argus.agents.mcp_scanner import MCPScannerAgent

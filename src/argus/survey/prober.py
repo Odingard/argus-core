@@ -321,7 +321,7 @@ def _parse_ndjson_to_text(raw: str) -> str:
                 continue
             # Skip terminal frames
             if obj.get("done") is True and not any(
-                obj.get(k) for k in ("response", "content", "text", "token", "message")
+                obj.get(k) for k in ("response", "content", "text", "token", "message", "output")
             ):
                 continue
             # OpenAI-style: choices[0].delta.content

@@ -493,9 +493,12 @@ class MCPScannerAgent(LLMAttackAgent):
                 }
 
         # Check for cloud metadata / SSRF indicators
-        if "169.254.169.254" in output or "ami-" in output or "instance-id" in output:
+        ssrf_indicators = ["169.254.169.254", "ami-", "instance-id"]
+        payload_lower = payload.lower()
+        ssrf_hits = [ind for ind in ssrf_indicators if ind.lower() in output_lower and ind.lower() not in payload_lower]
+        if ssrf_hits:
             return {
-                "reason": "Cloud metadata endpoint accessible via tool parameter",
+                "reason": f"Cloud metadata endpoint accessible via tool parameter (indicators: {', '.join(ssrf_hits)})",
                 "direct": True,
                 "proof": "Tool accessed cloud metadata endpoint and returned instance info",
             }
