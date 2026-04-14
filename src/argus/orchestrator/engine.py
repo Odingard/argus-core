@@ -343,7 +343,7 @@ class Orchestrator:
 
         # Timeout budget: Phase 1 gets up to 1/3, Phase 2 gets the remainder
         # (minimum 60s for Phase 2 to avoid trivial timeouts).
-        p1_timeout = timeout / 3.0 if phase1_types else 0.0
+        p1_timeout = (timeout / 3.0 if phase2_types else timeout) if phase1_types else 0.0
         scan_start = datetime.now(UTC)
 
         # ── Phase 1: Recon agents (model_extraction) ──
@@ -376,7 +376,7 @@ class Orchestrator:
         # ── Phase 2: Attack agents (all others) — launched simultaneously ──
         if phase2_types:
             phase1_elapsed = (datetime.now(UTC) - scan_start).total_seconds()
-            p2_timeout = max(timeout - phase1_elapsed, 60.0)
+            p2_timeout = max(timeout - phase1_elapsed, 0.1)
 
             phase2_agents = [_make_agent(t) for t in phase2_types]
             all_agents.extend(phase2_agents)
