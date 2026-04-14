@@ -59,7 +59,16 @@ class TurnResult(BaseModel):
     error: str | None = None
 
     def ok(self) -> bool:
-        """True if the request completed and returned a 2xx status."""
+        """True if the request completed successfully with no errors.
+
+        Returns False when:
+        - The request failed with an HTTP error (error set by except block)
+        - The response was an HTML catch-all / SPA shell (T1: error='html_response')
+        - No status code was recorded
+        - The status code is outside 2xx range
+        """
+        if self.error is not None:
+            return False
         return self.status_code is not None and 200 <= self.status_code < 300
 
     def field(self, *path: str) -> Any:

@@ -105,7 +105,7 @@ class TestT2SseParsing:
         assert _parse_sse_to_text(raw) == "Hello world"
 
     def test_generic_content_field(self):
-        raw = 'data: {"content": "Hi "}\n\n' 'data: {"content": "there"}\n\n' "data: [DONE]\n\n"
+        raw = 'data: {"content": "Hi "}\n\ndata: {"content": "there"}\n\ndata: [DONE]\n\n'
         assert _parse_sse_to_text(raw) == "Hi there"
 
     def test_generic_text_field(self):
