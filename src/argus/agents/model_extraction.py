@@ -418,10 +418,14 @@ class ModelExtractionAgent(LLMAttackAgent):
             if eval_evidence is not None and eval_evidence.get("matched_signatures"):
                 return eval_evidence
 
-            # D1: ResponseDivergence fallback — compare against baseline
-            divergence_result = self._check_divergence(result)
-            if divergence_result is not None:
-                return divergence_result
+            # D1: ResponseDivergence fallback — compare against baseline.
+            # Only for chat-based techniques; the baseline is collected from
+            # a chat endpoint so comparing it against admin/identity responses
+            # would produce false positives from format differences alone.
+            if technique != "extract_admin_direct":
+                divergence_result = self._check_divergence(result)
+                if divergence_result is not None:
+                    return divergence_result
 
             return None
 
