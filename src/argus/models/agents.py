@@ -24,6 +24,7 @@ class AgentType(str, Enum):
     MODEL_EXTRACTION = "model_extraction"
     PERSONA_HIJACKING = "persona_hijacking"
     MEMORY_BOUNDARY_COLLAPSE = "memory_boundary_collapse"
+    MCP_SCANNER = "mcp_scanner"
     CORRELATION = "correlation"
 
 

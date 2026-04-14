@@ -296,6 +296,57 @@ _SURFACE_BODIES: dict[SurfaceClass, dict[str, Any] | None] = {
 }
 
 
+def _parse_ndjson_to_text(raw: str) -> str:
+    """Parse newline-delimited JSON (NDJSON) into a single coherent text string.
+
+    Many AI inference servers (Ollama, vLLM, TGI, LiteLLM) stream responses as
+    NDJSON — one JSON object per line, each containing a token or chunk::
+
+        {"response": "Hello"}
+        {"response": " world"}
+        {"done": true}
+
+    We concatenate the text content fields from each line.  This is the T3
+    transport-layer gap: chunked transfer encoding where the *application*
+    framing is NDJSON rather than SSE.
+    """
+    parts: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = _json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            # Skip terminal frames
+            if obj.get("done") is True and not any(
+                obj.get(k) for k in ("response", "content", "text", "token", "message")
+            ):
+                continue
+            # OpenAI-style: choices[0].delta.content
+            choices = obj.get("choices")
+            if isinstance(choices, list) and choices:
+                delta = choices[0]
+                if isinstance(delta, dict):
+                    delta_inner = delta.get("delta", delta)
+                    if isinstance(delta_inner, dict):
+                        chunk = delta_inner.get("content") or delta_inner.get("text") or ""
+                        if chunk:
+                            parts.append(str(chunk))
+                            continue
+            # Generic fields: response (Ollama), content, text, token, message
+            for key in ("response", "content", "text", "token", "message", "output"):
+                val = obj.get(key)
+                if val and isinstance(val, str):
+                    parts.append(val)
+                    break
+        except (ValueError, TypeError, KeyError):
+            # Not JSON — skip non-JSON lines in NDJSON streams
+            continue
+    return "".join(parts) if parts else raw[:5000]
+
+
 def _parse_sse_to_text(raw: str) -> str:
     """Parse a ``text/event-stream`` body into a single coherent text string.
 
@@ -375,6 +426,24 @@ def build_body_for_format(payload: str, fmt: str, surface: str = "user_input") -
         return {"input": payload}
     # Default: generic message format
     return {"message": payload, "context": {"source": surface}}
+
+
+def build_multipart_fields(payload: str, field_name: str = "file") -> dict[str, Any]:
+    """Build multipart/form-data fields for T4 transport (file upload surfaces).
+
+    Parameters
+    ----------
+    payload : str
+        The attack payload text to embed in the uploaded content.
+    field_name : str
+        The form field name for the file upload (commonly ``file``, ``document``,
+        ``upload``, ``attachment``).
+
+    Returns a dict suitable for httpx ``files=`` parameter::
+
+        {"file": ("payload.txt", payload_bytes, "text/plain")}
+    """
+    return {field_name: ("payload.txt", payload.encode("utf-8"), "text/plain")}
 
 
 def _is_html_catchall(content_type: str, body: str) -> bool:
@@ -724,6 +793,13 @@ class EndpointProber:
         # a single coherent response string that agents can evaluate.
         if "text/event-stream" in ct:
             snippet = _parse_sse_to_text(raw_text)[:max_snippet]
+        # T3: NDJSON — reassemble newline-delimited JSON streams
+        # (Ollama, vLLM, TGI, LiteLLM chunked streaming)
+        elif "application/x-ndjson" in ct or "application/jsonlines" in ct:
+            snippet = _parse_ndjson_to_text(raw_text)[:max_snippet]
+        elif ct == "" and raw_text.lstrip().startswith("{") and "\n{" in raw_text:
+            # Heuristic: no content-type but body looks like NDJSON
+            snippet = _parse_ndjson_to_text(raw_text)[:max_snippet]
         else:
             snippet = raw_text[:max_snippet]
 

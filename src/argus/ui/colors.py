@@ -23,6 +23,8 @@ AGENT_COLORS: dict[AgentType, str] = {
     # Phase 5
     AgentType.PERSONA_HIJACKING: "green",
     AgentType.MEMORY_BOUNDARY_COLLAPSE: "cyan",
+    # MCP Scanner
+    AgentType.MCP_SCANNER: "bright_yellow",
     # Correlation
     AgentType.CORRELATION: "bright_white",
 }

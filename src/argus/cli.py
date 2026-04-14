@@ -22,6 +22,7 @@ from argus.agents import (
     ContextWindowAgent,
     CrossAgentExfilAgent,
     IdentitySpoofAgent,
+    MCPScannerAgent,
     MemoryBoundaryCollapseAgent,
     MemoryPoisoningAgent,
     ModelExtractionAgent,
@@ -64,6 +65,8 @@ def _create_orchestrator() -> Orchestrator:
     # Phase 5
     orch.register_agent(AgentType.PERSONA_HIJACKING, PersonaHijackingAgent)
     orch.register_agent(AgentType.MEMORY_BOUNDARY_COLLAPSE, MemoryBoundaryCollapseAgent)
+    # MCP Scanner
+    orch.register_agent(AgentType.MCP_SCANNER, MCPScannerAgent)
     return orch
 
 
