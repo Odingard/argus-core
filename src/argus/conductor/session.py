@@ -12,8 +12,10 @@ Security notes:
   - Response bodies truncated at 50KB by default to prevent memory exhaustion.
   - httpx event hooks explicitly disabled to prevent credential logging.
   - No automatic redirects — many attacks rely on observing 302/3xx behavior.
-  - No cookie persistence — sessions are stateful at the application layer
-    (session_id in body), not transport layer.
+  - Cookie persistence available via csrf_mode — when enabled the session
+    GETs the target page first, extracts a CSRF token from
+    ``<meta name="csrf-token">``, and injects it as ``X-CSRF-Token`` on
+    subsequent POSTs.  Cookies are persisted across turns.
 """
 
 from __future__ import annotations
@@ -112,6 +114,7 @@ class ConversationSession:
         timeout_seconds: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
         auth_token: str | None = None,
+        csrf_mode: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         parsed = urlparse(self.base_url)
@@ -126,6 +129,10 @@ class ConversationSession:
         self._transport = transport
         self.history: list[TurnResult] = []
         self._client: httpx.AsyncClient | None = None
+        # T3: CSRF token handling
+        self._csrf_mode = csrf_mode
+        self._csrf_token: str | None = None
+        self._csrf_fetched = False
 
     async def __aenter__(self) -> ConversationSession:
         kwargs: dict[str, Any] = {
@@ -135,6 +142,9 @@ class ConversationSession:
         }
         if self._transport is not None:
             kwargs["transport"] = self._transport
+        # T3: enable cookie persistence when CSRF mode is on
+        if self._csrf_mode:
+            kwargs["cookies"] = httpx.Cookies()
         self._client = httpx.AsyncClient(**kwargs)
         return self
 
@@ -166,13 +176,46 @@ class ConversationSession:
             raise ValueError(f"ConversationSession resolved host {resolved_host} != allowed host {self._allowed_host}")
         return resolved
 
+    async def _fetch_csrf_token(self, path: str) -> None:
+        """T3: GET the page and extract CSRF token from <meta name="csrf-token">.
+
+        Only attempts once per session — sets ``_csrf_fetched`` to avoid
+        repeated GETs on targets that don't use CSRF tokens.
+        """
+        if self._csrf_fetched or self._client is None:
+            return
+        self._csrf_fetched = True
+        try:
+            url = self._resolve(path)
+            resp = await self._client.get(url, headers=self.default_headers)
+            # Look for <meta name="csrf-token" content="..."> in HTML response
+            match = re.search(
+                r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\'>]+)',
+                resp.text,
+                re.IGNORECASE,
+            )
+            if match:
+                self._csrf_token = match.group(1)
+                logger.info("T3: extracted CSRF token (%d chars)", len(self._csrf_token))
+            else:
+                logger.debug("T3: no csrf-token meta tag found at %s", path)
+        except Exception as exc:
+            logger.debug("T3: CSRF token fetch failed: %s", type(exc).__name__)
+
     async def turn(self, spec: TurnSpec) -> TurnResult:
         """Execute a single turn and record the result in history."""
         if self._client is None:
             raise RuntimeError("ConversationSession must be used as an async context manager")
 
+        # T3: Fetch CSRF token before the first mutating request
+        if self._csrf_mode and not self._csrf_fetched and spec.method.upper() != "GET":
+            await self._fetch_csrf_token(spec.path)
+
         url = self._resolve(spec.path)
         headers = {**self.default_headers, **spec.headers}
+        # T3: Inject CSRF token header on mutating requests
+        if self._csrf_token and spec.method.upper() != "GET":
+            headers.setdefault("X-CSRF-Token", self._csrf_token)
         result = TurnResult(
             turn_name=spec.name,
             request_method=spec.method,

@@ -539,14 +539,28 @@ class SurveyReport(BaseModel):
             return False
         return self.auth_failure_count > len(responded) * 0.5
 
-    def endpoints_for(self, surface: SurfaceClass) -> list[DiscoveredEndpoint]:
-        return [
-            d for d in self.discovered if d.surface_class == surface and d.is_live() and d.status_code not in (401, 403)
-        ]
+    def endpoints_for(self, surface: SurfaceClass, *, include_auth_rejected: bool = False) -> list[DiscoveredEndpoint]:
+        """Return discovered endpoints for a surface class.
 
-    def has_surface(self, surface: SurfaceClass) -> bool:
+        By default, filters out 401/403 responses (they indicate the endpoint
+        exists but requires auth we don't have).  When *include_auth_rejected*
+        is True, 403 responses are kept — this is used by the identity_spoof
+        agent which specifically probes endpoints that reject unauthenticated
+        callers to see if spoofed headers bypass the check.
+        """
+        results: list[DiscoveredEndpoint] = []
+        for d in self.discovered:
+            if d.surface_class != surface or not d.is_live():
+                continue
+            if d.status_code in (401, 403) and not include_auth_rejected:
+                continue
+            results.append(d)
+        return results
+
+    def has_surface(self, surface: SurfaceClass, *, include_auth_rejected: bool = False) -> bool:
         return any(
-            d.surface_class == surface and d.is_live() and d.status_code not in (401, 403) for d in self.discovered
+            d.surface_class == surface and d.is_live() and (include_auth_rejected or d.status_code not in (401, 403))
+            for d in self.discovered
         )
 
 
@@ -612,6 +626,101 @@ def _extract_paths_from_response(response_text: str, base_url: str) -> list[str]
             paths.add(href)
 
     return sorted(paths)
+
+
+# ---------------------------------------------------------------------------
+# T4: SPA Endpoint Discovery — JS bundle parsing
+# ---------------------------------------------------------------------------
+
+# Regex patterns to extract API endpoints from JavaScript bundles.
+_JS_API_PATTERNS: list[re.Pattern[str]] = [
+    # fetch("/api/...") or fetch('/api/...')
+    re.compile(r'fetch\(["\'](/[a-zA-Z0-9_./-]+)["\']'),
+    # axios.get/post/put/delete("/api/...")
+    re.compile(r'axios\.(?:get|post|put|delete|patch)\(["\'](/[a-zA-Z0-9_./-]+)["\']'),
+    # Quoted string literals that look like API paths: "/api/...", "/v1/...", "/v2/..."
+    re.compile(r'["\'](/(?:api|v[0-9]+)/[a-zA-Z0-9_./-]+)["\']'),
+    # baseURL: "/api" or baseUrl = "/api"
+    re.compile(r'base[Uu][Rr][Ll]["\']?\s*[:=]\s*["\'](/[a-zA-Z0-9_./-]+)["\']'),
+    # Generic endpoint-looking paths in template strings: `/api/users/${id}`
+    re.compile(r"`(/(?:api|v[0-9]+)/[a-zA-Z0-9_./${}/-]+)`"),
+]
+
+# Maximum bundles to fetch per SPA root
+_SPA_MAX_BUNDLES = 5
+# Maximum size per bundle (bytes)
+_SPA_MAX_BUNDLE_SIZE = 500_000
+
+
+def _extract_script_srcs(html: str) -> list[str]:
+    """Extract <script src="..."> values from HTML."""
+    return re.findall(r'<script[^>]+src=["\']([^"\'>]+\.js)[^"\'>]*["\']', html, re.I)
+
+
+def _extract_api_paths_from_js(js_text: str) -> set[str]:
+    """Extract API endpoint paths from JavaScript source text."""
+    paths: set[str] = set()
+    for pattern in _JS_API_PATTERNS:
+        for match in pattern.finditer(js_text):
+            candidate = match.group(1)
+            # Skip obvious non-API paths
+            if re.search(r"\.(css|js|png|jpg|gif|ico|svg|woff|ttf|map)$", candidate, re.I):
+                continue
+            # Normalise template-string interpolations: /api/users/${id} → /api/users
+            cleaned = re.sub(r"/\$\{[^}]*\}", "", candidate)
+            if cleaned and cleaned.startswith("/"):
+                paths.add(cleaned)
+    return paths
+
+
+async def discover_spa_endpoints(
+    client: httpx.AsyncClient,
+    base_url: str,
+    html: str,
+) -> list[str]:
+    """T4: Fetch JS bundles referenced in *html* and extract API endpoints.
+
+    Caps at *_SPA_MAX_BUNDLES* bundles and *_SPA_MAX_BUNDLE_SIZE* bytes each
+    to avoid downloading massive SPA assets.
+
+    Returns a sorted, de-duplicated list of discovered API paths.
+    """
+    script_srcs = _extract_script_srcs(html)
+    if not script_srcs:
+        return []
+
+    # Resolve relative script URLs against the base
+    resolved: list[str] = []
+    for src in script_srcs[:_SPA_MAX_BUNDLES]:
+        if src.startswith(("http://", "https://")):
+            resolved.append(src)
+        elif src.startswith("/"):
+            resolved.append(f"{base_url.rstrip('/')}{src}")
+        else:
+            resolved.append(f"{base_url.rstrip('/')}/{src}")
+
+    all_paths: set[str] = set()
+    for url in resolved:
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                continue
+            # Respect size cap
+            text = resp.text[:_SPA_MAX_BUNDLE_SIZE]
+            found = _extract_api_paths_from_js(text)
+            all_paths.update(found)
+            logger.debug("T4: %s → %d API paths from %s", base_url, len(found), url)
+        except Exception as exc:
+            logger.debug("T4: failed to fetch JS bundle %s: %s", url, type(exc).__name__)
+
+    if all_paths:
+        logger.info(
+            "T4: SPA discovery found %d API endpoints from %d JS bundles at %s",
+            len(all_paths),
+            len(resolved),
+            base_url,
+        )
+    return sorted(all_paths)
 
 
 class EndpointProber:
@@ -691,6 +800,20 @@ class EndpointProber:
                         if p not in probed_paths:
                             probed_paths.add(p)
                             new_paths.append(p)
+
+            # ── Phase 2b (T4): SPA JS bundle discovery ──
+            # If root returned HTML with <script> tags, fetch the JS bundles
+            # and extract API endpoints from them.
+            if root_discovery.is_html_catchall and root_discovery.response_text_snippet:
+                spa_paths = await discover_spa_endpoints(
+                    client,
+                    self.base_url,
+                    root_discovery.response_text_snippet,
+                )
+                for p in spa_paths:
+                    if p not in probed_paths:
+                        probed_paths.add(p)
+                        new_paths.append(p)
 
             # Cap at 50 discovered paths to avoid request explosion on verbose targets
             if len(new_paths) > 50:

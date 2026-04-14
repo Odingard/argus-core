@@ -26,6 +26,7 @@ from argus.agents.base import LLMAttackAgent
 from argus.conductor import (
     ConversationSession,
     DataCategoryMatcher,
+    ResponseDivergence,
     ResponseMatcher,
     TurnResult,
     TurnSpec,
@@ -199,6 +200,10 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
     agent_type = AgentType.PRIVILEGE_ESCALATION
 
+    def __init__(self, config, signal_bus) -> None:  # type: ignore[override]
+        super().__init__(config, signal_bus)
+        self._baseline_response: str | None = None
+
     async def execute_attack(self, sandbox: SandboxEnvironment) -> None:
         """Run privilege escalation attacks."""
         endpoint = self.config.target.agent_endpoint
@@ -255,6 +260,14 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         tool_call_endpoints = survey.endpoints_for(SurfaceClass.TOOL_CALL)
         tool_catalog_endpoints = survey.endpoints_for(SurfaceClass.TOOLS)
+
+        # D1: Baseline collection — send a neutral command before attacks
+        # so ResponseDivergence can compare escalated vs normal responses.
+        await self._collect_baseline(
+            session_factory=lambda: self._make_session(base_url),
+            identity_endpoints=identity_endpoints,
+            admin_endpoints=admin_endpoints,
+        )
 
         target_paths = [e.path for e in identity_endpoints + admin_endpoints]
         if not target_paths and chat_endpoints:
@@ -820,8 +833,43 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         )
         await self.emit_finding(finding)
 
-    @staticmethod
-    def _evaluate_response(result: TurnResult) -> dict[str, Any] | None:
+    async def _collect_baseline(
+        self,
+        session_factory,
+        identity_endpoints: list,
+        admin_endpoints: list,
+    ) -> None:
+        """D1: Collect a baseline response for ResponseDivergence scoring.
+
+        Sends a neutral low-privilege command to the first available
+        identity/admin endpoint and stores the response.
+        """
+        paths = [e.path for e in identity_endpoints + admin_endpoints]
+        if not paths:
+            return
+        async with session_factory() as session:
+            spec = TurnSpec(
+                name="baseline",
+                method="POST",
+                path=paths[0],
+                body={
+                    "command": "noop",
+                    "agent_id": "argus-baseline",
+                    "agent_role": "user",
+                },
+                headers={"X-Agent-Role": "user"},
+            )
+            try:
+                result = await session.turn(spec)
+                self._baseline_response = result.response_text
+                logger.info(
+                    "PrivilegeEscalation: baseline collected (%d chars)",
+                    len(self._baseline_response),
+                )
+            except (ValueError, Exception):
+                self._baseline_response = None
+
+    def _evaluate_response(self, result: TurnResult) -> dict[str, Any] | None:
         """Check response for evidence of privilege escalation."""
         text = result.response_text
 
@@ -843,7 +891,18 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         # (ARNs, file paths, SQL, env vars, connection strings)
         data_leaks = DataCategoryMatcher.scan(text)
 
-        if not markers and not priv_indicators and not data_leaks:
+        # Layer 4 (D1): ResponseDivergence — compare against baseline
+        divergence_finding = False
+        if self._baseline_response:
+            divergence = ResponseDivergence.score(
+                self._baseline_response,
+                text,
+                agent_type="privilege_escalation",
+            )
+            if divergence.get("is_finding"):
+                divergence_finding = True
+
+        if not markers and not priv_indicators and not data_leaks and not divergence_finding:
             return None
 
         return {

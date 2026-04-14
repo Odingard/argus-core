@@ -123,7 +123,10 @@ class IdentitySpoofAgent(LLMAttackAgent):
         survey = await prober.probe_all()
         if await self._check_survey_auth(survey):
             return
-        identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
+        # include_auth_rejected=True: identity surfaces that return 403 are
+        # exactly what we want — the whole attack is "does adding a spoofed
+        # header turn a 403 into a 200?"
+        identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY, include_auth_rejected=True)
         if not identity_endpoints:
             logger.debug("IdentitySpoof: %s exposes no identity surface", base_url)
             return
