@@ -846,6 +846,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         """
         paths = [e.path for e in identity_endpoints + admin_endpoints]
         if not paths:
+            self._baseline_response = None
             return
         async with session_factory() as session:
             spec = TurnSpec(
@@ -908,12 +909,15 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         if not markers and not priv_indicators and not data_leaks and not divergence_finding:
             return None
 
-        return {
+        result_dict: dict[str, Any] = {
             "sensitive_markers": markers,
             "privilege_indicators": priv_indicators,
             "data_leaks": data_leaks,
             "response_excerpt": text[:500],
         }
+        if divergence_finding:
+            result_dict["divergence"] = divergence  # type: ignore[possibly-undefined]
+        return result_dict
 
     async def _report_tool_chain(
         self,

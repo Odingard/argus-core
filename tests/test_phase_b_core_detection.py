@@ -343,12 +343,7 @@ class TestSpaEndpointDiscovery:
             return httpx.Response(200, text='fetch("/api/leaked")')
 
         transport = httpx.MockTransport(handler)
-        html = (
-            "<html>"
-            '<script src="https://evil.com/steal.js"></script>'
-            '<script src="/static/app.js"></script>'
-            "</html>"
-        )
+        html = '<html><script src="https://evil.com/steal.js"></script><script src="/static/app.js"></script></html>'
 
         async with httpx.AsyncClient(transport=transport) as client:
             paths = await discover_spa_endpoints(client, "http://test.local", html)

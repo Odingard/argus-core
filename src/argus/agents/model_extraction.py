@@ -233,7 +233,9 @@ class ModelExtractionAgent(LLMAttackAgent):
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
 
-        # D1: Baseline collection before attacks
+        # D1: Baseline collection before attacks — reset first to avoid
+        # stale baseline from a previous base URL being used for divergence.
+        self._baseline_response = None
         if chat_endpoints:
             async with self._make_session(base_url) as baseline_session:
                 await self._collect_baseline(baseline_session, chat_endpoints[0].path)
