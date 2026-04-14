@@ -42,6 +42,18 @@ class TurnSpec(BaseModel):
     body: dict[str, Any] | None = Field(default=None, description="JSON body to send")
     headers: dict[str, str] = Field(default_factory=dict, description="Per-turn headers (merged with session headers)")
     expect_status: int | None = Field(default=None, description="Optional expected HTTP status (None = any 2xx-5xx)")
+    # T4: multipart/form-data support for file-upload attack surfaces.
+    # When set, body is ignored and files are sent as multipart form fields.
+    # Format: {field_name: (filename, content_bytes, content_type)}
+    multipart_files: dict[str, tuple[str, bytes, str]] | None = Field(
+        default=None,
+        description="Multipart file fields (T4). Overrides body when set.",
+    )
+    # Extra form fields to include alongside the file upload
+    multipart_data: dict[str, str] | None = Field(
+        default=None,
+        description="Multipart text form fields to send alongside files (T4).",
+    )
 
 
 class TurnResult(BaseModel):
@@ -165,17 +177,29 @@ class ConversationSession:
             turn_name=spec.name,
             request_method=spec.method,
             request_url=url,
-            request_body=spec.body,
+            request_body=spec.body
+            if spec.multipart_files is None
+            else {"_multipart": True, **(spec.multipart_data or {})},
             request_headers=headers,
         )
         start = time.monotonic()
         try:
-            response = await self._client.request(
-                spec.method,
-                url,
-                json=spec.body,
-                headers=headers,
-            )
+            # T4: multipart/form-data for file-upload surfaces
+            if spec.multipart_files is not None:
+                response = await self._client.request(
+                    spec.method,
+                    url,
+                    files=spec.multipart_files,
+                    data=spec.multipart_data or {},
+                    headers=headers,
+                )
+            else:
+                response = await self._client.request(
+                    spec.method,
+                    url,
+                    json=spec.body,
+                    headers=headers,
+                )
             result.status_code = response.status_code
             content_type = response.headers.get("content-type", "")
             raw_text = response.text[:_MAX_RESPONSE_BYTES]
@@ -185,6 +209,15 @@ class ConversationSession:
                 from argus.survey.prober import _parse_sse_to_text
 
                 text = _parse_sse_to_text(raw_text)
+            # T3: NDJSON — reassemble newline-delimited JSON streams
+            elif (
+                "application/x-ndjson" in content_type
+                or "application/jsonlines" in content_type
+                or (content_type == "" and raw_text.lstrip().startswith("{") and "\n{" in raw_text)
+            ):
+                from argus.survey.prober import _parse_ndjson_to_text
+
+                text = _parse_ndjson_to_text(raw_text)
             else:
                 text = raw_text
 

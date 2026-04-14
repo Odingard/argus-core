@@ -239,7 +239,7 @@ def require_enterprise(feature: Feature) -> None:
 
 FEATURE_MATRIX: list[dict[str, str | bool]] = [
     # Core features
-    {"feature": "All 12 Attack Agents", "core": True, "enterprise": True, "category": "Engine"},
+    {"feature": "All 13 Attack Agents", "core": True, "enterprise": True, "category": "Engine"},
     {"feature": "Correlation Engine", "core": True, "enterprise": True, "category": "Engine"},
     {"feature": "VERDICT WEIGHT Scoring", "core": True, "enterprise": True, "category": "Engine"},
     {"feature": "Attack Corpus", "core": True, "enterprise": True, "category": "Engine"},

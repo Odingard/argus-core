@@ -31,6 +31,7 @@ from argus.agents.base import LLMAttackAgent
 from argus.agents.context_window import ContextWindowAgent
 from argus.agents.cross_agent_exfil import CrossAgentExfilAgent
 from argus.agents.identity_spoof import IdentitySpoofAgent
+from argus.agents.mcp_scanner import MCPScannerAgent
 from argus.agents.memory_boundary_collapse import MemoryBoundaryCollapseAgent
 from argus.agents.memory_poisoning import MemoryPoisoningAgent
 from argus.agents.model_extraction import ModelExtractionAgent
@@ -54,6 +55,7 @@ AGENT_REGISTRY: dict[str, type[LLMAttackAgent]] = {
     "model_extraction": ModelExtractionAgent,
     "persona_hijacking": PersonaHijackingAgent,
     "memory_boundary_collapse": MemoryBoundaryCollapseAgent,
+    "mcp_scanner": MCPScannerAgent,
 }
 
 __all__ = [
@@ -70,5 +72,6 @@ __all__ = [
     "ModelExtractionAgent",
     "PersonaHijackingAgent",
     "MemoryBoundaryCollapseAgent",
+    "MCPScannerAgent",
     "AGENT_REGISTRY",
 ]
