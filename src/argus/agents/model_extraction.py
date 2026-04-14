@@ -404,8 +404,11 @@ class ModelExtractionAgent(LLMAttackAgent):
         priv = evidence["privilege_indicators"]
         extraction = evidence.get("extraction_indicators", [])
 
-        # ── Chain intelligence to shared context ──
-        await self._record_intelligence(technique, result.response_text, extraction)
+        # ── Chain intelligence to shared context (non-blocking) ──
+        try:
+            await self._record_intelligence(technique, result.response_text, extraction)
+        except Exception:
+            logger.debug("Intelligence recording failed for %s (finding emission continues)", technique)
 
         # System prompt and tool inventory extraction are critical
         severity = (

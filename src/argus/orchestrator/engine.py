@@ -201,7 +201,11 @@ class ScanResult:
 class Orchestrator:
     """ARGUS Agent Orchestrator.
 
-    Deploys all attack agents simultaneously at T=0 against a target.
+    Runs attack agents in two phases against a target:
+      Phase 1 — Recon agents (model_extraction) gather intelligence.
+      Phase 2 — All other attack agents launch simultaneously,
+               optionally using chained intelligence from Phase 1.
+
     Manages the signal bus, collects findings, runs validation, and
     coordinates the Correlation Agent.
     """
@@ -243,9 +247,11 @@ class Orchestrator:
     ) -> ScanResult:
         """Execute a full ARGUS scan against a target.
 
-        Deploys all registered agents (or specified subset) simultaneously.
-        All agents launch at T=0. Findings are collected, validated, and
-        correlated into compound attack paths.
+        Phase 1 runs recon agents (model_extraction) first, then Phase 2
+        launches all remaining attack agents simultaneously.  The timeout
+        budget is shared: Phase 1 gets up to 1/3, Phase 2 gets the rest.
+        Findings are collected, validated, and correlated into compound
+        attack paths.
 
         Args:
             demo_pace_seconds: Artificial inter-technique delay for live demos.
@@ -335,17 +341,23 @@ class Orchestrator:
         all_agents: list[BaseAttackAgent] = []
         all_agent_results: list[AgentResult | Exception] = []
 
+        # Timeout budget: Phase 1 gets up to 1/3, Phase 2 gets the remainder
+        # (minimum 60s for Phase 2 to avoid trivial timeouts).
+        p1_timeout = timeout / 3.0 if phase1_types else 0.0
+        scan_start = datetime.now(UTC)
+
         # ── Phase 1: Recon agents (model_extraction) ──
         if phase1_types:
             phase1_agents = [_make_agent(t) for t in phase1_types]
             all_agents.extend(phase1_agents)
             logger.info(
-                "Phase 1 — Deploying [bold]%d[/] recon agent(s) for intelligence gathering",
+                "Phase 1 — Deploying [bold]%d[/] recon agent(s) for intelligence gathering (timeout %.0fs)",
                 len(phase1_agents),
+                p1_timeout,
             )
             p1_tasks = [
                 asyncio.create_task(
-                    self._run_agent_with_timeout(agent, timeout),
+                    self._run_agent_with_timeout(agent, p1_timeout),
                     name=f"agent-{agent.agent_type.value}-{agent.config.instance_id[:8]}",
                 )
                 for agent in phase1_agents
@@ -363,16 +375,20 @@ class Orchestrator:
 
         # ── Phase 2: Attack agents (all others) — launched simultaneously ──
         if phase2_types:
+            phase1_elapsed = (datetime.now(UTC) - scan_start).total_seconds()
+            p2_timeout = max(timeout - phase1_elapsed, 60.0)
+
             phase2_agents = [_make_agent(t) for t in phase2_types]
             all_agents.extend(phase2_agents)
             logger.info(
-                "Phase 2 — Deploying [bold]%d[/] attack agents%s",
+                "Phase 2 — Deploying [bold]%d[/] attack agents%s (timeout %.0fs)",
                 len(phase2_agents),
                 " (with chained intelligence)" if intel.has_intel else "",
+                p2_timeout,
             )
             p2_tasks = [
                 asyncio.create_task(
-                    self._run_agent_with_timeout(agent, timeout),
+                    self._run_agent_with_timeout(agent, p2_timeout),
                     name=f"agent-{agent.agent_type.value}-{agent.config.instance_id[:8]}",
                 )
                 for agent in phase2_agents
