@@ -214,10 +214,11 @@ def status() -> None:
     help="Enable demo pacing (0.4s between findings) so updates are visible",
 )
 @click.option(
-    "--pace",
+    "--demo-pace",
+    "pace",
     type=float,
     default=0.0,
-    help="Custom inter-event delay in seconds (overrides --demo)",
+    help="Artificial delay in seconds between agent techniques (e.g. 1.0 for recordings)",
 )
 @click.option(
     "--cinematic",
@@ -225,6 +226,12 @@ def status() -> None:
     help="Use the cinematic retro-terminal dashboard (for demos/recordings)",
 )
 @click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
+@click.option(
+    "--max-rpm",
+    type=int,
+    default=60,
+    help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
+)
 def live(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -234,6 +241,7 @@ def live(
     pace: float,
     cinematic: bool,
     agent_api_key: str | None,
+    max_rpm: int,
 ) -> None:
     """Run an ARGUS scan with the LIVE streaming dashboard.
 
@@ -253,6 +261,7 @@ def live(
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
         agent_api_key=agent_api_key,
+        max_requests_per_minute=max_rpm,
     )
 
     from argus.ui import CinematicDashboard, LiveDashboard
@@ -282,6 +291,18 @@ def live(
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", help="Output file path for JSON report")
 @click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
+@click.option(
+    "--demo-pace",
+    type=float,
+    default=0.0,
+    help="Artificial delay in seconds between agent techniques (e.g. 1.0 for recordings)",
+)
+@click.option(
+    "--max-rpm",
+    type=int,
+    default=60,
+    help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
+)
 def scan(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -289,6 +310,8 @@ def scan(
     timeout: int,
     output: str | None,
     agent_api_key: str | None,
+    demo_pace: float,
+    max_rpm: int,
 ) -> None:
     """Run an ARGUS scan against a target AI system."""
     # Validate all URLs
@@ -310,13 +333,19 @@ def scan(
     if agent_api_key:
         key_display = "***" + agent_api_key[-4:] if len(agent_api_key) > 4 else "****"
     console.print(f"[bold]API Key:[/] {key_display}")
-    console.print(f"[bold]Timeout:[/] {timeout}s\n")
+    console.print(f"[bold]Timeout:[/] {timeout}s")
+    if demo_pace > 0:
+        console.print(f"[bold]Demo Pace:[/] {demo_pace}s between techniques")
+    if max_rpm != 60:
+        console.print(f"[bold]Max RPM:[/] {max_rpm} req/min")
+    console.print()
 
     target = TargetConfig(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
         agent_api_key=agent_api_key,
+        max_requests_per_minute=max_rpm,
     )
 
     orchestrator = _create_orchestrator()
@@ -333,7 +362,7 @@ def scan(
     console.print(agent_list)
     console.print()
 
-    result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout))
+    result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout, demo_pace_seconds=demo_pace))
 
     # Persist scan results to database
     try:
@@ -362,6 +391,18 @@ def scan(
 @click.option("--timeout", default=600, help="Scan timeout in seconds")
 @click.option("--output", "-o", required=True, help="Output file path for ALEC evidence package")
 @click.option("--agent-api-key", default=None, help="Bearer token for target agent authentication")
+@click.option(
+    "--demo-pace",
+    type=float,
+    default=0.0,
+    help="Artificial delay in seconds between agent techniques",
+)
+@click.option(
+    "--max-rpm",
+    type=int,
+    default=60,
+    help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
+)
 def alec_export(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -369,6 +410,8 @@ def alec_export(
     timeout: int,
     output: str,
     agent_api_key: str | None,
+    demo_pace: float,
+    max_rpm: int,
 ) -> None:
     """Run a scan and export an ALEC evidence package.
 
@@ -402,10 +445,11 @@ def alec_export(
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
         agent_api_key=agent_api_key,
+        max_requests_per_minute=max_rpm,
     )
 
     orchestrator = _create_orchestrator()
-    result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout))
+    result = asyncio.run(orchestrator.run_scan(target=target, timeout=timeout, demo_pace_seconds=demo_pace))
 
     # Persist scan results to database
     try:

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from argus.correlation import CorrelationEngine
-from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, TargetConfig
+from argus.models.agents import AgentConfig, AgentResult, AgentStatus, AgentType, ScanIntelligence, TargetConfig
 from argus.models.findings import CompoundAttackPath, Finding
 from argus.orchestrator.signal_bus import Signal, SignalBus, SignalType
 from argus.scoring import VerdictAdapter
@@ -42,6 +42,8 @@ class BaseAttackAgent:
         self._requests_made = 0
         # VERDICT WEIGHT scoring adapter — set by Orchestrator before run()
         self._verdict: VerdictAdapter | None = None
+        # Shared intelligence from prior phases — set by Orchestrator before run()
+        self._intel: ScanIntelligence | None = None
 
     @property
     def verdict(self) -> VerdictAdapter | None:
@@ -51,6 +53,15 @@ class BaseAttackAgent:
     def attach_verdict_adapter(self, adapter: VerdictAdapter) -> None:
         """Attach the per-scan VerdictAdapter (called by Orchestrator)."""
         self._verdict = adapter
+
+    def attach_intel(self, intel: ScanIntelligence) -> None:
+        """Attach the per-scan ScanIntelligence (called by Orchestrator)."""
+        self._intel = intel
+
+    @property
+    def intel(self) -> ScanIntelligence | None:
+        """The shared intelligence context for this scan."""
+        return self._intel
 
     async def run(self) -> AgentResult:
         """Execute the agent's attack mission. Override in subclasses."""
@@ -190,7 +201,11 @@ class ScanResult:
 class Orchestrator:
     """ARGUS Agent Orchestrator.
 
-    Deploys all attack agents simultaneously at T=0 against a target.
+    Runs attack agents in two phases against a target:
+      Phase 1 — Recon agents (model_extraction) gather intelligence.
+      Phase 2 — All other attack agents launch simultaneously,
+               optionally using chained intelligence from Phase 1.
+
     Manages the signal bus, collects findings, runs validation, and
     coordinates the Correlation Agent.
     """
@@ -232,9 +247,11 @@ class Orchestrator:
     ) -> ScanResult:
         """Execute a full ARGUS scan against a target.
 
-        Deploys all registered agents (or specified subset) simultaneously.
-        All agents launch at T=0. Findings are collected, validated, and
-        correlated into compound attack paths.
+        Phase 1 runs recon agents (model_extraction) first, then Phase 2
+        launches all remaining attack agents simultaneously.  The timeout
+        budget is shared: Phase 1 gets up to 1/3, Phase 2 gets the rest.
+        Findings are collected, validated, and correlated into compound
+        attack paths.
 
         Args:
             demo_pace_seconds: Artificial inter-technique delay for live demos.
@@ -298,9 +315,16 @@ class Orchestrator:
         # Shared across all agents so corroboration tracking works cross-agent
         verdict_adapter = VerdictAdapter()
 
-        # Create agent instances
-        agents: list[BaseAttackAgent] = []
-        for agent_type in types_to_deploy:
+        # Shared intelligence context — Phase 1 writes, Phase 2 reads
+        intel = ScanIntelligence()
+
+        # Split agents into Phase 1 (recon) and Phase 2 (attack)
+        # Phase 1 agents run first to gather intelligence for Phase 2
+        _RECON_AGENTS = {AgentType.MODEL_EXTRACTION}
+        phase1_types = [t for t in types_to_deploy if t in _RECON_AGENTS]
+        phase2_types = [t for t in types_to_deploy if t not in _RECON_AGENTS]
+
+        def _make_agent(agent_type: AgentType) -> BaseAttackAgent:
             config = AgentConfig(
                 agent_type=agent_type,
                 scan_id=scan_id,
@@ -310,41 +334,87 @@ class Orchestrator:
             agent_class = self._agent_registry[agent_type]
             agent = agent_class(config=config, signal_bus=scan_signal_bus)
             agent.attach_verdict_adapter(verdict_adapter)
-            agents.append(agent)
+            agent.attach_intel(intel)
             self._active_agents[config.instance_id] = agent
+            return agent
 
-        # T=0 — Deploy all agents simultaneously
-        logger.info("T=0 — All [bold]%d[/] agents launching simultaneously", len(agents))
-        tasks = [
-            asyncio.create_task(
-                self._run_agent_with_timeout(agent, timeout),
-                name=f"agent-{agent.agent_type.value}-{agent.config.instance_id[:8]}",
+        all_agents: list[BaseAttackAgent] = []
+        all_agent_results: list[AgentResult | Exception] = []
+
+        # Timeout budget: Phase 1 gets up to 1/3, Phase 2 gets the remainder
+        # (minimum 0.1s for Phase 2 to prevent zero/negative timeout).
+        p1_timeout = (timeout / 3.0 if phase2_types else timeout) if phase1_types else 0.0
+        scan_start = datetime.now(UTC)
+
+        # ── Phase 1: Recon agents (model_extraction) ──
+        if phase1_types:
+            phase1_agents = [_make_agent(t) for t in phase1_types]
+            all_agents.extend(phase1_agents)
+            logger.info(
+                "Phase 1 — Deploying [bold]%d[/] recon agent(s) for intelligence gathering (timeout %.0fs)",
+                len(phase1_agents),
+                p1_timeout,
             )
-            for agent in agents
-        ]
+            p1_tasks = [
+                asyncio.create_task(
+                    self._run_agent_with_timeout(agent, p1_timeout),
+                    name=f"agent-{agent.agent_type.value}-{agent.config.instance_id[:8]}",
+                )
+                for agent in phase1_agents
+            ]
+            p1_results = await asyncio.gather(*p1_tasks, return_exceptions=True)
+            all_agent_results.extend(p1_results)
 
-        # Wait for all agents to complete
-        agent_results = await asyncio.gather(*tasks, return_exceptions=True)
+            if intel.has_intel:
+                logger.info(
+                    "Phase 1 complete — intelligence collected: %s",
+                    intel.summary()[:200],
+                )
+            else:
+                logger.info("Phase 1 complete — no intelligence extracted (Phase 2 proceeds with default payloads)")
+
+        # ── Phase 2: Attack agents (all others) — launched simultaneously ──
+        if phase2_types:
+            phase1_elapsed = (datetime.now(UTC) - scan_start).total_seconds()
+            p2_timeout = max(timeout - phase1_elapsed, 0.1)
+
+            phase2_agents = [_make_agent(t) for t in phase2_types]
+            all_agents.extend(phase2_agents)
+            logger.info(
+                "Phase 2 — Deploying [bold]%d[/] attack agents%s (timeout %.0fs)",
+                len(phase2_agents),
+                " (with chained intelligence)" if intel.has_intel else "",
+                p2_timeout,
+            )
+            p2_tasks = [
+                asyncio.create_task(
+                    self._run_agent_with_timeout(agent, p2_timeout),
+                    name=f"agent-{agent.agent_type.value}-{agent.config.instance_id[:8]}",
+                )
+                for agent in phase2_agents
+            ]
+            p2_results = await asyncio.gather(*p2_tasks, return_exceptions=True)
+            all_agent_results.extend(p2_results)
 
         # Collect results
         all_findings: list[Finding] = []
-        for i, agent_result in enumerate(agent_results):
+        for i, agent_result in enumerate(all_agent_results):
             if isinstance(agent_result, Exception):
                 from argus.ui.colors import agent_color
 
-                a_color = agent_color(agents[i].agent_type)
+                a_color = agent_color(all_agents[i].agent_type)
                 logger.error(
                     "Agent [bold %s]%s[/] failed with exception: %s",
                     a_color,
-                    agents[i].agent_type.value,
+                    all_agents[i].agent_type.value,
                     type(agent_result).__name__,
                 )
-                logger.debug("Agent %s full exception: %s", agents[i].agent_type.value, agent_result)
+                logger.debug("Agent %s full exception: %s", all_agents[i].agent_type.value, agent_result)
                 # Sanitize: only the exception class name is propagated to the
                 # result. The full str(exc) often includes target URLs with
                 # credentials, full request bodies, or other sensitive content.
                 result.agent_results.append(
-                    agents[i].build_result(
+                    all_agents[i].build_result(
                         AgentStatus.FAILED,
                         result.started_at,
                         errors=[type(agent_result).__name__],
@@ -352,9 +422,9 @@ class Orchestrator:
                 )
             elif isinstance(agent_result, AgentResult):
                 result.agent_results.append(agent_result)
-                all_findings.extend(agents[i].findings)
+                all_findings.extend(all_agents[i].findings)
             else:
-                logger.warning("Unexpected result type from agent %s", agents[i].agent_type.value)
+                logger.warning("Unexpected result type from agent %s", all_agents[i].agent_type.value)
 
         # Validate all findings
         logger.info("Validating %d findings...", len(all_findings))

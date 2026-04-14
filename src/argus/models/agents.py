@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -121,3 +122,69 @@ class AgentResult(BaseModel):
 
     # Signals sent to correlation agent
     signals_emitted: int = 0
+
+
+class ScanIntelligence:
+    """Shared intelligence context for inter-agent finding chaining.
+
+    Phase 1 agents (model_extraction) write extracted info here.
+    Phase 2 agents (prompt_injection, etc.) read it to craft targeted attacks.
+
+    Thread-safe: uses asyncio.Lock for concurrent writes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        # Extracted model identity (e.g. "claude-3", "gpt-4", "llama-3")
+        self.model_name: str | None = None
+        # Fragments of the system prompt extracted by model_extraction
+        self.system_prompt_fragments: list[str] = []
+        # Tool names the target has access to
+        self.tool_names: list[str] = []
+        # Behavioral boundaries discovered (topics refused, actions forbidden)
+        self.refusal_topics: list[str] = []
+        # Raw extraction evidence for downstream agents
+        self.extraction_evidence: list[dict[str, Any]] = []
+
+    async def record_model_name(self, name: str) -> None:
+        async with self._lock:
+            self.model_name = name
+
+    async def record_system_prompt_fragment(self, fragment: str) -> None:
+        async with self._lock:
+            if fragment not in self.system_prompt_fragments:
+                self.system_prompt_fragments.append(fragment)
+
+    async def record_tool_names(self, names: list[str]) -> None:
+        async with self._lock:
+            for n in names:
+                if n not in self.tool_names:
+                    self.tool_names.append(n)
+
+    async def record_refusal(self, topic: str) -> None:
+        async with self._lock:
+            if topic not in self.refusal_topics:
+                self.refusal_topics.append(topic)
+
+    async def record_evidence(self, evidence: dict[str, Any]) -> None:
+        async with self._lock:
+            self.extraction_evidence.append(evidence)
+
+    @property
+    def has_intel(self) -> bool:
+        """Return True if any intelligence has been collected."""
+        return bool(self.model_name or self.system_prompt_fragments or self.tool_names or self.refusal_topics)
+
+    def summary(self) -> str:
+        """Human-readable summary of collected intelligence for LLM context."""
+        parts: list[str] = []
+        if self.model_name:
+            parts.append(f"Model: {self.model_name}")
+        if self.system_prompt_fragments:
+            joined = " | ".join(f[:200] for f in self.system_prompt_fragments[:5])
+            parts.append(f"System prompt fragments: {joined}")
+        if self.tool_names:
+            parts.append(f"Tools: {', '.join(self.tool_names[:20])}")
+        if self.refusal_topics:
+            parts.append(f"Refused topics: {', '.join(self.refusal_topics[:10])}")
+        return "; ".join(parts) if parts else "No intelligence collected"

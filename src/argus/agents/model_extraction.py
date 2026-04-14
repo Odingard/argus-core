@@ -394,10 +394,21 @@ class ModelExtractionAgent(LLMAttackAgent):
         result: TurnResult,
         evidence: dict[str, Any],
     ) -> None:
-        """Emit a finding for successful model extraction."""
+        """Emit a finding for successful model extraction.
+
+        Also writes extracted intelligence to the shared ScanIntelligence
+        context so downstream agents (prompt_injection, etc.) can craft
+        model-specific payloads.
+        """
         markers = evidence["sensitive_markers"]
         priv = evidence["privilege_indicators"]
         extraction = evidence.get("extraction_indicators", [])
+
+        # ── Chain intelligence to shared context (non-blocking) ──
+        try:
+            await self._record_intelligence(technique, result.response_text, extraction)
+        except Exception:
+            logger.debug("Intelligence recording failed for %s (finding emission continues)", technique)
 
         # System prompt and tool inventory extraction are critical
         severity = (
@@ -459,6 +470,107 @@ class ModelExtractionAgent(LLMAttackAgent):
             proof_of_exploitation=proof,
         )
         await self.emit_finding(finding)
+
+    # ------------------------------------------------------------------
+    # Intelligence chaining — write to shared ScanIntelligence
+    # ------------------------------------------------------------------
+
+    # Known model name patterns for fingerprinting
+    _MODEL_PATTERNS: list[tuple[str, str]] = [
+        (r"gpt-4[o\-]?\w*", "gpt-4"),
+        (r"gpt-3\.5\w*", "gpt-3.5"),
+        (r"claude[- ]?3[- ]?\w*", "claude-3"),
+        (r"claude[- ]?2\w*", "claude-2"),
+        (r"claude[- ]?sonnet\w*", "claude-sonnet"),
+        (r"claude[- ]?haiku\w*", "claude-haiku"),
+        (r"claude[- ]?opus\w*", "claude-opus"),
+        (r"gemini[- ]?\w*", "gemini"),
+        (r"llama[- ]?3\w*", "llama-3"),
+        (r"llama[- ]?2\w*", "llama-2"),
+        (r"mistral\w*", "mistral"),
+        (r"mixtral\w*", "mixtral"),
+        (r"command[- ]?r\w*", "command-r"),
+        (r"phi[- ]?3\w*", "phi-3"),
+        (r"qwen\w*", "qwen"),
+    ]
+
+    async def _record_intelligence(
+        self,
+        technique: str,
+        response_text: str,
+        extraction_indicators: list[str],
+    ) -> None:
+        """Write extracted intelligence to the shared ScanIntelligence context.
+
+        Called after each successful extraction finding. Downstream agents
+        (prompt_injection, etc.) read this to craft model-specific payloads.
+        """
+        if self._intel is None:
+            return
+
+        text_lower = response_text.lower()
+
+        # Extract model name
+        if technique in ("extract_config_fingerprint", "extract_system_prompt"):
+            for pattern, model_name in self._MODEL_PATTERNS:
+                if re.search(pattern, text_lower):
+                    await self._intel.record_model_name(model_name)
+                    break
+
+        # Extract system prompt fragments
+        if technique == "extract_system_prompt":
+            # Look for quoted instructions or rule-like statements
+            for line in response_text.split("\n"):
+                line_stripped = line.strip()
+                if len(line_stripped) > 20 and any(
+                    kw in line_stripped.lower()
+                    for kw in ("you are", "you must", "do not", "never", "always", "your role")
+                ):
+                    await self._intel.record_system_prompt_fragment(line_stripped[:500])
+
+        # Extract tool names
+        if technique == "extract_tool_inventory":
+            # Look for tool-like names in the response
+            tool_matches = re.findall(
+                r"\b(?:get|set|create|delete|update|list|search|send|read|write|execute|run|call|fetch|query)_\w+\b",
+                response_text,
+            )
+            if tool_matches:
+                await self._intel.record_tool_names(tool_matches[:30])
+            # Also look for function-call style names
+            fn_matches = re.findall(r'"name"\s*:\s*"([^"]+)"', response_text)
+            if fn_matches:
+                await self._intel.record_tool_names(fn_matches[:30])
+
+        # Extract refusal topics from boundary probing
+        if technique == "extract_behavior_boundary":
+            refusal_keywords = [
+                "cannot",
+                "not allowed",
+                "forbidden",
+                "restricted",
+                "unable to",
+                "not permitted",
+                "refuse",
+            ]
+            for line in response_text.split("\n"):
+                if any(kw in line.lower() for kw in refusal_keywords) and len(line.strip()) > 10:
+                    await self._intel.record_refusal(line.strip()[:200])
+
+        # Record raw evidence for all techniques
+        await self._intel.record_evidence(
+            {
+                "technique": technique,
+                "indicators": extraction_indicators,
+                "excerpt": response_text[:1000],
+            }
+        )
+
+        logger.debug(
+            "ModelExtraction: recorded intelligence for %s — intel summary: %s",
+            technique,
+            self._intel.summary()[:200],
+        )
 
     # ------------------------------------------------------------------
     # Phase 3: Credential/Token Harvesting via Tool Responses
