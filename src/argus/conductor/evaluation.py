@@ -1016,8 +1016,8 @@ class DataCategoryMatcher:
         # /node_modules/.  Requires a sensitive root like /etc/, /home/, /root/
         "sensitive_path": (
             r"(?i)(?:/(?!(?:api|v\d|static|assets|node_modules))[a-z0-9._-]+)*"
-            r"(?:/etc/|/home/|/root/|/var/log/|/proc/|/tmp/|\.env|\.ssh/|\.aws/)"
-            r"[a-z0-9._/-]+"
+            r"(?:/etc/|/home/|/root/|/var/log/|/proc/|/tmp/|\.env(?:[./]|rc\b)|/\.ssh/|/\.aws/)"
+            r"[a-z0-9._/-]*"
         ),
         # SQL leak — specific query fragments, not generic JSON
         "sql_leak": (

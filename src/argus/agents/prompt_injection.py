@@ -30,7 +30,7 @@ import logging
 from typing import Any
 
 from argus.agents.base import LLMAttackAgent
-from argus.conductor import DataCategoryMatcher, quick_eval
+from argus.conductor import BehaviorEvaluator, DataCategoryMatcher, quick_eval
 from argus.corpus.manager import AttackCategory
 from argus.models.agents import AgentType
 from argus.models.findings import (
@@ -1272,8 +1272,12 @@ class PromptInjectionHunter(LLMAttackAgent):
         # connection strings, private keys, JWTs, etc.)
         # Use original-case text — several patterns are case-sensitive
         # (env_leak, private_key, jwt_token, cloud_leak GCP prefix).
-        if DataCategoryMatcher.has_leaks(str(result.get("response", ""))):
-            return True
+        # Gate on non-refusal to avoid false positives from educational
+        # refusal responses that mention data patterns.
+        original_response = str(result.get("response", ""))
+        if DataCategoryMatcher.has_leaks(original_response):
+            if not BehaviorEvaluator.is_refusal(original_response):
+                return True
 
         return False
 
