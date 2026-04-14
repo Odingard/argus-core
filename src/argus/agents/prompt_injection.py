@@ -1270,7 +1270,9 @@ class PromptInjectionHunter(LLMAttackAgent):
 
         # Layer: Data category detection — real data leaked (ARNs, SQL,
         # connection strings, private keys, JWTs, etc.)
-        if DataCategoryMatcher.has_leaks(response):
+        # Use original-case text — several patterns are case-sensitive
+        # (env_leak, private_key, jwt_token, cloud_leak GCP prefix).
+        if DataCategoryMatcher.has_leaks(str(result.get("response", ""))):
             return True
 
         return False

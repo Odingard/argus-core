@@ -237,8 +237,18 @@ class IdentitySpoofAgent(LLMAttackAgent):
             agent_type="identity_spoof",
         )
 
-        # Layer 4: Data category detection — real leaked data in spoofed response
-        data_leaks = DataCategoryMatcher.scan(spoofed.response_text)
+        # Layer 4: Data category detection — differential scan.
+        # Only count data categories that are NEW in the spoofed response
+        # (not already present in baseline) to avoid false positives when
+        # the target normally returns emails, ARNs, etc.
+        baseline_leaks = DataCategoryMatcher.scan(baseline.response_text)
+        spoofed_leaks = DataCategoryMatcher.scan(spoofed.response_text)
+        data_leaks: dict[str, list[str]] = {}
+        for cat, matches in spoofed_leaks.items():
+            baseline_matches = set(baseline_leaks.get(cat, []))
+            new_matches = [m for m in matches if m not in baseline_matches]
+            if new_matches:
+                data_leaks[cat] = new_matches
 
         if (
             not new_priv
