@@ -116,7 +116,8 @@ def _validate_output_path(path_str: str) -> Path:
 @click.group()
 @click.version_option(version=__version__, prog_name="ARGUS")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
-def main(verbose: bool) -> None:
+@click.option("--quiet", "-q", is_flag=True, help="Suppress HTTP probe noise — show only findings and summary")
+def main(verbose: bool, quiet: bool) -> None:
     """ARGUS — Autonomous AI Red Team Platform."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -133,6 +134,20 @@ def main(verbose: bool) -> None:
             )
         ],
     )
+
+    if quiet:
+        # Silence the extremely noisy httpx/httpcore per-request logs
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        # Suppress repetitive SURVEY/prober discovery lines
+        logging.getLogger("argus.survey.prober").setLevel(logging.WARNING)
+        # Suppress per-agent phase progress and sandbox chatter
+        logging.getLogger("argus.sandbox").setLevel(logging.WARNING)
+        logging.getLogger("argus.conductor.session").setLevel(logging.WARNING)
+        logging.getLogger("argus.conductor.evaluation").setLevel(logging.WARNING)
+        logging.getLogger("argus.rate_limiter").setLevel(logging.WARNING)
+        logging.getLogger("argus.validation").setLevel(logging.WARNING)
+        logging.getLogger("argus.llm").setLevel(logging.WARNING)
 
 
 @main.command()
