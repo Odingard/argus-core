@@ -32,7 +32,7 @@ from argus.conductor import (
     TurnSpec,
     quick_eval,
 )
-from argus.models.agents import AgentType
+from argus.models.agents import AgentConfig, AgentType
 from argus.models.findings import (
     AttackChainStep,
     FindingSeverity,
@@ -40,6 +40,7 @@ from argus.models.findings import (
     OWASPLLMCategory,
     ReproductionStep,
 )
+from argus.orchestrator.signal_bus import SignalBus
 from argus.sandbox.environment import SandboxEnvironment
 from argus.survey import SurfaceClass
 
@@ -200,7 +201,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
 
     agent_type = AgentType.PRIVILEGE_ESCALATION
 
-    def __init__(self, config, signal_bus) -> None:  # type: ignore[override]
+    def __init__(self, config: AgentConfig, signal_bus: SignalBus) -> None:
         super().__init__(config, signal_bus)
         self._baseline_response: str | None = None
 

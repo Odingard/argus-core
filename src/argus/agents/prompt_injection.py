@@ -32,7 +32,7 @@ from typing import Any
 from argus.agents.base import LLMAttackAgent
 from argus.conductor import BehaviorEvaluator, DataCategoryMatcher, ResponseDivergence, quick_eval
 from argus.corpus.manager import AttackCategory
-from argus.models.agents import AgentType
+from argus.models.agents import AgentConfig, AgentType
 from argus.models.findings import (
     AttackChainStep,
     FindingSeverity,
@@ -40,6 +40,7 @@ from argus.models.findings import (
     OWASPLLMCategory,
     ReproductionStep,
 )
+from argus.orchestrator.signal_bus import SignalBus
 from argus.sandbox.environment import SandboxEnvironment
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class PromptInjectionHunter(LLMAttackAgent):
 
     agent_type = AgentType.PROMPT_INJECTION
 
-    def __init__(self, config, signal_bus) -> None:  # type: ignore[override]
+    def __init__(self, config: AgentConfig, signal_bus: SignalBus) -> None:
         super().__init__(config, signal_bus)
         self._baseline_response: str | None = None
 
