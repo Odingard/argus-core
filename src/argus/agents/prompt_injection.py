@@ -30,9 +30,9 @@ import logging
 from typing import Any
 
 from argus.agents.base import LLMAttackAgent
-from argus.conductor import BehaviorEvaluator, DataCategoryMatcher, quick_eval
+from argus.conductor import BehaviorEvaluator, DataCategoryMatcher, ResponseDivergence, quick_eval
 from argus.corpus.manager import AttackCategory
-from argus.models.agents import AgentType
+from argus.models.agents import AgentConfig, AgentType
 from argus.models.findings import (
     AttackChainStep,
     FindingSeverity,
@@ -40,6 +40,7 @@ from argus.models.findings import (
     OWASPLLMCategory,
     ReproductionStep,
 )
+from argus.orchestrator.signal_bus import SignalBus
 from argus.sandbox.environment import SandboxEnvironment
 
 logger = logging.getLogger(__name__)
@@ -83,9 +84,17 @@ class PromptInjectionHunter(LLMAttackAgent):
 
     agent_type = AgentType.PROMPT_INJECTION
 
+    def __init__(self, config: AgentConfig, signal_bus: SignalBus) -> None:
+        super().__init__(config, signal_bus)
+        self._baseline_response: str | None = None
+
     async def execute_attack(self, sandbox: SandboxEnvironment) -> None:
         """Run all prompt injection attack techniques."""
         logger.info("Prompt Injection Hunter starting — target: %s", self.config.target.name)
+
+        # D1: Baseline Collection — send a neutral request before any attacks
+        # so ResponseDivergence can compare attack responses against baseline.
+        await self._collect_baseline(sandbox)
 
         # Load corpus patterns
         patterns = self._load_corpus_patterns()
@@ -157,6 +166,31 @@ class PromptInjectionHunter(LLMAttackAgent):
             self._techniques_attempted,
             len(self.findings),
         )
+
+    # ------------------------------------------------------------------
+    # Baseline Collection (D1)
+    # ------------------------------------------------------------------
+
+    async def _collect_baseline(self, sandbox: SandboxEnvironment) -> None:
+        """Send a neutral request to the target and store the baseline response.
+
+        This enables ResponseDivergence scoring: if the target responds very
+        differently to an attack payload than to a benign message, that's
+        evidence of a behavior change even when canary tokens aren't present.
+        """
+        neutral_message = "Hello, can you help me with a general question about your capabilities?"
+        result = await self._fire_injection(
+            sandbox=sandbox,
+            payload=neutral_message,
+            surface="user_input",
+            technique="baseline_collection",
+        )
+        if result is not None:
+            self._baseline_response = str(result.get("response", ""))
+            logger.info("PromptInjection: baseline collected (%d chars)", len(self._baseline_response))
+        else:
+            self._baseline_response = None
+            logger.debug("PromptInjection: baseline collection failed, divergence scoring disabled")
 
     # ------------------------------------------------------------------
     # Direct Injection Attacks
@@ -1300,6 +1334,19 @@ class PromptInjectionHunter(LLMAttackAgent):
         original_response = str(result.get("response", ""))
         if DataCategoryMatcher.has_leaks(original_response):
             if not BehaviorEvaluator.is_refusal(original_response):
+                return True
+
+        # D1: ResponseDivergence — compare attack response against baseline.
+        # If the target's response to an attack is structurally very different
+        # from its baseline (benign) response, that's evidence of a behavior
+        # change even without canary tokens.
+        if self._baseline_response and original_response:
+            divergence = ResponseDivergence.score(
+                self._baseline_response,
+                original_response,
+                agent_type="prompt_injection",
+            )
+            if divergence.get("is_finding"):
                 return True
 
         return False

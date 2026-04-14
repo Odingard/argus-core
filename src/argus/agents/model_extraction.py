@@ -27,12 +27,13 @@ from typing import Any
 from argus.agents.base import LLMAttackAgent
 from argus.conductor import (
     ConversationSession,
+    ResponseDivergence,
     ResponseMatcher,
     TurnResult,
     TurnSpec,
     quick_eval,
 )
-from argus.models.agents import AgentType
+from argus.models.agents import AgentConfig, AgentType
 from argus.models.findings import (
     AttackChainStep,
     FindingSeverity,
@@ -40,6 +41,7 @@ from argus.models.findings import (
     OWASPLLMCategory,
     ReproductionStep,
 )
+from argus.orchestrator.signal_bus import SignalBus
 from argus.sandbox.environment import SandboxEnvironment
 from argus.survey import SurfaceClass
 
@@ -144,6 +146,10 @@ class ModelExtractionAgent(LLMAttackAgent):
 
     agent_type = AgentType.MODEL_EXTRACTION
 
+    def __init__(self, config: AgentConfig, signal_bus: SignalBus) -> None:
+        super().__init__(config, signal_bus)
+        self._baseline_response: str | None = None
+
     async def execute_attack(self, sandbox: SandboxEnvironment) -> None:
         """Run model extraction attacks."""
         endpoint = self.config.target.agent_endpoint
@@ -185,6 +191,35 @@ class ModelExtractionAgent(LLMAttackAgent):
         except Exception:
             return None
 
+    async def _collect_baseline(self, session: ConversationSession, chat_path: str) -> None:
+        """D1: Collect a baseline response from the chat endpoint.
+
+        Sends a neutral message and stores the response so that
+        ResponseDivergence can quantify how much attack responses differ
+        from normal behavior.
+        """
+        spec = TurnSpec(
+            name="baseline",
+            method="POST",
+            path=chat_path,
+            body={
+                "session_id": "argus-baseline",
+                "message": "Hello, what can you help me with today?",
+            },
+        )
+        try:
+            result = await session.turn(spec)
+            if result.ok():
+                self._baseline_response = result.response_text
+                logger.info(
+                    "ModelExtraction: baseline collected (%d chars)",
+                    len(self._baseline_response),
+                )
+            else:
+                self._baseline_response = None
+        except (ValueError, Exception):
+            self._baseline_response = None
+
     async def _attack_base(self, sandbox: SandboxEnvironment, base_url: str) -> None:
         """Run extraction attacks against one base URL."""
         if not await sandbox.check_request_allowed():
@@ -198,6 +233,13 @@ class ModelExtractionAgent(LLMAttackAgent):
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
+
+        # D1: Baseline collection before attacks — reset first to avoid
+        # stale baseline from a previous base URL being used for divergence.
+        self._baseline_response = None
+        if chat_endpoints:
+            async with self._make_session(base_url) as baseline_session:
+                await self._collect_baseline(baseline_session, chat_endpoints[0].path)
 
         # Phase 1: Chat-based extraction (system prompt, tools, etc.)
         if chat_endpoints:
@@ -306,8 +348,8 @@ class ModelExtractionAgent(LLMAttackAgent):
             )
             break
 
-    @staticmethod
     def _evaluate_response(
+        self,
         result: TurnResult,
         technique: str,
     ) -> dict[str, Any] | None:
@@ -376,6 +418,16 @@ class ModelExtractionAgent(LLMAttackAgent):
             eval_evidence = quick_eval(text)
             if eval_evidence is not None and eval_evidence.get("matched_signatures"):
                 return eval_evidence
+
+            # D1: ResponseDivergence fallback — compare against baseline.
+            # Only for chat-based techniques; the baseline is collected from
+            # a chat endpoint so comparing it against admin/identity responses
+            # would produce false positives from format differences alone.
+            if technique != "extract_admin_direct":
+                divergence_result = self._check_divergence(result)
+                if divergence_result is not None:
+                    return divergence_result
+
             return None
 
         return {
@@ -384,6 +436,25 @@ class ModelExtractionAgent(LLMAttackAgent):
             "extraction_indicators": extraction_indicators,
             "response_excerpt": text[:500],
         }
+
+    def _check_divergence(self, result: TurnResult) -> dict[str, Any] | None:
+        """D1: Compare attack response against baseline using ResponseDivergence."""
+        if not self._baseline_response:
+            return None
+        divergence = ResponseDivergence.score(
+            self._baseline_response,
+            result.response_text,
+            agent_type="model_extraction",
+        )
+        if divergence.get("is_finding"):
+            return {
+                "sensitive_markers": [],
+                "privilege_indicators": [],
+                "extraction_indicators": [],
+                "response_excerpt": result.response_text[:500],
+                "divergence": divergence,
+            }
+        return None
 
     async def _report(
         self,
