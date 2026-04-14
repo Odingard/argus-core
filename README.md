@@ -112,9 +112,7 @@ argus auth create-key my-admin --role admin
 # Start the backend
 argus serve --port 8765
 
-# Start the React frontend (in another terminal)
-cd argus-frontend && npm install && npm run dev
-# Open http://localhost:5173 and log in with your API key
+# Open http://localhost:8765 in your browser (token printed to terminal)
 ```
 
 ---
@@ -187,29 +185,12 @@ argus scan "Arena" --target http://localhost:9001
 
 ## Interfaces
 
-ARGUS ships with **three interfaces**:
+ARGUS ships with **two interfaces**:
 
 | Interface | Use Case | Command |
 |-----------|----------|---------|
-| **React Frontend** | Operators, CISOs — login, target management, scan history, findings, OWASP coverage | `cd argus-frontend && npm run dev` |
 | **Web Dashboard** | Live scan monitoring, real-time agent status, SSE event stream | `argus serve` |
 | **Cinematic Terminal** | Screen recordings, GIF demos, CLI workflows | `argus live --cinematic` |
-
-### React Frontend
-
-The production React frontend (`argus-frontend/`) provides a continuous platform experience:
-
-- **Login** — API key authentication with role-based access
-- **Dashboard** — Real-time scan monitoring with all 12 agents, trend charts, severity breakdown
-- **Live Scan** — Watch agents attack in real-time with SSE event streaming
-- **Target Management** — CRUD for MCP servers, AI agent endpoints, multi-agent pipelines, memory stores
-- **Findings** — Expandable rows with attack chains, VERDICT WEIGHT scores, reproduction steps
-- **Compound Chains** — Multi-step attack paths from the Correlation Engine
-- **OWASP Coverage** — Heatmap across all OWASP Agentic AI and LLM categories
-- **Corpus** — Browse the attack pattern database across all 12 domains
-- **Settings** — System configuration, tier status, API key management
-
-**Tech Stack:** Vite + React 18 + TypeScript + Tailwind CSS + shadcn/ui + recharts + lucide-react
 
 ---
 
@@ -226,7 +207,7 @@ The full attack engine is open-source. All 12 agents, every technique, and the C
 | Callback Beacon Server | **yes** | **yes** |
 | CERBERUS Detection Rules | **yes** | **yes** |
 | JSON + HTML Reports | **yes** | **yes** |
-| CLI + Web Dashboard + React Frontend | **yes** | **yes** |
+| CLI + Web Dashboard | **yes** | **yes** |
 | ARGUS Arena (12 targets) | **yes** | **yes** |
 | ALEC Evidence Packages | — | **yes** |
 | PDF Executive Reports | — | **yes** |
@@ -256,9 +237,9 @@ export ARGUS_LICENSE_KEY=your-key-here
 ┌──────────────────────────────────────────────────────────────┐
 │                      FRONTEND LAYER                          │
 │                                                              │
-│   React/TypeScript         Web Dashboard       Terminal UI   │
-│   (argus-frontend/)        (argus serve)       (argus live)  │
-│        :5173                   :8765              CLI         │
+│          Web Dashboard              Terminal UI              │
+│          (argus serve)              (argus live)             │
+│              :8765                     CLI                    │
 │                                                              │
 ├──────────────────────────────────────────────────────────────┤
 │                     API LAYER                                │
@@ -513,18 +494,6 @@ arena/                        # ARGUS Arena — 12 vulnerable AI targets
 ├── scoring.py                # Arena scoring engine
 └── scenarios/                # 12 scenario implementations
 
-argus-frontend/               # Production React frontend
-├── src/
-│   ├── api/client.ts         # API client — auth, scans, targets, findings
-│   ├── components/
-│   │   ├── layout/           # AppLayout, Header, Sidebar
-│   │   └── ui/               # shadcn/ui components
-│   ├── pages/                # 16 pages — Login, Dashboard, LiveScan, etc.
-│   └── types/index.ts        # TypeScript type definitions
-├── package.json
-├── tailwind.config.cjs
-├── tsconfig.json
-└── vite.config.ts
 ```
 
 ---
@@ -540,7 +509,6 @@ argus-frontend/               # Production React frontend
 | `ARGUS_TIER` | Active tier: `core` or `enterprise` | `core` |
 | `ARGUS_LICENSE_KEY` | Enterprise license key | — |
 | `ARGUS_WEB_ALLOW_ORIGIN` | Additional CORS origin for the frontend | — |
-| `VITE_API_URL` | Backend API URL for the React frontend | `http://localhost:8765` |
 
 ---
 
@@ -573,7 +541,7 @@ ruff format src/ tests/
 | Beacon Server | HTTP callback verification for proof-of-exploitation |
 | Database | SQLAlchemy + SQLite (default) / PostgreSQL |
 | Backend API | FastAPI + Uvicorn + SSE + Bearer auth + CORS |
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui |
+| Frontend | Built-in HTML/JS dashboard (served by FastAPI) |
 | Reporting | HTML, JSON, PDF, ALEC evidence packages, CERBERUS rules, SIEM export |
 | CI/CD | GitHub Actions — ruff lint, pip-audit, pytest (3.11 / 3.12 / 3.13) |
 | Package | [argus-redteam on PyPI](https://pypi.org/project/argus-redteam/) |

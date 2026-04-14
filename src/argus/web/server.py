@@ -399,8 +399,6 @@ def create_app() -> FastAPI:
     allow_origins = [
         "http://127.0.0.1:8765",
         "http://localhost:8765",
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
     ]
     if extra_origin:
         allow_origins.append(extra_origin)

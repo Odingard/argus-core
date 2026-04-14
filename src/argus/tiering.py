@@ -249,7 +249,6 @@ FEATURE_MATRIX: list[dict[str, str | bool]] = [
     {"feature": "HTML Reports", "core": True, "enterprise": True, "category": "Reports"},
     {"feature": "CLI Interface", "core": True, "enterprise": True, "category": "Interface"},
     {"feature": "Web Dashboard", "core": True, "enterprise": True, "category": "Interface"},
-    {"feature": "React Frontend", "core": True, "enterprise": True, "category": "Interface"},
     {"feature": "ARGUS Arena (12 targets)", "core": True, "enterprise": True, "category": "Testing"},
     # Enterprise features
     {"feature": "ALEC Evidence Packages", "core": False, "enterprise": True, "category": "Reports"},
