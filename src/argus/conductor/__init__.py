@@ -37,6 +37,7 @@ from argus.conductor.evaluation import (
 )
 from argus.conductor.session import (
     AttackSequence,
+    ConnectionPool,
     ConversationSession,
     ResponseMatcher,
     TurnResult,
@@ -47,6 +48,7 @@ __all__ = [
     "AttackSequence",
     "BehaviorEvaluator",
     "CanaryPropagator",
+    "ConnectionPool",
     "ConversationSession",
     "DataCategoryMatcher",
     "EvalResult",

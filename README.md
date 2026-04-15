@@ -14,11 +14,11 @@
 
 ---
 
-ARGUS deploys **12 specialized offensive agents in parallel** against AI systems, MCP servers, and multi-agent workflows. Each agent attacks a different AI-specific domain simultaneously. A Correlation Engine chains individual findings into multi-step compound attack paths. Every finding is validated with proof of exploitation and scored by [VERDICT WEIGHT](https://github.com/Odingard/verdict-weight) before it is surfaced.
+ARGUS deploys **13 specialized offensive agents in parallel** against AI systems, MCP servers, and multi-agent workflows. Each agent attacks a different AI-specific domain simultaneously. A Correlation Engine chains individual findings into multi-step compound attack paths. Every finding is validated with proof of exploitation and scored by [VERDICT WEIGHT](https://github.com/Odingard/verdict-weight) before it is surfaced.
 
 ```bash
 pip install argus-redteam
-argus scan "My AI Agent" --mcp-url https://your-ai-agent.com/api/chat
+argus scan "My AI Agent" --target https://your-ai-agent.com/api/chat
 ```
 
 ---
@@ -33,7 +33,7 @@ Traditional security tools were built for a different attack surface. A SQL inje
 
 ---
 
-## The 12 Attack Agents
+## The 13 Attack Agents
 
 | # | Agent | Attack Surface |
 |---|-------|---------------|
@@ -41,17 +41,18 @@ Traditional security tools were built for a different attack surface. A SQL inje
 | 2 | **Tool Poisoning Agent** | MCP tool definitions, metadata, schema manipulation, infrastructure exfiltration |
 | 3 | **Supply Chain Agent** | External MCP servers and tool packages |
 | 4 | **Memory Poisoning Agent** | Agent persistent memory and session state |
-| 5 | **Identity Spoof Agent** | Agent-to-agent authentication channels |
+| 5 | **Identity Spoof Agent** | Agent-to-agent authentication, social engineering BFLA |
 | 6 | **Context Window Agent** | Multi-turn conversation state, attention manipulation |
 | 7 | **Cross-Agent Exfiltration Agent** | Multi-agent data flow boundaries |
-| 8 | **Privilege Escalation Agent** | Tool call chains, permission boundaries, cloud IAM probing |
+| 8 | **Privilege Escalation Agent** | Tool call chains, permission boundaries, BOLA, cloud IAM probing |
 | 9 | **Race Condition Agent** | Parallel agent execution timing |
-| 10 | **Model Extraction Agent** | Agent API interface, system prompt extraction |
+| 10 | **Model Extraction Agent** | Agent API interface, system prompt extraction, tool/function discovery |
 | 11 | **Persona Hijacking Agent** | Identity drift, role confusion, behavioral persistence |
 | 12 | **Memory Boundary Collapse Agent** | Cross-store memory bleed, instruction hierarchy collapse |
-| — | **Correlation Engine** | All agent outputs — chains findings into compound attack paths |
+| 13 | **MCP Scanner Agent** | MCP server enumeration, capability probing, protocol conformance |
+| — | **Correlation Engine** | All agent outputs — chains findings into compound attack paths (21 patterns) |
 
-Agents 1-10 map to the [OWASP Top 10 for Agentic AI](https://owasp.org/www-project-top-10-for-large-language-model-applications/) and LLM Applications. Agents 11-12 are **ARGUS-defined categories** — attack surfaces not yet covered by OWASP.
+Agents 1-10 map to the [OWASP Top 10 for Agentic AI](https://owasp.org/www-project-top-10-for-large-language-model-applications/) and LLM Applications. Agents 11-13 are **ARGUS-defined categories** — attack surfaces not yet covered by OWASP.
 
 ---
 
@@ -175,10 +176,16 @@ ARGUS ships with **Arena** — 12 intentionally vulnerable AI agent targets for 
 
 ```bash
 # Start all Arena scenarios
-cd arena && docker-compose up -d
+argus arena start
 
-# Point ARGUS at Arena
-argus scan "Arena" --target http://localhost:9001
+# Check status
+argus arena status
+
+# Scan specific scenarios
+ARGUS_WEB_ALLOW_PRIVATE=1 argus arena scan --only 1,2,3
+
+# Score findings against expected vulnerabilities
+argus arena score
 ```
 
 ---
@@ -196,11 +203,11 @@ ARGUS ships with **two interfaces**:
 
 ## Core vs Enterprise
 
-The full attack engine is open-source. All 12 agents, every technique, and the Correlation Engine are included in Core. **Enterprise gates the output infrastructure — not the offensive capability.**
+The full attack engine is open-source. All 13 agents, every technique, and the Correlation Engine are included in Core. **Enterprise gates the output infrastructure — not the offensive capability.**
 
 | Feature | Core | Enterprise |
 |---------|:----:|:----------:|
-| All 12 Attack Agents | **yes** | **yes** |
+| All 13 Attack Agents | **yes** | **yes** |
 | Correlation Engine | **yes** | **yes** |
 | VERDICT WEIGHT Scoring | **yes** | **yes** |
 | Attack Corpus | **yes** | **yes** |
@@ -251,11 +258,11 @@ export ARGUS_LICENSE_KEY=your-key-here
 ├──────────────────────────────────────────────────────────────┤
 │                   ATTACK LAYER                               │
 │                                                              │
+│  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐         │
+│  │ PI │ │ TP │ │ SC │ │ MP │ │ IS │ │ CW │ │ MS │         │
+│  └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘         │
 │  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐                │
-│  │ PI │ │ TP │ │ SC │ │ MP │ │ IS │ │ CW │                │
-│  └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘                │
-│  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐                │
-│  │ CX │ │ PE │ │ RC │ │ ME │ │ PH │ │ MB │   x12 agents   │
+│  │ CX │ │ PE │ │ RC │ │ ME │ │ PH │ │ MB │   x13 agents   │
 │  └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘                │
 │     └───────┴───────┴───┬──┴──────┴───────┘                 │
 │                         │                                    │
@@ -266,7 +273,7 @@ export ARGUS_LICENSE_KEY=your-key-here
 │                CORRELATION LAYER                             │
 │              ┌──────────▼──────────┐                         │
 │              │  Correlation Engine │                         │
-│              │  Compound Chains    │                         │
+│              │  21 Compound Rules  │                         │
 │              └──────────┬──────────┘                         │
 ├─────────────────────────┼───────────────────────────────────┤
 │               SCORING + REPORTING                            │
@@ -431,7 +438,8 @@ src/argus/
 │   ├── race_condition.py     # Agent 9 — Race Condition
 │   ├── model_extraction.py   # Agent 10 — Model Extraction
 │   ├── persona_hijacking.py  # Agent 11 — Persona Hijacking
-│   └── memory_boundary_collapse.py  # Agent 12 — Memory Boundary Collapse
+│   ├── memory_boundary_collapse.py  # Agent 12 — Memory Boundary Collapse
+│   └── mcp_scanner.py           # Agent 13 — MCP Scanner
 ├── beacon/
 │   ├── __init__.py           # Beacon module entry point
 │   └── server.py             # Callback beacon server for proof-of-exploitation
@@ -439,9 +447,10 @@ src/argus/
 │   ├── engine.py             # Core orchestrator — parallel agent deployment
 │   └── signal_bus.py         # Inter-agent real-time signal bus
 ├── correlation/
-│   └── engine.py             # Compound attack path detection (16 patterns)
+│   └── engine.py             # Compound attack path detection (21 patterns)
 ├── conductor/
-│   └── session.py            # Conversation session management
+│   ├── session.py            # Conversation session management
+│   └── evaluation.py         # LLM-based semantic evaluation engine
 ├── survey/
 │   └── prober.py             # Endpoint discovery and surface classification
 ├── validation/
@@ -470,6 +479,10 @@ src/argus/
 │   └── renderer.py           # JSON report generation
 ├── corpus/
 │   ├── manager.py            # Attack pattern corpus management
+│   ├── encoding.py           # Encoding/obfuscation layer
+│   ├── indirect.py           # Indirect injection patterns
+│   ├── escalation.py         # Multi-turn escalation chains
+│   ├── composite.py          # Composite attack patterns
 │   └── data/                 # Attack pattern JSON files (12 domains)
 ├── mcp_client/
 │   ├── client.py             # MCP protocol attack client
@@ -535,7 +548,7 @@ ruff format src/ tests/
 | Attack Agent Runtime | LLM-powered reasoning (Claude / GPT) + deterministic tool access |
 | Validation Engine | Deterministic Python — reproducible proof-of-exploitation |
 | Scoring | VERDICT WEIGHT — 8-stream confidence certification |
-| Correlation Engine | 16 compound attack path detection patterns |
+| Correlation Engine | 21 compound attack path detection patterns |
 | Attack Corpus | 12-domain AI-specific attack pattern database |
 | MCP Client | Full MCP protocol client — attacker perspective |
 | Beacon Server | HTTP callback verification for proof-of-exploitation |

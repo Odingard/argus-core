@@ -1041,6 +1041,53 @@ class DataCategoryMatcher:
         "private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
         # JWT tokens — three base64 segments separated by dots
         "jwt_token": r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+        # ---------------------------------------------------------------
+        # D8: PII Detection Expansion
+        # ---------------------------------------------------------------
+        # US phone numbers — (xxx) xxx-xxxx, xxx-xxx-xxxx, +1xxxxxxxxxx
+        # Requires at least one separator to avoid matching timestamps/IDs
+        "pii_phone": (r"\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s.]\d{3}[-\s.]\d{4}\b"),
+        # US Social Security Numbers — xxx-xx-xxxx (with dashes required
+        # to avoid matching random 9-digit numbers)
+        "pii_ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+        # Credit card numbers — Visa, Mastercard, Amex, Discover
+        # Requires at least one separator (dash or space) to avoid matching
+        # random 16-digit numbers. Also matches contiguous 16-digit Visa/MC.
+        "pii_credit_card": (
+            r"(?:\b4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"  # Visa
+            r"|\b5[1-5]\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"  # Mastercard
+            r"|\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b"  # Amex
+            r"|\b6(?:011|5\d{2})[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b)"  # Discover
+        ),
+        # IPv4 addresses — excludes loopback/localhost and common non-PII
+        # ranges (0.x, 255.x). Requires word boundaries.
+        "pii_ipv4": (
+            r"\b(?!(?:0|127|255)\.)" r"(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}" r"(?:25[0-5]|2[0-4]\d|1?\d\d?)\b"
+        ),
+        # IPv6 addresses — full form and common compressed forms
+        # Uses lookaround anchors instead of \b because \b doesn't fire
+        # adjacent to :: (both : and start-of-string are non-word chars).
+        # The fourth alternative covers mid-address :: (e.g. fe80::1, ::ffff:x).
+        "pii_ipv6": (
+            r"(?:^|(?<=\s)|(?<=[=,;]))(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(?=\s|$|[,;])"
+            r"|(?:^|(?<=\s)|(?<=[=,;]))(?:[0-9a-fA-F]{1,4}:){1,7}:(?=\s|$|[,;])"
+            r"|(?:^|(?<=\s)|(?<=[=,;]))::(?:(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?(?=\s|$|[,;])"
+            r"|(?:^|(?<=\s)|(?<=[=,;]))(?:[0-9a-fA-F]{1,4}:){1,6}:(?:[0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4}(?=\s|$|[,;])"
+        ),
+        # Date of birth patterns — common formats that suggest PII context
+        # Only matches when preceded by "dob", "birth", "born" context
+        "pii_date_of_birth": (
+            r"(?i)(?:date\s*of\s*birth|dob|born\s*(?:on)?)\s*[:=]?\s*"
+            r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})"
+        ),
+        # Passport numbers — common formats (US, UK, EU)
+        # Requires at least one digit in the value to avoid matching English words
+        "pii_passport": (r"(?i)(?:passport\s*(?:no|number|#)?)\s*[:=]\s*" r"(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}"),
+        # Medical record numbers / health IDs
+        # Requires mandatory separator and at least one digit in value
+        "pii_medical_id": (
+            r"(?i)(?:mrn|medical\s*record|patient\s*id|health\s*id)\s*[:=]\s*" r"(?=[A-Z0-9]*\d)[A-Z0-9]{4,20}"
+        ),
     }
 
     @classmethod
