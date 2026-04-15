@@ -1277,7 +1277,7 @@ class PromptInjectionHunter(LLMAttackAgent):
                     direct_evidence=True,
                     proof_of_exploitation=(
                         f"Multi-turn escalation chain '{chain.name}' ({chain.technique}) "
-                        f"achieved behavior change after {len(chain.steps)} turns. "
+                        f"achieved behavior change after {len(results)} turns. "
                         f"Final response: {str(final_result.get('response', ''))[:300]}"
                     ),
                 )
