@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-redteam"
-version = "0.1.4"
-description = "ARGUS — Autonomous AI Red Team Platform. 12 offensive agents attack AI systems, MCP servers, and multi-agent workflows in parallel."
+version = "0.1.5"
+description = "ARGUS — Autonomous AI Red Team Platform. 13 specialized agents attack AI systems, MCP servers, and multi-agent workflows in parallel."
 requires-python = ">=3.11"
 license = {text = "BSL-1.1"}
 readme = "README.md"
@@ -42,6 +42,7 @@ dependencies = [
     "click>=8.1.0,<9.0",
     "pyyaml>=6.0.0,<7.0",
     "fastapi>=0.115.0,<1.0",
+    "python-multipart>=0.0.22",
     "uvicorn[standard]>=0.34.0,<1.0",
     "sse-starlette>=2.1.0,<3.0",
     "verdict-weight>=1.0.0,<2.0",
