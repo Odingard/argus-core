@@ -85,7 +85,13 @@ class ConnectionPool:
         *,
         csrf_mode: bool = False,
     ) -> httpx.AsyncClient:
-        """Return (or create) a pooled client for *host* with *timeout*."""
+        """Return (or create) a pooled client for *host* with *timeout*.
+
+        Pooled clients share TCP connections but **not** cookie state.
+        Cookies are disabled at the client level (``cookies=False``) so
+        each ``ConversationSession`` manages its own cookie jar when
+        CSRF mode is needed.
+        """
         key = (host, timeout, csrf_mode)
         async with self._lock:
             if key not in self._clients:
@@ -93,9 +99,8 @@ class ConnectionPool:
                     "timeout": timeout,
                     "event_hooks": {"request": [], "response": []},
                     "follow_redirects": False,
+                    "cookies": False,  # prevent cross-session cookie leakage
                 }
-                if csrf_mode:
-                    kwargs["cookies"] = httpx.Cookies()
                 self._clients[key] = httpx.AsyncClient(**kwargs)
                 logger.debug("T7: created pooled client for %s (timeout=%.1f)", host, timeout)
             return self._clients[key]
