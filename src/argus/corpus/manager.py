@@ -172,6 +172,36 @@ class AttackCategory(str, Enum):
     MEMORY_BOUNDARY_TEMPORAL = "memory_boundary.temporal"
     MEMORY_BOUNDARY_TOOL_MEMORY = "memory_boundary.tool_memory"
 
+    # --- Phase C: Extended Encoding ---
+    PROMPT_INJECTION_ENCODING_EXTENDED = "prompt_injection.encoding_extended"
+    PROMPT_INJECTION_ENCODING_HOMOGLYPH = "prompt_injection.encoding_homoglyph"
+    PROMPT_INJECTION_ENCODING_ZERO_WIDTH = "prompt_injection.encoding_zero_width"
+    PROMPT_INJECTION_ENCODING_DOUBLE = "prompt_injection.encoding_double"
+    PROMPT_INJECTION_ENCODING_HEX = "prompt_injection.encoding_hex"
+    PROMPT_INJECTION_ENCODING_SPECIAL_TOKENS = "prompt_injection.encoding_special_tokens"
+
+    # --- Phase C: Indirect Injection Surfaces ---
+    PROMPT_INJECTION_INDIRECT_HTML = "prompt_injection.indirect_html"
+    PROMPT_INJECTION_INDIRECT_JSON = "prompt_injection.indirect_json"
+    PROMPT_INJECTION_INDIRECT_MARKDOWN = "prompt_injection.indirect_markdown"
+    PROMPT_INJECTION_INDIRECT_IMAGE = "prompt_injection.indirect_image"
+    PROMPT_INJECTION_INDIRECT_EMAIL = "prompt_injection.indirect_email"
+    PROMPT_INJECTION_INDIRECT_PDF = "prompt_injection.indirect_pdf"
+    PROMPT_INJECTION_INDIRECT_CSV = "prompt_injection.indirect_csv"
+    PROMPT_INJECTION_INDIRECT_XML = "prompt_injection.indirect_xml"
+
+    # --- Phase C: Multi-Turn Escalation ---
+    PROMPT_INJECTION_ESCALATION_CRESCENDO = "prompt_injection.escalation_crescendo"
+    PROMPT_INJECTION_ESCALATION_LONGCON = "prompt_injection.escalation_longcon"
+    PROMPT_INJECTION_ESCALATION_ADAPTIVE = "prompt_injection.escalation_adaptive"
+    PROMPT_INJECTION_ESCALATION_SPLIT = "prompt_injection.escalation_split"
+
+    # --- Phase C: Composite Attacks ---
+    PROMPT_INJECTION_COMPOSITE_ENCODING = "prompt_injection.composite_encoding"
+    PROMPT_INJECTION_COMPOSITE_AUTHORITY = "prompt_injection.composite_authority"
+    PROMPT_INJECTION_COMPOSITE_ROLEPLAY = "prompt_injection.composite_roleplay"
+    PROMPT_INJECTION_COMPOSITE_MULTILAYER = "prompt_injection.composite_multilayer"
+
 
 class AttackPattern(BaseModel):
     """A single attack pattern in the corpus."""
