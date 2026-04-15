@@ -230,10 +230,12 @@ class ConversationSession:
         }
         # T7: use shared transport from pool when available — shares TCP
         # connections but each session gets its own client (own cookie jar).
+        used_pooled_transport = False
         if self._pool is not None and self._transport is None:
             kwargs["transport"] = await self._pool.get_transport(
                 self._allowed_host,
             )
+            used_pooled_transport = True
         elif self._transport is not None:
             kwargs["transport"] = self._transport
         # T3: enable cookie persistence when CSRF mode is on
@@ -243,7 +245,9 @@ class ConversationSession:
         # When using a pooled transport, do NOT close the client on exit —
         # httpx.AsyncClient.aclose() unconditionally closes its transport,
         # which would destroy the shared transport for all other sessions.
-        self._owns_client = self._pool is None
+        # If an explicit transport was provided (even with a pool), the
+        # session owns the client and should close it normally.
+        self._owns_client = not used_pooled_transport
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
