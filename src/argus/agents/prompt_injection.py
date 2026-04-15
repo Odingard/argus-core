@@ -1238,9 +1238,12 @@ class PromptInjectionHunter(LLMAttackAgent):
                 )
                 results.append(result)
 
-            # Check if the final (exploit) step succeeded
+            # Check if the final (exploit) step succeeded — only if the full chain ran
+            if len(results) < len(chain.steps):
+                continue
             final_result = results[-1] if results else None
-            if final_result and self._is_behavior_change(final_result):
+            last_payload = chain.steps[len(results) - 1].message if results else ""
+            if final_result and self._is_behavior_change(final_result, last_payload):
                 self._techniques_succeeded += 1
 
                 chain_steps = [
@@ -1323,7 +1326,8 @@ class PromptInjectionHunter(LLMAttackAgent):
 
             # Check if any step achieved behavior change
             for i, result in enumerate(results):
-                if result and self._is_behavior_change(result):
+                step_payload = attack.steps[i].message if i < len(attack.steps) else ""
+                if result and self._is_behavior_change(result, step_payload):
                     self._techniques_succeeded += 1
 
                     chain_steps = [
