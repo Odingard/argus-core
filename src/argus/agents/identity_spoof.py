@@ -179,11 +179,16 @@ class IdentitySpoofAgent(LLMAttackAgent):
         # exactly what we want — the whole attack is "does adding a spoofed
         # header turn a 403 into a 200?"
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY, include_auth_rejected=True)
-        if not identity_endpoints:
-            logger.debug("IdentitySpoof: %s exposes no identity surface", base_url)
+        # D7: BFLA targets chat endpoints, not identity endpoints — fetch
+        # independently so D7 is reachable even when no identity surface exists.
+        chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
+
+        if not identity_endpoints and not chat_endpoints:
+            logger.debug("IdentitySpoof: %s exposes no identity or chat surface", base_url)
             return
 
         async with self._make_session(base_url) as session:
+            # Identity spoofing probes (original attack surface)
             for endpoint in identity_endpoints:
                 if not await sandbox.check_request_allowed():
                     return
@@ -191,7 +196,6 @@ class IdentitySpoofAgent(LLMAttackAgent):
 
             # D7: Social Engineering BFLA — use urgency/authority to bypass
             # function-level authorization via chat surfaces.
-            chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
             if chat_endpoints:
                 chat_path = chat_endpoints[0].path
                 for bfla in _SOCIAL_ENGINEERING_BFLA:
