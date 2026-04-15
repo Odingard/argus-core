@@ -2,12 +2,12 @@
 
 ## What is ARGUS
 Autonomous AI Red Team Platform by Odingard Security / Six Sense Enterprise Services.
-Deploys 12 specialized offensive AI agents in parallel against target AI systems.
+Deploys 13 specialized offensive AI agents in parallel against target AI systems.
 Continuous security platform — not one-shot. Persistent deployment with scan history, baseline management, and alerting.
 
 ## Development Commands
 - `pip install -e ".[dev]"` — Install with dev dependencies
-- `pytest tests/ -v` — Run all 163 tests
+- `pytest tests/ -v` — Run all 352 tests
 - `ruff check src/ tests/` — Run ruff linter
 - `ruff format src/ tests/` — Auto-format code
 - `argus serve` — Start backend API server (port 8765)
@@ -20,9 +20,9 @@ Continuous security platform — not one-shot. Persistent deployment with scan h
 - `ruff` for linting and formatting (config in pyproject.toml)
 
 ## Architecture
-- `src/argus/agents/` — 12 attack agent implementations (Phase 1-5)
+- `src/argus/agents/` — 13 attack agent implementations (Phase 1-5 + MCP Scanner)
 - `src/argus/orchestrator/` — Agent orchestrator, signal bus
-- `src/argus/correlation/` — Compound attack path detection (16 patterns)
+- `src/argus/correlation/` — Compound attack path detection (21 patterns)
 - `src/argus/conductor/` — Conversation session management for agents
 - `src/argus/survey/` — Endpoint discovery and surface classification
 - `src/argus/models/` — Finding schema, agent configs, CerberusRule
@@ -38,7 +38,7 @@ Continuous security platform — not one-shot. Persistent deployment with scan h
 - `src/argus/test_harness/` — Mock vulnerable AI target for testing
 
 ## Testing
-- All tests in `tests/` — 163 tests across Python 3.11/3.12/3.13
+- All tests in `tests/` — 352 tests across Python 3.11/3.12/3.13
 - Use `pytest-asyncio` for async tests
 - Every finding must have validation tests
 - CI: GitHub Actions — ruff lint, pip-audit, pytest (3 Python versions)

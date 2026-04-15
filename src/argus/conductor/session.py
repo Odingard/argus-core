@@ -49,11 +49,15 @@ _MAX_RESPONSE_BYTES = 50_000
 
 
 class ConnectionPool:
-    """Shared pool of ``httpx.AsyncClient`` instances keyed by (host, timeout).
+    """Shared pool of ``httpx.AsyncHTTPTransport`` instances keyed by host.
 
     Multiple ``ConversationSession`` objects targeting the same host reuse
-    a single underlying TCP connection pool, reducing handshake overhead
-    when many agents attack the same target simultaneously.
+    a single underlying TCP connection pool (transport), reducing handshake
+    overhead when many agents attack the same target simultaneously.
+
+    Each session creates its **own** ``httpx.AsyncClient`` on top of the
+    shared transport, so cookie jars and other per-client state are fully
+    isolated between sessions.
 
     Usage::
 
@@ -68,7 +72,7 @@ class ConnectionPool:
     _instance: ConnectionPool | None = None
 
     def __init__(self) -> None:
-        self._clients: dict[tuple[str, float, bool], httpx.AsyncClient] = {}
+        self._transports: dict[str, httpx.AsyncHTTPTransport] = {}
         self._lock = asyncio.Lock()
 
     @classmethod
@@ -78,45 +82,33 @@ class ConnectionPool:
             cls._instance = cls()
         return cls._instance
 
-    async def get_client(
-        self,
-        host: str,
-        timeout: float,
-        *,
-        csrf_mode: bool = False,
-    ) -> httpx.AsyncClient:
-        """Return (or create) a pooled client for *host* with *timeout*.
+    async def get_transport(self, host: str) -> httpx.AsyncHTTPTransport:
+        """Return (or create) a shared transport for *host*.
 
-        Pooled clients share TCP connections but **not** cookie state.
-        Cookies are disabled at the client level (``cookies=False``) so
-        each ``ConversationSession`` manages its own cookie jar when
-        CSRF mode is needed.
+        The transport shares TCP connections across sessions but carries
+        **no** cookie or header state — that lives on each session's own
+        ``httpx.AsyncClient``.
         """
-        key = (host, timeout, csrf_mode)
         async with self._lock:
-            if key not in self._clients:
-                kwargs: dict[str, Any] = {
-                    "timeout": timeout,
-                    "event_hooks": {"request": [], "response": []},
-                    "follow_redirects": False,
-                    "cookies": False,  # prevent cross-session cookie leakage
-                }
-                self._clients[key] = httpx.AsyncClient(**kwargs)
-                logger.debug("T7: created pooled client for %s (timeout=%.1f)", host, timeout)
-            return self._clients[key]
+            if host not in self._transports:
+                self._transports[host] = httpx.AsyncHTTPTransport(
+                    retries=0,
+                )
+                logger.debug("T7: created pooled transport for %s", host)
+            return self._transports[host]
 
     async def close_all(self) -> None:
-        """Close every pooled client. Call at scan teardown."""
+        """Close every pooled transport. Call at scan teardown."""
         async with self._lock:
-            for client in self._clients.values():
+            for transport in self._transports.values():
                 try:
-                    await client.aclose()
+                    await transport.aclose()
                 except Exception as exc:
-                    logger.debug("T7: error closing pooled client: %s", type(exc).__name__)
-            count = len(self._clients)
-            self._clients.clear()
+                    logger.debug("T7: error closing pooled transport: %s", type(exc).__name__)
+            count = len(self._transports)
+            self._transports.clear()
         if count:
-            logger.debug("T7: closed %d pooled client(s)", count)
+            logger.debug("T7: closed %d pooled transport(s)", count)
 
     @classmethod
     async def shutdown(cls) -> None:
@@ -231,27 +223,24 @@ class ConversationSession:
         self._owns_client = True  # False when using pooled client
 
     async def __aenter__(self) -> ConversationSession:
-        # T7: prefer pooled client when a pool is provided
+        kwargs: dict[str, Any] = {
+            "timeout": self.timeout_seconds,
+            "event_hooks": {"request": [], "response": []},
+            "follow_redirects": False,
+        }
+        # T7: use shared transport from pool when available — shares TCP
+        # connections but each session gets its own client (own cookie jar).
         if self._pool is not None and self._transport is None:
-            self._client = await self._pool.get_client(
+            kwargs["transport"] = await self._pool.get_transport(
                 self._allowed_host,
-                self.timeout_seconds,
-                csrf_mode=self._csrf_mode,
             )
-            self._owns_client = False
-        else:
-            kwargs: dict[str, Any] = {
-                "timeout": self.timeout_seconds,
-                "event_hooks": {"request": [], "response": []},
-                "follow_redirects": False,
-            }
-            if self._transport is not None:
-                kwargs["transport"] = self._transport
-            # T3: enable cookie persistence when CSRF mode is on
-            if self._csrf_mode:
-                kwargs["cookies"] = httpx.Cookies()
-            self._client = httpx.AsyncClient(**kwargs)
-            self._owns_client = True
+        elif self._transport is not None:
+            kwargs["transport"] = self._transport
+        # T3: enable cookie persistence when CSRF mode is on
+        if self._csrf_mode:
+            kwargs["cookies"] = httpx.Cookies()
+        self._client = httpx.AsyncClient(**kwargs)
+        self._owns_client = True
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
