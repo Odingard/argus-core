@@ -252,7 +252,7 @@ class ConversationSession:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self._client is not None and self._owns_client:
             await self._client.aclose()
-            self._client = None
+        self._client = None
 
     def _resolve(self, path: str) -> str:
         """Resolve a turn path against the session base_url.

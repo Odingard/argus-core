@@ -1045,7 +1045,8 @@ class DataCategoryMatcher:
         # D8: PII Detection Expansion
         # ---------------------------------------------------------------
         # US phone numbers — (xxx) xxx-xxxx, xxx-xxx-xxxx, +1xxxxxxxxxx
-        "pii_phone": (r"(?:\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"),
+        # Requires at least one separator to avoid matching timestamps/IDs
+        "pii_phone": (r"\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s.]\d{3}[-\s.]\d{4}\b"),
         # US Social Security Numbers — xxx-xx-xxxx (with dashes required
         # to avoid matching random 9-digit numbers)
         "pii_ssn": r"\b\d{3}-\d{2}-\d{4}\b",
@@ -1076,9 +1077,13 @@ class DataCategoryMatcher:
             r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})"
         ),
         # Passport numbers — common formats (US, UK, EU)
-        "pii_passport": (r"(?i)(?:passport\s*(?:no|number|#)?)\s*[:=]?\s*" r"[A-Z0-9]{6,12}"),
+        # Requires at least one digit in the value to avoid matching English words
+        "pii_passport": (r"(?i)(?:passport\s*(?:no|number|#)?)\s*[:=]\s*" r"(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}"),
         # Medical record numbers / health IDs
-        "pii_medical_id": (r"(?i)(?:mrn|medical\s*record|patient\s*id|health\s*id)\s*[:=]?\s*" r"[A-Z0-9]{4,20}"),
+        # Requires mandatory separator and at least one digit in value
+        "pii_medical_id": (
+            r"(?i)(?:mrn|medical\s*record|patient\s*id|health\s*id)\s*[:=]\s*" r"(?=[A-Z0-9]*\d)[A-Z0-9]{4,20}"
+        ),
     }
 
     @classmethod
