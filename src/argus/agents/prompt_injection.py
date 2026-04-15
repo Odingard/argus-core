@@ -74,7 +74,7 @@ def _encode_rot13(text: str) -> str:
 
 
 def _encode_leetspeak(text: str) -> str:
-    table = str.maketrans("aeiostlAEIOSTL", "4310571431057!")
+    table = str.maketrans("aeiostlAEIOSTL", "43105714310571")
     return text.translate(table)
 
 
@@ -1258,7 +1258,7 @@ class PromptInjectionHunter(LLMAttackAgent):
 
                 finding = self._build_finding(
                     title=f"Multi-turn escalation (C3): {chain.name}",
-                    description=(f"{chain.description} " f"Expected ASR boost: {chain.expected_asr_boost}."),
+                    description=(f"{chain.description} Expected ASR boost: {chain.expected_asr_boost}."),
                     severity=FindingSeverity.CRITICAL,
                     target_surface="user_input",
                     technique=f"c3_{chain.technique}",

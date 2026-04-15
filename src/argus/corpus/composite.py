@@ -278,8 +278,7 @@ def _multi_layer_attacks() -> list[CompositeAttack]:
                 "html_injection",
             ],
             description=(
-                "Four-layer attack combining authority claim, special tokens, "
-                "homoglyph encoding, and HTML concealment"
+                "Four-layer attack combining authority claim, special tokens, homoglyph encoding, and HTML concealment"
             ),
             expected_asr_boost="+85%",
             steps=[

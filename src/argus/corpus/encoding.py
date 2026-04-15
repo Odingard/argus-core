@@ -48,7 +48,7 @@ def encode_rot13(text: str) -> str:
 
 def encode_leetspeak(text: str) -> str:
     """Leetspeak character substitution."""
-    table = str.maketrans("aeiostlAEIOSTL", "4310571431057!")
+    table = str.maketrans("aeiostlAEIOSTL", "43105714310571")
     return text.translate(table)
 
 
