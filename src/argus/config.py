@@ -78,6 +78,16 @@ def _read_simple(path: Path) -> dict[str, Any]:
     return result
 
 
+def _escape_toml_value(s: str) -> str:
+    """Escape a string for use inside a TOML basic (double-quoted) string."""
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
+    s = s.replace("\t", "\\t")
+    return s
+
+
 def _write_config(data: dict[str, Any]) -> None:
     """Write the config dict as TOML to the config file with secure permissions."""
     path = _config_path()
@@ -94,7 +104,7 @@ def _write_config(data: dict[str, Any]) -> None:
     for key, value in sorted(data.items()):
         if isinstance(value, dict):
             continue
-        lines.append(f'{key} = "{value}"')
+        lines.append(f'{key} = "{_escape_toml_value(str(value))}"')
 
     # Write sections
     for section, values in sorted(data.items()):
@@ -103,7 +113,7 @@ def _write_config(data: dict[str, Any]) -> None:
         lines.append("")
         lines.append(f"[{section}]")
         for key, val in sorted(values.items()):
-            lines.append(f'{key} = "{val}"')
+            lines.append(f'{key} = "{_escape_toml_value(str(val))}"')
 
     lines.append("")
     path.write_text("\n".join(lines))

@@ -393,13 +393,18 @@ def scan(
     if output:
         output_path = _validate_output_path(output)
 
+    # Resolve agent API key: CLI flag > env > config file
+    resolved_api_key = argus_config.resolve_agent_api_key(agent_api_key)
+
     console.print(BANNER, style="bold red")
     console.print(f"\n[bold]Target:[/] {target_name}")
     console.print(f"[bold]MCP URLs:[/] {', '.join(mcp_url) if mcp_url else 'None'}")
     console.print(f"[bold]Agent Endpoint:[/] {agent_endpoint or 'None'}")
     key_display = "None"
-    if agent_api_key:
-        key_display = "***" + agent_api_key[-4:] if len(agent_api_key) > 4 else "****"
+    if resolved_api_key:
+        key_display = argus_config.mask_key(resolved_api_key)
+        key_source = "cli" if agent_api_key else "env/config"
+        key_display += f" ({key_source})"
     console.print(f"[bold]API Key:[/] {key_display}")
     console.print(f"[bold]Timeout:[/] {timeout}s")
     if demo_pace > 0:
@@ -407,9 +412,6 @@ def scan(
     if max_rpm != 60:
         console.print(f"[bold]Max RPM:[/] {max_rpm} req/min")
     console.print()
-
-    # Resolve agent API key: CLI flag > env > config file
-    resolved_api_key = argus_config.resolve_agent_api_key(agent_api_key)
 
     # Parse extra fields from key=value pairs
     extra_fields: dict[str, str] = {}
