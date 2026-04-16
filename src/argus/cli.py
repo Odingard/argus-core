@@ -18,6 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from argus import __version__
+from argus import config as argus_config
 from argus.agents import (
     ContextWindowAgent,
     CrossAgentExfilAgent,
@@ -250,6 +251,21 @@ def status() -> None:
     default=60,
     help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
 )
+@click.option(
+    "--body-format",
+    default="auto",
+    help="Request body format: auto, json, formdata, openai, prompt, input, custom",
+)
+@click.option(
+    "--prompt-field",
+    default="message",
+    help="Field name for the prompt payload (default: message). E.g. 'prompt' for Gandalf.",
+)
+@click.option(
+    "--extra-field",
+    multiple=True,
+    help="Extra fields as key=value pairs (e.g. --extra-field defender=baseline)",
+)
 def live(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -260,6 +276,9 @@ def live(
     cinematic: bool,
     agent_api_key: str | None,
     max_rpm: int,
+    body_format: str,
+    prompt_field: str,
+    extra_field: tuple[str, ...],
 ) -> None:
     """Run an ARGUS scan with the LIVE streaming dashboard.
 
@@ -274,12 +293,27 @@ def live(
     if agent_endpoint:
         _validate_url(agent_endpoint)
 
+    # Resolve agent API key: CLI flag > env > config file
+    resolved_api_key = argus_config.resolve_agent_api_key(agent_api_key)
+
+    # Parse extra fields from key=value pairs
+    extra_fields_live: dict[str, str] = {}
+    for ef in extra_field:
+        if "=" in ef:
+            k, v = ef.split("=", 1)
+            extra_fields_live[k] = v
+        else:
+            console.print(f"[yellow]Warning: ignoring malformed --extra-field '{ef}' (expected key=value)[/]")
+
     target = TargetConfig(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
-        agent_api_key=agent_api_key,
+        agent_api_key=resolved_api_key,
         max_requests_per_minute=max_rpm,
+        body_format=body_format,
+        prompt_field=prompt_field,
+        extra_fields=extra_fields_live,
     )
 
     from argus.ui import CinematicDashboard, LiveDashboard
@@ -321,6 +355,21 @@ def live(
     default=60,
     help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
 )
+@click.option(
+    "--body-format",
+    default="auto",
+    help="Request body format: auto, json, formdata, openai, prompt, input, custom",
+)
+@click.option(
+    "--prompt-field",
+    default="message",
+    help="Field name for the prompt payload (default: message). E.g. 'prompt' for Gandalf.",
+)
+@click.option(
+    "--extra-field",
+    multiple=True,
+    help="Extra fields as key=value pairs (e.g. --extra-field defender=baseline)",
+)
 def scan(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -330,6 +379,9 @@ def scan(
     agent_api_key: str | None,
     demo_pace: float,
     max_rpm: int,
+    body_format: str,
+    prompt_field: str,
+    extra_field: tuple[str, ...],
 ) -> None:
     """Run an ARGUS scan against a target AI system."""
     # Validate all URLs
@@ -343,13 +395,18 @@ def scan(
     if output:
         output_path = _validate_output_path(output)
 
+    # Resolve agent API key: CLI flag > env > config file
+    resolved_api_key = argus_config.resolve_agent_api_key(agent_api_key)
+
     console.print(BANNER, style="bold red")
     console.print(f"\n[bold]Target:[/] {target_name}")
     console.print(f"[bold]MCP URLs:[/] {', '.join(mcp_url) if mcp_url else 'None'}")
     console.print(f"[bold]Agent Endpoint:[/] {agent_endpoint or 'None'}")
     key_display = "None"
-    if agent_api_key:
-        key_display = "***" + agent_api_key[-4:] if len(agent_api_key) > 4 else "****"
+    if resolved_api_key:
+        key_display = argus_config.mask_key(resolved_api_key)
+        key_source = "cli" if agent_api_key else "env/config"
+        key_display += f" ({key_source})"
     console.print(f"[bold]API Key:[/] {key_display}")
     console.print(f"[bold]Timeout:[/] {timeout}s")
     if demo_pace > 0:
@@ -358,12 +415,24 @@ def scan(
         console.print(f"[bold]Max RPM:[/] {max_rpm} req/min")
     console.print()
 
+    # Parse extra fields from key=value pairs
+    extra_fields: dict[str, str] = {}
+    for ef in extra_field:
+        if "=" in ef:
+            k, v = ef.split("=", 1)
+            extra_fields[k] = v
+        else:
+            console.print(f"[yellow]Warning: ignoring malformed --extra-field '{ef}' (expected key=value)[/]")
+
     target = TargetConfig(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
-        agent_api_key=agent_api_key,
+        agent_api_key=resolved_api_key,
         max_requests_per_minute=max_rpm,
+        body_format=body_format,
+        prompt_field=prompt_field,
+        extra_fields=extra_fields,
     )
 
     orchestrator = _create_orchestrator()
@@ -421,6 +490,21 @@ def scan(
     default=60,
     help="Maximum requests per minute per agent (default 60, lower to avoid 429s)",
 )
+@click.option(
+    "--body-format",
+    default="auto",
+    help="Request body format: auto, json, formdata, openai, prompt, input, custom",
+)
+@click.option(
+    "--prompt-field",
+    default="message",
+    help="Field name for the prompt payload (default: message). E.g. 'prompt' for Gandalf.",
+)
+@click.option(
+    "--extra-field",
+    multiple=True,
+    help="Extra fields as key=value pairs (e.g. --extra-field defender=baseline)",
+)
 def alec_export(
     target_name: str,
     mcp_url: tuple[str, ...],
@@ -430,6 +514,9 @@ def alec_export(
     agent_api_key: str | None,
     demo_pace: float,
     max_rpm: int,
+    body_format: str,
+    prompt_field: str,
+    extra_field: tuple[str, ...],
 ) -> None:
     """Run a scan and export an ALEC evidence package.
 
@@ -458,12 +545,27 @@ def alec_export(
     console.print(f"[bold]Target:[/] {target_name}")
     console.print(f"[bold]Output:[/] {output_path}\n")
 
+    # Resolve agent API key: CLI flag > env > config file
+    resolved_api_key = argus_config.resolve_agent_api_key(agent_api_key)
+
+    # Parse extra fields from key=value pairs
+    extra_fields_alec: dict[str, str] = {}
+    for ef in extra_field:
+        if "=" in ef:
+            k, v = ef.split("=", 1)
+            extra_fields_alec[k] = v
+        else:
+            console.print(f"[yellow]Warning: ignoring malformed --extra-field '{ef}' (expected key=value)[/]")
+
     target = TargetConfig(
         name=target_name,
         mcp_server_urls=list(mcp_url),
         agent_endpoint=agent_endpoint,
-        agent_api_key=agent_api_key,
+        agent_api_key=resolved_api_key,
         max_requests_per_minute=max_rpm,
+        body_format=body_format,
+        prompt_field=prompt_field,
+        extra_fields=extra_fields_alec,
     )
 
     orchestrator = _create_orchestrator()
@@ -1016,6 +1118,104 @@ def test_target_status(port: int) -> None:
     except httpx.HTTPError:
         console.print(f"[red]Mock target is not running[/] on port {port}")
         console.print("[dim]Start it with: argus test-target start[/]")
+
+
+# ---------------------------------------------------------------------------
+# Config commands — persistent API keys and defaults
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def config() -> None:
+    """Manage persistent ARGUS configuration (~/.argus/argusrc).
+
+    Store API keys and default settings so you don't have to
+    export environment variables or pass CLI flags every time.
+
+    \b
+    Examples:
+        argus config set anthropic_api_key sk-ant-api03-...
+        argus config set openai_api_key sk-...
+        argus config set agent_api_key my-bearer-token
+        argus config set default_timeout 300
+        argus config list
+        argus config get anthropic_api_key
+        argus config delete agent_api_key
+        argus config path
+    """
+
+
+@config.command(name="set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key: str, value: str) -> None:
+    """Set a config value.
+
+    \b
+    Well-known keys:
+        anthropic_api_key   — Anthropic API key (for LLM evaluation)
+        openai_api_key      — OpenAI API key (for LLM evaluation)
+        google_api_key      — Google API key
+        agent_api_key       — Default Bearer token for target auth
+        default_timeout     — Default scan timeout in seconds
+        default_max_rpm     — Default max requests per minute
+    """
+    argus_config.set_value(key, value)
+    masked = argus_config.mask_key(value) if "key" in key.lower() else value
+    console.print(f"[green]Set[/] {key} = {masked}")
+    console.print(f"[dim]Saved to {argus_config._config_path()}[/]")
+
+
+@config.command(name="get")
+@click.argument("key")
+def config_get(key: str) -> None:
+    """Get a config value (checks env vars first, then config file)."""
+    value = argus_config.get(key)
+    if value is None:
+        console.print(f"[yellow]Not set:[/] {key}")
+    else:
+        masked = argus_config.mask_key(value) if "key" in key.lower() else value
+        console.print(f"{key} = {masked}")
+
+
+@config.command(name="delete")
+@click.argument("key")
+def config_delete(key: str) -> None:
+    """Delete a config value."""
+    if argus_config.delete(key):
+        console.print(f"[green]Deleted:[/] {key}")
+    else:
+        console.print(f"[yellow]Not found:[/] {key}")
+
+
+@config.command(name="list")
+def config_list() -> None:
+    """List all config values from the config file."""
+    values = argus_config.list_all()
+    if not values:
+        console.print("[dim]No config values set. Use 'argus config set <key> <value>' to add.[/]")
+        return
+
+    table = Table(title="ARGUS Configuration")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_column("Source", style="dim")
+
+    for key, val in sorted(values.items()):
+        masked = argus_config.mask_key(val) if "key" in key.lower() else val
+        table.add_row(key, masked, "~/.argus/argusrc")
+
+    console.print(table)
+    console.print(f"\n[dim]Config file: {argus_config._config_path()}[/]")
+
+
+@config.command(name="path")
+def config_path() -> None:
+    """Show the config file path."""
+    path = argus_config._config_path()
+    exists = path.exists()
+    console.print(f"[bold]Config file:[/] {path}")
+    console.print(f"[bold]Exists:[/] {'[green]yes[/]' if exists else '[yellow]no[/]'}")
 
 
 if __name__ == "__main__":

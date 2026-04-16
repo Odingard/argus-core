@@ -86,6 +86,14 @@ class TargetConfig(BaseModel):
     system_prompt: str | None = None
     available_tools: list[dict[str, Any]] = Field(default_factory=list)
 
+    # Body format negotiation — how the target expects payloads
+    # "auto" = let SURVEY detect; "json" = standard JSON; "formdata" = multipart/form-data
+    body_format: str = "auto"
+    # The field name that carries the user prompt (default "message")
+    prompt_field: str = "message"
+    # Extra static fields to include with every request (e.g. {"defender": "baseline"})
+    extra_fields: dict[str, str] = Field(default_factory=dict)
+
     # Constraints
     non_destructive: bool = True
     max_requests_per_minute: int = 60

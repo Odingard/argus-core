@@ -406,7 +406,14 @@ def _parse_sse_to_text(raw: str) -> str:
     return "".join(parts) if parts else raw[:5000]
 
 
-def build_body_for_format(payload: str, fmt: str, surface: str = "user_input") -> dict[str, Any]:
+def build_body_for_format(
+    payload: str,
+    fmt: str,
+    surface: str = "user_input",
+    *,
+    prompt_field: str = "message",
+    extra_fields: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Build a request body in the format the target expects (T6).
 
     Parameters
@@ -414,9 +421,16 @@ def build_body_for_format(payload: str, fmt: str, surface: str = "user_input") -
     payload : str
         The attack payload text.
     fmt : str
-        One of ``"message"``, ``"openai"``, ``"prompt"``, ``"input"``.
+        One of ``"message"``, ``"openai"``, ``"prompt"``, ``"input"``,
+        ``"formdata"``, or ``"custom"``.
     surface : str
         Surface label for context metadata.
+    prompt_field : str
+        The field name that carries the user prompt (default ``"message"``).
+        Used by ``"formdata"`` and ``"custom"`` formats.
+    extra_fields : dict[str, str] | None
+        Additional static fields to include (e.g. ``{"defender": "baseline"}``
+        for Gandalf).  Used by ``"formdata"`` and ``"custom"`` formats.
     """
     if fmt == "openai":
         return {"model": "probe", "messages": [{"role": "user", "content": payload}]}
@@ -424,8 +438,22 @@ def build_body_for_format(payload: str, fmt: str, surface: str = "user_input") -
         return {"prompt": payload}
     if fmt == "input":
         return {"input": payload}
-    # Default: generic message format
-    return {"message": payload, "context": {"source": surface}}
+    if fmt in ("formdata", "custom"):
+        # Build a flat dict — caller decides whether to send as JSON or FormData
+        body: dict[str, Any] = {prompt_field: payload}
+        if extra_fields:
+            body.update(extra_fields)
+        return body
+    # Default: generic message format using the configured prompt_field
+    if prompt_field != "message":
+        body = {prompt_field: payload}
+        if extra_fields:
+            body.update(extra_fields)
+        return body
+    body = {"message": payload, "context": {"source": surface}}
+    if extra_fields:
+        body.update(extra_fields)
+    return body
 
 
 def build_multipart_fields(payload: str, field_name: str = "file") -> dict[str, Any]:

@@ -1418,6 +1418,9 @@ class PromptInjectionHunter(LLMAttackAgent):
             streamed frames into a single text string.
         T6: Uses ``build_body_for_format`` to send the body shape the target
             expects (auto-detected during SURVEY or defaulting to ``message``).
+        FormData: When ``target.body_format == "formdata"``, sends the request
+            as ``multipart/form-data`` instead of JSON — required for targets
+            like Gandalf (``gandalf-api.lakera.ai``).
 
         Security: httpx event hooks disabled to prevent credential logging.
         """
@@ -1434,15 +1437,40 @@ class PromptInjectionHunter(LLMAttackAgent):
                 if self.config.target.agent_api_key:
                     headers["Authorization"] = f"Bearer {self.config.target.agent_api_key}"
 
-                # T6: Negotiate body format — use survey-detected format if available
-                fmt = getattr(self, "_endpoint_format", "message")
-                body = build_body_for_format(payload, fmt, surface)
+                target = self.config.target
 
-                response = await client.post(
-                    endpoint,
-                    json=body,
-                    headers=headers,
+                # Determine body format: explicit config > survey-detected > default
+                if target.body_format and target.body_format not in ("auto", ""):
+                    fmt = target.body_format
+                else:
+                    fmt = getattr(self, "_endpoint_format", "message")
+
+                prompt_field = target.prompt_field or "message"
+                extra_fields = target.extra_fields or {}
+
+                body = build_body_for_format(
+                    payload,
+                    fmt,
+                    surface,
+                    prompt_field=prompt_field,
+                    extra_fields=extra_fields,
                 )
+
+                # Send as multipart/form-data or JSON depending on format
+                if fmt == "formdata":
+                    # httpx: files= sends multipart/form-data, data= sends x-www-form-urlencoded
+                    multipart_fields = {k: (None, v) for k, v in body.items()}
+                    response = await client.post(
+                        endpoint,
+                        files=multipart_fields,
+                        headers=headers,
+                    )
+                else:
+                    response = await client.post(
+                        endpoint,
+                        json=body,
+                        headers=headers,
+                    )
                 response.raise_for_status()
 
                 content_type = response.headers.get("content-type", "")
@@ -1456,14 +1484,23 @@ class PromptInjectionHunter(LLMAttackAgent):
                         "raw": {"sse_reassembled": True, "text": resp_text[:2000]},
                     }
 
-                data = response.json()
-                # Truncate response to prevent memory bloat from large targets
-                resp_text = str(data.get("response", data.get("content", str(data))))[:50_000]
-                return {
-                    "response": resp_text,
-                    "status_code": response.status_code,
-                    "raw": data,
-                }
+                # Try JSON first, fall back to raw text
+                try:
+                    data = response.json()
+                    resp_text = str(data.get("answer", data.get("response", data.get("content", str(data)))))[:50_000]
+                    return {
+                        "response": resp_text,
+                        "status_code": response.status_code,
+                        "raw": data,
+                    }
+                except Exception:
+                    # Non-JSON response (e.g. plain text from some targets)
+                    resp_text = response.text[:50_000]
+                    return {
+                        "response": resp_text,
+                        "status_code": response.status_code,
+                        "raw": {"text": resp_text[:2000]},
+                    }
         except Exception as exc:
             logger.debug("Agent endpoint request failed: %s", exc)
             return None
