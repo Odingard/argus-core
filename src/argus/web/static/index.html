@@ -3,151 +3,97 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ARGUS — Autonomous AI Red Team</title>
+  <title>ARGUS — War Room</title>
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23a855f7'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23000'/%3E%3C/svg%3E" />
 </head>
 <body>
-  <script>
-    // Embed mode: ?embed=cards renders only the attacker grid for GIF capture.
-    // Adds .embed-cards on <body> which the stylesheet uses to hide everything
-    // else and the JS uses to skip rendering panels that aren't needed.
-    if (new URLSearchParams(window.location.search).get('embed') === 'cards') {
-      document.body.classList.add('embed-cards');
-    }
-  </script>
-  <div class="app">
-    <!-- ============== SIDEBAR ============== -->
-    <aside class="sidebar">
+  <div class="app" id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-logo">◉</div>
+        <div class="brand-logo">&#9673;</div>
         <div class="brand-text">
           <div class="brand-name">ARGUS</div>
-          <div class="brand-tag">AI Red Team</div>
+          <div class="brand-tag">War Room</div>
         </div>
       </div>
 
       <div class="advanced-pill">
         <span class="dot"></span>
-        Phase 1–5 — 12 agents
+        <span id="pill-label">13 agents online</span>
       </div>
 
-      <nav class="nav">
+      <nav class="nav" id="nav">
         <div class="nav-group">
-          <div class="nav-label">Activity</div>
-          <a class="nav-item active">
-            <span class="nav-icon">⚡</span> Live Scan
+          <div class="nav-label">Operations</div>
+          <a class="nav-item" data-page="dashboard">
+            <span class="nav-icon">&#x1F4CA;</span> Dashboard
           </a>
-          <a class="nav-item">
-            <span class="nav-icon">○</span> Pending
-            <span class="badge">0</span>
+          <a class="nav-item" data-page="live-scan">
+            <span class="nav-icon">&#x26A1;</span> Live Scan
           </a>
-          <a class="nav-item">
-            <span class="nav-icon">✓</span> Completed
-            <span class="badge">0</span>
+          <a class="nav-item" data-page="scan-history">
+            <span class="nav-icon">&#x1F4C1;</span> Scan History
+            <span class="badge" id="badge-scans">0</span>
+          </a>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-label">Intelligence</div>
+          <a class="nav-item" data-page="findings">
+            <span class="nav-icon">&#x1F534;</span> Findings
+            <span class="badge" id="badge-findings">0</span>
+          </a>
+          <a class="nav-item" data-page="attack-chains">
+            <span class="nav-icon">&#x1F525;</span> Attack Chains
+          </a>
+          <a class="nav-item" data-page="owasp">
+            <span class="nav-icon">&#x1F4CB;</span> OWASP Coverage
           </a>
         </div>
 
         <div class="nav-group">
           <div class="nav-label">Targets</div>
-          <a class="nav-item"><span class="nav-icon">🛰</span> MCP Servers</a>
-          <a class="nav-item"><span class="nav-icon">🤖</span> AI Agents</a>
-          <a class="nav-item"><span class="nav-icon">🔗</span> Multi-Agent Pipelines</a>
-          <a class="nav-item"><span class="nav-icon">🧠</span> Memory Stores</a>
-        </div>
-
-        <div class="nav-group">
-          <div class="nav-label">Findings</div>
-          <a class="nav-item"><span class="nav-icon">⚠</span> All Findings</a>
-          <a class="nav-item"><span class="nav-icon">🔥</span> Compound Chains</a>
-          <a class="nav-item"><span class="nav-icon">📋</span> OWASP Mapping</a>
+          <a class="nav-item" data-page="targets">
+            <span class="nav-icon">&#x1F3AF;</span> Target Registry
+          </a>
         </div>
 
         <div class="nav-group">
           <div class="nav-label">Platform</div>
-          <a class="nav-item"><span class="nav-icon">📚</span> Attack Corpus</a>
-          <a class="nav-item"><span class="nav-icon">🏆</span> ARGUS Gauntlet</a>
-          <a class="nav-item"><span class="nav-icon">⚙</span> Settings</a>
+          <a class="nav-item" data-page="agents">
+            <span class="nav-icon">&#x1F916;</span> Agent Status
+          </a>
+          <a class="nav-item" data-page="corpus">
+            <span class="nav-icon">&#x1F4DA;</span> Attack Corpus
+          </a>
+          <a class="nav-item" data-page="settings">
+            <span class="nav-icon">&#x2699;</span> Settings
+          </a>
         </div>
       </nav>
 
       <div class="sidebar-footer">
         <div class="sidebar-footer-title">Odingard Security</div>
-        <div class="sidebar-footer-sub">Six Sense · v0.1.0</div>
+        <div class="sidebar-footer-sub">Six Sense &middot; <span id="version-label">v0.1.6</span></div>
       </div>
     </aside>
 
-    <!-- ============== MAIN ============== -->
-    <main class="main">
-      <header class="topbar">
-        <div class="breadcrumb">
-          <span>All Targets</span>
-          <span class="sep">›</span>
-          <span>Pentests</span>
-          <span class="sep">›</span>
-          <span class="crumb-active" id="crumb-target">ARGUS Gauntlet</span>
-          <span class="sep">›</span>
-          <span>Live Scan</span>
-        </div>
-        <div class="topbar-actions">
-          <button class="btn-secondary" id="btn-stop">⏹ Stop</button>
-          <button class="btn-primary" id="btn-start">▶ Start Scan</button>
-        </div>
-      </header>
+    <!-- Main content area — pages rendered here by the router -->
+    <main class="main" id="main-content"></main>
+  </div>
 
-      <div class="content">
-        <div class="page-header">
-          <h1>Pentesting Live Release</h1>
-          <div class="tabs">
-            <a class="tab active">Overview</a>
-            <a class="tab">Findings <span class="tab-badge" id="tab-findings-count">0</span></a>
-            <a class="tab">Attackers <span class="tab-badge" id="tab-attackers-count">12</span></a>
-            <a class="tab">Signal Bus</a>
-          </div>
-        </div>
-
-        <!-- Status banner -->
-        <div class="status-card" id="status-card">
-          <div class="status-left">
-            <div class="status-icon" id="status-icon">⏸</div>
-            <div>
-              <div class="status-title" id="status-title">Idle</div>
-              <div class="status-sub" id="status-sub">No scan running. Click Start Scan to begin.</div>
-            </div>
-          </div>
-          <div class="status-right">
-            <div class="metric">
-              <div class="metric-label">Elapsed</div>
-              <div class="metric-value" id="metric-elapsed">0.0s</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Findings</div>
-              <div class="metric-value" id="metric-findings">0</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Validated</div>
-              <div class="metric-value highlight-green" id="metric-validated">0</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Signals</div>
-              <div class="metric-value highlight-purple" id="metric-signals">0</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Attacker grid -->
-        <h2 class="section-title">Attack Swarm <span class="section-sub" id="swarm-sub">12 agents deployed in parallel</span></h2>
-        <div class="attacker-grid" id="attacker-grid">
-          <!-- Cards inserted by JS -->
-        </div>
-
-        <!-- Live findings stream -->
-        <h2 class="section-title">Live Findings Stream</h2>
-        <div class="findings-stream" id="findings-stream">
-          <div class="empty-state">No findings yet. Start a scan to see live results.</div>
-        </div>
-      </div>
-    </main>
+  <!-- Login overlay -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-card">
+      <div class="login-logo">&#9673;</div>
+      <h2>ARGUS War Room</h2>
+      <p class="login-sub">Enter your API token to continue</p>
+      <input type="password" id="login-token" placeholder="API Token" autocomplete="off" />
+      <button class="btn-primary login-btn" id="login-btn">Authenticate</button>
+      <p class="login-error" id="login-error"></p>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>
