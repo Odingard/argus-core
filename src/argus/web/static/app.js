@@ -102,11 +102,14 @@ function agentName(type) {
 const pages = {};
 let currentPage = '';
 let currentParams = {};
+let navGeneration = 0;
 
 function registerPage(name, renderFn) { pages[name] = renderFn; }
 
 function navigateTo(page, params) {
   if (!pages[page]) return;
+  navGeneration++;
+  var gen = navGeneration;
   currentPage = page;
   currentParams = params || {};
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -115,11 +118,15 @@ function navigateTo(page, params) {
   const main = document.getElementById('main-content');
   main.innerHTML = '<div class="page-loading">Loading\u2026</div>';
   try {
-    pages[page](main, currentParams);
+    pages[page](main, currentParams, gen);
   } catch (e) {
-    main.innerHTML = '<div class="page-error">Error loading page: ' + esc(e.message) + '</div>';
+    if (gen === navGeneration) {
+      main.innerHTML = '<div class="page-error">Error loading page: ' + esc(e.message) + '</div>';
+    }
   }
 }
+
+function isStaleNav(gen) { return gen !== navGeneration; }
 
 // --- SSE ---
 let sseSource = null;
@@ -227,10 +234,11 @@ async function updateBadges() {
 // ============================================================
 // PAGE: Dashboard
 // ============================================================
-registerPage('dashboard', async function (el) {
+registerPage('dashboard', async function (el, _params, gen) {
   el.innerHTML = '<div class="page-loading">Loading dashboard\u2026</div>';
   try {
     var stats = await apiJson('/api/dashboard/stats');
+    if (isStaleNav(gen)) return;
     var sevBars = (stats.severity_distribution || []).map(function (s) {
       var pct = stats.total_findings ? Math.round(s.value / stats.total_findings * 100) : 0;
       return '<div class="sev-bar-row">' +
@@ -427,10 +435,11 @@ async function stopScan() {
 // ============================================================
 // PAGE: Scan History
 // ============================================================
-registerPage('scan-history', async function (el) {
+registerPage('scan-history', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Scan History</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/scans?limit=100');
+    if (isStaleNav(gen)) return;
     var scans = data.scans || [];
     var rows = scans.map(function (s) {
       var sid = s.id || s.scan_id || '';
@@ -461,11 +470,12 @@ registerPage('scan-history', async function (el) {
 // ============================================================
 // PAGE: Scan Detail
 // ============================================================
-registerPage('scan-detail', async function (el, params) {
+registerPage('scan-detail', async function (el, params, gen) {
   var scanId = params.scanId;
   el.innerHTML = '<div class="content"><div class="page-loading">Loading scan details\u2026</div></div>';
   try {
     var results = await Promise.all([
+    if (isStaleNav(gen)) return;
       apiJson('/api/scans/' + scanId),
       apiJson('/api/scans/' + scanId + '/findings'),
       apiJson('/api/scans/' + scanId + '/compound-paths').catch(function () { return { compound_paths: [] }; }),
@@ -525,10 +535,11 @@ registerPage('scan-detail', async function (el, params) {
 // ============================================================
 // PAGE: Findings
 // ============================================================
-registerPage('findings', async function (el) {
+registerPage('findings', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>All Findings</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/findings/all?limit=200');
+    if (isStaleNav(gen)) return;
     var findings = data.findings || [];
     var rows = findings.map(function (f) {
       return '<tr><td><span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || 'info') + '</span></td>' +
@@ -550,10 +561,11 @@ registerPage('findings', async function (el) {
 // ============================================================
 // PAGE: Attack Chains
 // ============================================================
-registerPage('attack-chains', async function (el) {
+registerPage('attack-chains', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Compound Attack Paths</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/compound-paths?limit=100');
+    if (isStaleNav(gen)) return;
     var paths = data.compound_paths || [];
     var cards = paths.map(function (p) {
       var steps = p.steps || p.chain_steps || [];
@@ -580,10 +592,11 @@ registerPage('attack-chains', async function (el) {
 // ============================================================
 // PAGE: OWASP Coverage
 // ============================================================
-registerPage('owasp', async function (el) {
+registerPage('owasp', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>OWASP Coverage</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/owasp-coverage');
+    if (isStaleNav(gen)) return;
     var categories = data.categories || [];
     var cards = categories.map(function (c) {
       var agentTags = (c.agents || []).map(function (a) { return '<span class="owasp-agent">' + esc(a) + '</span>'; }).join(' ');
@@ -605,10 +618,11 @@ registerPage('owasp', async function (el) {
 // ============================================================
 // PAGE: Targets
 // ============================================================
-registerPage('targets', async function (el) {
+registerPage('targets', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Target Registry</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/targets');
+    if (isStaleNav(gen)) return;
     var targets = data.targets || [];
     var rows = targets.map(function (t) {
       var ep = t.agent_endpoint || (t.mcp_server_urls && t.mcp_server_urls[0]) || '-';
@@ -631,10 +645,11 @@ registerPage('targets', async function (el) {
 // ============================================================
 // PAGE: Agent Status
 // ============================================================
-registerPage('agents', async function (el) {
+registerPage('agents', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Agent Status</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/agents/status');
+    if (isStaleNav(gen)) return;
     var agentList = data.agents || [];
     var cards = agentList.map(function (a) {
       var display = AGENTS[a.agent_type] || { name: a.agent_type, badge: '?', icon: '?', color: '#888' };
@@ -657,10 +672,11 @@ registerPage('agents', async function (el) {
 // ============================================================
 // PAGE: Attack Corpus
 // ============================================================
-registerPage('corpus', async function (el) {
+registerPage('corpus', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Attack Corpus</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var data = await apiJson('/api/corpus');
+    if (isStaleNav(gen)) return;
     var patterns = data.patterns || [];
     var rows = patterns.map(function (p) {
       return '<tr><td><span class="status-pill">' + esc(p.category || '') + '</span></td>' +
@@ -681,10 +697,11 @@ registerPage('corpus', async function (el) {
 // ============================================================
 // PAGE: Settings
 // ============================================================
-registerPage('settings', async function (el) {
+registerPage('settings', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Settings</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var results = await Promise.all([
+    if (isStaleNav(gen)) return;
       apiJson('/api/system/tier').catch(function () { return {}; }),
       apiJson('/api/system/db-status').catch(function () { return {}; }),
     ]);
