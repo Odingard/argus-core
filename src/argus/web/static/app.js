@@ -1,444 +1,782 @@
 // ============================================================
-// ARGUS Web Dashboard — frontend SSE client + UI updater
+// ARGUS War Room — Multi-page SPA with client-side router
 // ============================================================
 
-// Auth token injected by the server into a meta tag for loopback requests.
-// For non-loopback access, the operator must set it manually before page load.
-const ARGUS_TOKEN = (() => {
+// --- Auth ---
+const AUTH = {
+  token: localStorage.getItem('argus_token') || '',
+  setToken(t) { this.token = t; localStorage.setItem('argus_token', t); },
+  clear() { this.token = ''; localStorage.removeItem('argus_token'); },
+  headers() {
+    const h = { 'Content-Type': 'application/json' };
+    if (this.token) {
+      h['Authorization'] = `Bearer ${this.token}`;
+      h['X-Argus-Token'] = this.token;
+    }
+    return h;
+  },
+};
+
+// Check for server-injected token (loopback)
+(() => {
   const meta = document.querySelector('meta[name="argus-token"]');
-  return meta ? meta.getAttribute('content') : '';
+  if (meta && meta.getAttribute('content')) {
+    AUTH.setToken(meta.getAttribute('content'));
+  }
 })();
 
-function authHeaders() {
-  return ARGUS_TOKEN ? { 'Authorization': `Bearer ${ARGUS_TOKEN}` } : {};
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...AUTH.headers(), ...opts.headers } });
+  if (res.status === 401) { showLogin(); throw new Error('Unauthorized'); }
+  return res;
 }
 
-const AGENT_DISPLAY = {
-  prompt_injection_hunter: {
-    name: 'Prompt Injection Hunter',
-    badge: 'PI-01',
-    icon: '⚡',
-  },
-  tool_poisoning: {
-    name: 'Tool Poisoning Agent',
-    badge: 'TP-02',
-    icon: '☠',
-  },
-  supply_chain: {
-    name: 'Supply Chain Agent',
-    badge: 'SC-09',
-    icon: '🔗',
-  },
-  memory_poisoning: { name: 'Memory Poisoning Agent', badge: 'MP-03', icon: '🧠' },
-  identity_spoof: { name: 'Identity Spoof Agent', badge: 'IS-04', icon: '🎭' },
-  context_window: { name: 'Context Window Agent', badge: 'CW-05', icon: '🪟' },
-  cross_agent_exfiltration: { name: 'Cross-Agent Exfil Agent', badge: 'CX-06', icon: '↔' },
-  privilege_escalation: { name: 'Privilege Escalation Agent', badge: 'PE-07', icon: '⬆' },
-  race_condition: { name: 'Race Condition Agent', badge: 'RC-08', icon: '⏱' },
-  model_extraction: { name: 'Model Extraction Agent', badge: 'ME-10', icon: '📤' },
-  persona_hijacking: { name: 'Persona Hijacking Agent', badge: 'PH-11', icon: '🎭' },
-  memory_boundary_collapse: { name: 'Memory Boundary Collapse', badge: 'MB-12', icon: '🧬' },
+async function apiJson(path, opts) {
+  const res = await apiFetch(path, opts);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+
+// --- Escape helper ---
+function escapeHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/\//g, '&#x2F;');
+}
+var esc = escapeHtml;
+
+// --- Finding rendering helpers ---
+function renderFindingRow(finding) {
+  var sev = escapeHtml(finding.severity || 'info');
+  var tierClass = String(finding.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  var title = escapeHtml(finding.title || '');
+  var agent = escapeHtml(finding.agent_type || '');
+  return '<tr class="clickable-row"><td><span class="severity-badge severity-' + tierClass + '">' + sev + '</span></td>' +
+    '<td class="mono">' + agent + '</td><td>' + title + '</td>' +
+    '<td class="mono">' + escapeHtml(finding.technique || '') + '</td>' +
+    '<td><span class="' + (finding.status === 'validated' ? 'finding-validated' : 'finding-unvalidated') + '">' +
+    (finding.status === 'validated' ? '\u2713 validated' : '\u25CB pending') + '</span></td></tr>';
+}
+
+function renderVerdictTooltip(verdict) {
+  if (!verdict) return '';
+  var text = escapeHtml(verdict.interpretation || verdict.description || '');
+  return ' title="' + text + '"';
+}
+
+// --- Terminal line helper (atomic replacement) ---
+function appendTerminalLine(lines, newLine) {
+  var next = lines.concat([newLine]);
+  return next.slice(-5);
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return String(d).slice(0, 19);
+  return dt.toLocaleString();
+}
+
+// --- Agent display map (13 agents) ---
+const AGENTS = {
+  prompt_injection_hunter: { name: 'Prompt Injection Hunter', badge: 'PI-01', icon: '\u26A1', color: '#ef4444' },
+  tool_poisoning: { name: 'Tool Poisoning Agent', badge: 'TP-02', icon: '\u2620', color: '#f97316' },
+  memory_poisoning: { name: 'Memory Poisoning Agent', badge: 'MP-03', icon: '\uD83E\uDDE0', color: '#8b5cf6' },
+  identity_spoof: { name: 'Identity Spoof Agent', badge: 'IS-04', icon: '\uD83C\uDFAD', color: '#ec4899' },
+  context_window: { name: 'Context Window Agent', badge: 'CW-05', icon: '\uD83E\uDE9F', color: '#06b6d4' },
+  cross_agent_exfiltration: { name: 'Cross-Agent Exfil', badge: 'CX-06', icon: '\u2194', color: '#14b8a6' },
+  privilege_escalation: { name: 'Privilege Escalation', badge: 'PE-07', icon: '\u2B06', color: '#f59e0b' },
+  race_condition: { name: 'Race Condition Agent', badge: 'RC-08', icon: '\u23F1', color: '#6366f1' },
+  supply_chain: { name: 'Supply Chain Agent', badge: 'SC-09', icon: '\uD83D\uDD17', color: '#10b981' },
+  model_extraction: { name: 'Model Extraction Agent', badge: 'ME-10', icon: '\uD83D\uDCE4', color: '#3b82f6' },
+  persona_hijacking: { name: 'Persona Hijacking', badge: 'PH-11', icon: '\uD83C\uDFAD', color: '#a855f7' },
+  memory_boundary_collapse: { name: 'Memory Boundary Collapse', badge: 'MB-12', icon: '\uD83E\uDDEC', color: '#d946ef' },
+  mcp_scanner: { name: 'MCP Scanner', badge: 'MC-13', icon: '\uD83D\uDD0D', color: '#0ea5e9' },
 };
 
-const state = {
-  agents: {},
-  findings: [],
-  agentTerminalLines: {},
-  scanRunning: false,
-};
+function agentName(type) {
+  return (AGENTS[type] || {}).name || type;
+}
 
-// ============================================================
-// Setup
-// ============================================================
+// --- Router ---
+const pages = {};
+let currentPage = '';
+let currentParams = {};
+let navGeneration = 0;
 
-// Embed mode: ?embed=cards renders only the attacker grid (for GIF capture).
-// In this mode we MUST NOT open the SSE EventSource — it's a long-lived
-// connection that prevents headless Chrome's load event from firing.
-const EMBED_MODE = new URLSearchParams(window.location.search).get('embed') === 'cards';
+function registerPage(name, renderFn) { pages[name] = renderFn; }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  renderEmptyAttackerCards();
-
-  // Pull current state immediately so headless screenshots and reloads
-  // see live data before SSE begins streaming.
+function navigateTo(page, params) {
+  if (!pages[page]) return;
+  navGeneration++;
+  var gen = navGeneration;
+  currentPage = page;
+  currentParams = params || {};
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-page') === page);
+  });
+  const main = document.getElementById('main-content');
+  main.innerHTML = '<div class="page-loading">Loading\u2026</div>';
   try {
-    const res = await fetch('/api/status', { headers: authHeaders() });
-    if (res.ok) {
-      const snap = await res.json();
-      applySnapshot(snap);
-
-      // Also pull all findings to populate the stream from history
-      const fres = await fetch('/api/findings', { headers: authHeaders() });
-      if (fres.ok) {
-        const data = await fres.json();
-        const findings = data.findings || [];
-        // Render most recent 25 in the stream
-        document.getElementById('findings-stream').innerHTML = '';
-        findings.slice(-25).forEach(addFinding);
-      }
-    }
+    pages[page](main, currentParams, gen);
   } catch (e) {
-    console.warn('Initial fetch failed:', e);
+    if (gen === navGeneration) {
+      main.innerHTML = '<div class="page-error">Error loading page: ' + esc(e.message) + '</div>';
+    }
   }
+}
 
-  if (!EMBED_MODE) {
-    connectEventStream();
+function isStaleNav(gen) { return gen !== navGeneration; }
+
+// --- SSE ---
+let sseSource = null;
+const scanState = {
+  status: 'idle', agents: {}, findings: [], elapsed: 0,
+  totalFindings: 0, validatedFindings: 0, signalCount: 0,
+  agentsRunning: 0, agentsTotal: 0, activityLog: [],
+};
+
+function connectSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  const url = AUTH.token
+    ? '/api/events?token=' + encodeURIComponent(AUTH.token)
+    : '/api/events';
+  sseSource = new EventSource(url);
+
+  sseSource.addEventListener('snapshot', function (e) {
+    Object.assign(scanState, flattenSnap(JSON.parse(e.data)));
+    if (currentPage === 'live-scan') updateLiveScan();
+  });
+  sseSource.addEventListener('signal', function (e) {
+    Object.assign(scanState, flattenSnap(JSON.parse(e.data)));
+    if (currentPage === 'live-scan') updateLiveScan();
+  });
+  sseSource.addEventListener('finding', function (e) {
+    var f = JSON.parse(e.data);
+    scanState.findings.unshift(f);
+    if (scanState.findings.length > 100) scanState.findings.length = 100;
+    if (currentPage === 'live-scan') updateLiveScan();
+  });
+  sseSource.addEventListener('activity', function (e) {
+    var a = JSON.parse(e.data);
+    scanState.activityLog.push(a);
+    if (scanState.activityLog.length > 300) scanState.activityLog = scanState.activityLog.slice(-300);
+    if (currentPage === 'live-scan') appendActivity(a);
+  });
+  sseSource.addEventListener('scan_started', function (e) {
+    scanState.status = 'running';
+    Object.assign(scanState, flattenSnap(JSON.parse(e.data)));
+    if (currentPage === 'live-scan') updateLiveScan();
+  });
+  sseSource.addEventListener('complete', function (e) {
+    scanState.status = 'completed';
+    Object.assign(scanState, flattenSnap(JSON.parse(e.data)));
+    if (currentPage === 'live-scan') updateLiveScan();
+  });
+  sseSource.addEventListener('failed', function () { scanState.status = 'failed'; });
+  sseSource.addEventListener('cancelled', function () { scanState.status = 'cancelled'; });
+  sseSource.addEventListener('ping', function () {});
+  sseSource.onerror = function () {};
+}
+
+function flattenSnap(s) {
+  return {
+    status: s.status || 'idle',
+    agents: s.agents || {},
+    elapsed: s.elapsed_seconds || 0,
+    totalFindings: s.total_findings || 0,
+    validatedFindings: s.validated_findings || 0,
+    signalCount: s.signal_count || 0,
+    agentsRunning: s.agents_running || 0,
+    agentsTotal: s.agents_total || 0,
+    targetName: s.target_name || '',
+    scanId: s.scan_id || '',
+    activityLog: s.activity_log || scanState.activityLog,
+  };
+}
+
+// --- Login ---
+function showLogin() {
+  document.getElementById('login-overlay').style.display = 'flex';
+}
+
+function hideLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
+}
+
+async function attemptLogin(token) {
+  AUTH.setToken(token);
+  try {
+    var res = await fetch('/api/health');
+    if (!res.ok) throw new Error('Health check failed');
+    var r2 = await fetch('/api/status', { headers: AUTH.headers() });
+    if (r2.status === 401) throw new Error('Invalid token');
+    hideLogin();
+    connectSSE();
+    navigateTo('dashboard');
+    updateBadges();
+  } catch (e) {
+    document.getElementById('login-error').textContent = 'Authentication failed. Check your token.';
+    AUTH.clear();
   }
+}
 
-  const startBtn = document.getElementById('btn-start');
-  const stopBtn = document.getElementById('btn-stop');
-  if (startBtn) startBtn.addEventListener('click', startScan);
-  if (stopBtn) stopBtn.addEventListener('click', stopScan);
+async function updateBadges() {
+  try {
+    var d = await apiJson('/api/dashboard/stats');
+    var bf = document.getElementById('badge-findings');
+    if (bf) bf.textContent = d.total_findings || 0;
+    var bs = document.getElementById('badge-scans');
+    if (bs) bs.textContent = d.total_scans || 0;
+  } catch (e) { /* ignore */ }
+}
+
+// ============================================================
+// PAGE: Dashboard
+// ============================================================
+registerPage('dashboard', async function (el, _params, gen) {
+  el.innerHTML = '<div class="page-loading">Loading dashboard\u2026</div>';
+  try {
+    var stats = await apiJson('/api/dashboard/stats');
+    if (isStaleNav(gen)) return;
+    var sevBars = (stats.severity_distribution || []).map(function (s) {
+      var pct = stats.total_findings ? Math.round(s.value / stats.total_findings * 100) : 0;
+      return '<div class="sev-bar-row">' +
+        '<span class="sev-bar-label">' + esc(s.name) + '</span>' +
+        '<div class="sev-bar-track"><div class="sev-bar-fill" style="width:' + pct + '%;background:' + esc(s.color) + '"></div></div>' +
+        '<span class="sev-bar-count">' + s.value + '</span></div>';
+    }).join('');
+
+    var trendMax = Math.max.apply(null, (stats.trend || []).map(function (t) { return t.findings; }).concat([1]));
+    var trendBars = (stats.trend || []).map(function (t) {
+      var h = Math.max(4, (t.findings / trendMax) * 80);
+      return '<div class="trend-bar-col"><div class="trend-bar" style="height:' + h + 'px"></div>' +
+        '<div class="trend-label">' + esc(t.date).slice(5) + '</div></div>';
+    }).join('');
+    if (!trendBars) trendBars = '<div class="empty-state">No scan data yet</div>';
+
+    el.innerHTML =
+      '<div class="content">' +
+        '<div class="page-header"><h1>Dashboard</h1></div>' +
+        '<div class="kpi-row">' +
+          '<div class="kpi-card"><div class="kpi-value">' + stats.total_findings + '</div><div class="kpi-label">Total Findings</div></div>' +
+          '<div class="kpi-card kpi-critical"><div class="kpi-value">' + stats.critical + '</div><div class="kpi-label">Critical</div></div>' +
+          '<div class="kpi-card kpi-high"><div class="kpi-value">' + stats.high + '</div><div class="kpi-label">High</div></div>' +
+          '<div class="kpi-card"><div class="kpi-value">' + stats.total_scans + '</div><div class="kpi-label">Total Scans</div></div>' +
+          '<div class="kpi-card"><div class="kpi-value">' + stats.active_targets + '</div><div class="kpi-label">Targets</div></div>' +
+          '<div class="kpi-card"><div class="kpi-value">' + stats.compound_chains + '</div><div class="kpi-label">Attack Chains</div></div>' +
+        '</div>' +
+        '<div class="dashboard-grid">' +
+          '<div class="card"><h3 class="card-title">Severity Distribution</h3><div class="severity-bars">' + sevBars + '</div></div>' +
+          '<div class="card"><h3 class="card-title">Scan Trend</h3><div class="trend-chart">' + trendBars + '</div></div>' +
+        '</div>' +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load dashboard: ' + esc(e.message) + '</div></div>';
+  }
 });
 
 // ============================================================
-// SSE event stream
+// PAGE: Live Scan
 // ============================================================
+var liveScanInterval = null;
 
-function connectEventStream() {
-  // EventSource cannot send custom headers — pass token via query param
-  const url = ARGUS_TOKEN
-    ? `/api/events?token=${encodeURIComponent(ARGUS_TOKEN)}`
-    : '/api/events';
-  const source = new EventSource(url);
+registerPage('live-scan', function (el) {
+  el.innerHTML =
+    '<div class="content">' +
+      '<div class="page-header"><h1>Live Scan</h1>' +
+        '<div class="topbar-actions">' +
+          '<button class="btn-secondary" id="btn-stop">\u23F9 Stop</button>' +
+          '<button class="btn-primary" id="btn-start">\u25B6 Start Scan</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="scan-form" id="scan-form">' +
+        '<input type="text" id="scan-target" class="input" placeholder="Target URL (e.g. http://localhost:9001/chat)" />' +
+        '<input type="text" id="scan-mcp" class="input" placeholder="MCP URLs (comma-separated, optional)" />' +
+        '<input type="text" id="scan-api-key" class="input" placeholder="Target API Key (optional)" />' +
+      '</div>' +
+      '<div class="status-card" id="status-card">' +
+        '<div class="status-left">' +
+          '<div class="status-icon" id="status-icon">\u23F8</div>' +
+          '<div><div class="status-title" id="status-title">Idle</div>' +
+            '<div class="status-sub" id="status-sub">Enter a target URL and click Start Scan</div></div>' +
+        '</div>' +
+        '<div class="status-right">' +
+          '<div class="metric"><div class="metric-label">Elapsed</div><div class="metric-value" id="m-elapsed">0.0s</div></div>' +
+          '<div class="metric"><div class="metric-label">Findings</div><div class="metric-value" id="m-findings">0</div></div>' +
+          '<div class="metric"><div class="metric-label">Validated</div><div class="metric-value highlight-green" id="m-validated">0</div></div>' +
+          '<div class="metric"><div class="metric-label">Signals</div><div class="metric-value highlight-purple" id="m-signals">0</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="live-split">' +
+        '<div class="agent-panel" id="agent-panel"></div>' +
+        '<div class="activity-feed" id="activity-feed">' +
+          '<div class="feed-header">Agent Activity</div>' +
+          '<div class="feed-body" id="feed-body"></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 
-  source.addEventListener('snapshot', (e) => {
-    const snap = JSON.parse(e.data);
-    applySnapshot(snap);
-  });
+  renderAgentPanel();
+  renderActivityFromState();
 
-  source.addEventListener('signal', (e) => {
-    const snap = JSON.parse(e.data);
-    applySnapshot(snap);
-  });
+  document.getElementById('btn-start').addEventListener('click', startScan);
+  document.getElementById('btn-stop').addEventListener('click', stopScan);
 
-  source.addEventListener('finding', (e) => {
-    const finding = JSON.parse(e.data);
-    addFinding(finding);
-    appendTerminalLine(finding.agent_type, formatFindingLine(finding));
-  });
+  if (liveScanInterval) clearInterval(liveScanInterval);
+  liveScanInterval = setInterval(function () {
+    if (scanState.status === 'running') {
+      var mel = document.getElementById('m-elapsed');
+      if (mel) mel.textContent = scanState.elapsed.toFixed(1) + 's';
+    }
+  }, 500);
+});
 
-  source.addEventListener('scan_started', (e) => {
-    const snap = JSON.parse(e.data);
-    state.scanRunning = true;
-    applySnapshot(snap);
-  });
-
-  source.addEventListener('complete', (e) => {
-    const snap = JSON.parse(e.data);
-    state.scanRunning = false;
-    applySnapshot(snap);
-    setStatus('completed', 'Scan Complete', `${snap.total_findings} findings · ${snap.validated_findings} validated`);
-  });
-
-  source.addEventListener('failed', (e) => {
-    state.scanRunning = false;
-    setStatus('failed', 'Scan Failed', JSON.parse(e.data).error || 'Unknown error');
-  });
-
-  source.addEventListener('cancelled', () => {
-    state.scanRunning = false;
-    setStatus('cancelled', 'Scan Cancelled', 'Scan was stopped by operator');
-  });
-
-  source.addEventListener('ping', () => {
-    // heartbeat — no-op
-  });
-
-  source.onerror = () => {
-    console.warn('SSE connection error, will retry...');
-  };
+function renderAgentPanel() {
+  var panel = document.getElementById('agent-panel');
+  if (!panel) return;
+  var keys = Object.keys(AGENTS);
+  panel.innerHTML = keys.map(function (key) {
+    var a = AGENTS[key];
+    var st = scanState.agents[key] || {};
+    var status = st.status || 'idle';
+    var findings = st.findings_count || 0;
+    var techniques = st.techniques_attempted || 0;
+    return '<div class="agent-row agent-' + esc(status) + '">' +
+      '<span class="agent-dot" style="background:' + a.color + '"></span>' +
+      '<span class="agent-name-sm">' + esc(a.badge) + '</span>' +
+      '<span class="agent-name-full">' + esc(a.name) + '</span>' +
+      '<span class="agent-stat">' + findings + 'f</span>' +
+      '<span class="agent-stat">' + techniques + 't</span>' +
+      '<span class="agent-status-label">' + esc(status) + '</span>' +
+    '</div>';
+  }).join('');
 }
 
-// ============================================================
-// State application
-// ============================================================
-
-function applySnapshot(snap) {
-  // Update top metrics
-  document.getElementById('metric-elapsed').textContent = `${snap.elapsed_seconds.toFixed(1)}s`;
-  document.getElementById('metric-findings').textContent = snap.total_findings;
-  document.getElementById('metric-validated').textContent = snap.validated_findings;
-  document.getElementById('metric-signals').textContent = snap.signal_count || 0;
-
-  document.getElementById('tab-findings-count').textContent = snap.total_findings;
-  document.getElementById('tab-attackers-count').textContent = snap.agents_total || 3;
-
-  if (snap.target_name) {
-    document.getElementById('crumb-target').textContent = snap.target_name;
-  }
-
-  // Update status card
-  if (snap.status === 'running') {
-    setStatus('running', 'Running', `${snap.agents_running} of ${snap.agents_total} agents active · ${snap.target_endpoints?.length || 0} endpoints`);
-  } else if (snap.status === 'completed') {
-    setStatus('completed', 'Scan Complete', `${snap.total_findings} findings · ${snap.validated_findings} validated`);
-  } else if (snap.status === 'failed') {
-    setStatus('failed', 'Scan Failed', 'See logs for details');
-  } else if (snap.status === 'idle') {
-    setStatus('idle', 'Idle', 'Click Start Scan to begin');
-  }
-
-  // Update agent cards
-  if (snap.agents) {
-    Object.keys(snap.agents).forEach((agentType) => {
-      const agent = snap.agents[agentType];
-      state.agents[agentType] = agent;
-      updateAttackerCard(agentType, agent);
-    });
-  }
+function renderActivityFromState() {
+  var body = document.getElementById('feed-body');
+  if (!body) return;
+  body.innerHTML = '';
+  (scanState.activityLog || []).slice(-100).forEach(function (a) { appendActivity(a); });
 }
 
-function setStatus(status, title, sub) {
-  const card = document.getElementById('status-card');
-  card.classList.remove('running', 'completed', 'failed');
-  if (status === 'running') card.classList.add('running');
-  if (status === 'completed') card.classList.add('completed');
-
-  const iconMap = { running: '◉', completed: '✓', failed: '✗', idle: '⏸', cancelled: '⊘' };
-  document.getElementById('status-icon').textContent = iconMap[status] || '●';
-  document.getElementById('status-title').textContent = title;
-  document.getElementById('status-sub').textContent = sub;
-}
-
-// ============================================================
-// Attacker cards
-// ============================================================
-
-function renderEmptyAttackerCards() {
-  const grid = document.getElementById('attacker-grid');
-  const defaultAgents = [
-    'prompt_injection_hunter',
-    'tool_poisoning',
-    'supply_chain',
-    'memory_poisoning',
-    'identity_spoof',
-    'context_window',
-    'cross_agent_exfiltration',
-    'privilege_escalation',
-    'race_condition',
-    'model_extraction',
-    'persona_hijacking',
-    'memory_boundary_collapse',
-  ];
-
-  grid.innerHTML = '';
-  defaultAgents.forEach((agentType) => {
-    const display = AGENT_DISPLAY[agentType] || { name: agentType, badge: '???', icon: '?' };
-    const card = document.createElement('div');
-    card.className = 'attacker-card';
-    card.id = `card-${agentType}`;
-    card.innerHTML = `
-      <div class="attacker-header">
-        <div class="attacker-name">
-          <span>${display.icon}</span>
-          <span>${display.name}</span>
-          <span class="attacker-badge">${display.badge}</span>
-        </div>
-        <div class="attacker-status status-pending" id="status-${agentType}">
-          <span class="status-dot"></span>
-          <span>Pending</span>
-        </div>
-      </div>
-      <div class="attacker-terminal" id="terminal-${agentType}">
-        <div class="terminal-line cmd">$ argus-agent ${agentType} --target awaiting</div>
-        <div class="terminal-line out">[ ready ] waiting for swarm deployment</div>
-        <div class="terminal-line out">[ ready ] corpus loaded · 47 patterns</div>
-        <div class="terminal-line out">                      <span class="terminal-cursor"></span></div>
-      </div>
-      <div class="attacker-stats">
-        <div class="stat-item">findings <span class="stat-item-value yellow" id="findings-${agentType}">0</span></div>
-        <div class="stat-item">validated <span class="stat-item-value green" id="validated-${agentType}">0</span></div>
-        <div class="stat-item">techniques <span class="stat-item-value" id="techniques-${agentType}">0</span></div>
-      </div>
-    `;
-    grid.appendChild(card);
-    state.agentTerminalLines[agentType] = [];
-  });
-}
-
-function updateAttackerCard(agentType, agent) {
-  const statusEl = document.getElementById(`status-${agentType}`);
-  if (!statusEl) return;
-
-  // Update status
-  statusEl.className = `attacker-status status-${agent.status}`;
-  const statusText = {
-    pending: 'Pending',
-    running: 'Running',
-    completed: 'Completed',
-    failed: 'Failed',
-  }[agent.status] || agent.status;
-  statusEl.innerHTML = `<span class="status-dot"></span><span>${statusText}</span>`;
-
-  // Update stats
-  document.getElementById(`findings-${agentType}`).textContent = agent.findings_count || 0;
-  document.getElementById(`validated-${agentType}`).textContent = agent.validated_count || 0;
-  document.getElementById(`techniques-${agentType}`).textContent = agent.techniques_attempted || 0;
-
-  // Update terminal preview if action changed
-  if (agent.current_action && agent.status === 'running') {
-    appendTerminalLine(agentType, agent.current_action.toLowerCase().includes('found')
-      ? `[ HIT  ] ${agent.current_action.replace(/^Found:\s*/i, '')}`
-      : `[ ${agent.status} ] ${agent.current_action}`);
+function appendActivity(a) {
+  var body = document.getElementById('feed-body');
+  if (!body) return;
+  var cat = a.category || 'status';
+  var catMap = { finding: 'act-finding', probe: 'act-probe', status: 'act-status', technique: 'act-technique', recon: 'act-recon' };
+  var catClass = catMap[cat] || 'act-status';
+  var line = document.createElement('div');
+  line.className = 'feed-line ' + catClass;
+  line.innerHTML = '<span class="feed-agent">' + esc((AGENTS[a.agent] || {}).badge || a.agent) + '</span> <span class="feed-cat">' + esc(cat) + '</span> ' + esc(a.action || '');
+  body.appendChild(line);
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) {
+    body.scrollTop = body.scrollHeight;
   }
 }
 
-function appendTerminalLine(agentType, text) {
-  const terminal = document.getElementById(`terminal-${agentType}`);
-  if (!terminal) return;
-
-  if (!state.agentTerminalLines[agentType]) {
-    state.agentTerminalLines[agentType] = [];
+function updateLiveScan() {
+  renderAgentPanel();
+  var iconMap = { running: '\u25C9', completed: '\u2713', failed: '\u2717', idle: '\u23F8', cancelled: '\u2298' };
+  var el_icon = document.getElementById('status-icon');
+  var el_title = document.getElementById('status-title');
+  var el_sub = document.getElementById('status-sub');
+  if (el_icon) el_icon.textContent = iconMap[scanState.status] || '\u25CF';
+  if (el_title) el_title.textContent = scanState.status === 'running' ? 'Running' : scanState.status === 'completed' ? 'Scan Complete' : scanState.status.charAt(0).toUpperCase() + scanState.status.slice(1);
+  if (el_sub) {
+    if (scanState.status === 'running') el_sub.textContent = scanState.agentsRunning + ' of ' + scanState.agentsTotal + ' agents active';
+    else if (scanState.status === 'completed') el_sub.textContent = scanState.totalFindings + ' findings \u00B7 ' + scanState.validatedFindings + ' validated';
+    else el_sub.textContent = 'Enter a target URL and click Start Scan';
   }
-
-  let lineClass = 'out';
-  if (text.includes('[ HIT')) lineClass = 'success';
-  else if (text.includes('CRITICAL') || text.includes('[ CRIT')) lineClass = 'crit';
-  else if (text.includes('WARN') || text.includes('[ HIGH')) lineClass = 'warn';
-
-  // Atomic replacement: build the new array, then assign in one shot.
-  // Prevents read/write races between concurrent SSE callbacks.
-  const next = [...state.agentTerminalLines[agentType], { text, cls: lineClass }];
-  state.agentTerminalLines[agentType] = next.slice(-5);
-
-  const linesHtml = state.agentTerminalLines[agentType]
-    .map((l) => `<div class="terminal-line ${escapeHtml(l.cls)}">${escapeHtml(l.text.slice(0, 60))}</div>`)
-    .join('');
-
-  // agentType is from the signal bus (server-controlled) but escape it anyway —
-  // defense in depth against future code paths that pass arbitrary values.
-  const safeAgent = escapeHtml(agentType);
-  terminal.innerHTML = `
-    <div class="terminal-line cmd">$ argus-agent ${safeAgent} --target gauntlet</div>
-    ${linesHtml}
-    <div class="terminal-line out">                      <span class="terminal-cursor"></span></div>
-  `;
+  var card = document.getElementById('status-card');
+  if (card) card.className = 'status-card ' + (scanState.status === 'running' ? 'running' : scanState.status === 'completed' ? 'completed' : '');
+  var mel = document.getElementById('m-elapsed');
+  if (mel) mel.textContent = scanState.elapsed.toFixed(1) + 's';
+  var mf = document.getElementById('m-findings');
+  if (mf) mf.textContent = scanState.totalFindings;
+  var mv = document.getElementById('m-validated');
+  if (mv) mv.textContent = scanState.validatedFindings;
+  var ms = document.getElementById('m-signals');
+  if (ms) ms.textContent = scanState.signalCount;
 }
-
-// ============================================================
-// Findings stream
-// ============================================================
-
-function addFinding(finding) {
-  state.findings.unshift(finding);
-
-  const stream = document.getElementById('findings-stream');
-  // Remove empty state
-  const empty = stream.querySelector('.empty-state');
-  if (empty) empty.remove();
-
-  const row = document.createElement('div');
-  row.className = 'finding-row';
-  const sev = (finding.severity || 'info').toLowerCase();
-  const sevClass = escapeHtml(sev);
-  const validated = finding.status === 'validated';
-  const verdict = finding.verdict_score || {};
-  const cw = verdict.consequence_weight;
-  // Sanitize tier to alphanumeric only — used as a CSS class suffix
-  const tierRaw = String(verdict.action_tier || '');
-  const tierClass = tierRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const tierLabel = escapeHtml(tierRaw);
-  const interp = escapeHtml(verdict.interpretation || '');
-  const cwBadge = (cw !== undefined && cw !== null && typeof cw === 'number')
-    ? `<div class="cw-badge cw-${tierClass}" title="VERDICT WEIGHT ${tierLabel}: ${interp}">CW ${cw.toFixed(2)}</div>`
-    : '';
-
-  row.innerHTML = `
-    <div class="severity-badge severity-${sevClass}">${sevClass}</div>
-    <div class="finding-agent">${escapeHtml(finding.agent_type || 'unknown')}</div>
-    <div class="finding-title">${escapeHtml(finding.title || '')}</div>
-    ${cwBadge}
-    <div class="finding-status ${validated ? 'finding-validated' : 'finding-unvalidated'}">
-      ${validated ? '✓ validated' : '○ pending'}
-    </div>
-  `;
-
-  stream.insertBefore(row, stream.firstChild);
-
-  // Cap stream length
-  while (stream.children.length > 25) {
-    stream.removeChild(stream.lastChild);
-  }
-}
-
-function formatFindingLine(finding) {
-  const sev = (finding.severity || 'info').toUpperCase();
-  return `[ ${sev.padEnd(4)} ] ${(finding.title || '').slice(0, 50)}`;
-}
-
-// ============================================================
-// API actions
-// ============================================================
 
 async function startScan() {
-  if (state.scanRunning) return;
+  var targetInput = document.getElementById('scan-target');
+  var mcpInput = document.getElementById('scan-mcp');
+  var apiKeyInput = document.getElementById('scan-api-key');
+  if (!targetInput || !targetInput.value.trim()) { alert('Enter a target URL'); return; }
+  var target = targetInput.value.trim();
+  var mcpUrls = mcpInput && mcpInput.value.trim() ? mcpInput.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+  var apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
 
-  const body = {
-    target_name: 'ARGUS Gauntlet',
-    mcp_urls: [
-      'http://localhost:8001',  // Scenario 01 — Tool Poisoning MCP
-      'http://localhost:8003',  // Scenario 02 — Memory Poisoning
-      'http://localhost:8005',  // Scenario 03 — Identity Spoof
-      'http://localhost:8007',  // Scenario 04 — Privilege Chain
-      'http://localhost:8009',  // Scenario 05 — Injection Gauntlet
-      'http://localhost:8011',  // Scenario 06 — Supply Chain
-      'http://localhost:8013',  // Scenario 07 — Race Condition
-    ],
-    agent_endpoint: 'http://localhost:8002/chat',
-    timeout: 300,
-    demo_pace_seconds: 0.4,
-  };
+  scanState.findings = [];
+  scanState.activityLog = [];
+  scanState.agents = {};
+  scanState.status = 'running';
 
-  // Reset findings stream
-  document.getElementById('findings-stream').innerHTML = '<div class="empty-state">Deploying agents...</div>';
-  state.findings = [];
-
-  // Reset agent cards
-  renderEmptyAttackerCards();
+  var reqBody = { target_name: target, mcp_urls: mcpUrls, agent_endpoint: target, timeout: 600, demo_pace_seconds: 0.5 };
+  if (apiKey) reqBody.agent_api_key = apiKey;
 
   try {
-    const res = await fetch('/api/scan/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(body),
-    });
+    var res = await apiFetch('/api/scan/start', { method: 'POST', body: JSON.stringify(reqBody) });
     if (!res.ok) {
-      const err = await res.json();
-      // FastAPI returns err.detail as an array of {loc, msg, type} objects
-      // for pydantic validation errors. Flatten to readable text instead of
-      // letting the array stringify to "[object Object],[object Object]".
-      let detailText = res.statusText;
-      if (Array.isArray(err.detail)) {
-        detailText = err.detail.map((e) => e.msg || JSON.stringify(e)).join('\n');
-      } else if (typeof err.detail === 'string') {
-        detailText = err.detail;
-      } else if (err.detail) {
-        detailText = JSON.stringify(err.detail);
-      }
-      alert(`Failed to start scan:\n${detailText}`);
+      var err = await res.json().catch(function () { return {}; });
+      alert('Failed to start scan: ' + (err.detail || res.statusText));
     }
   } catch (e) {
-    alert(`Failed to start scan: ${e.message}`);
+    alert('Failed to start scan: ' + e.message);
   }
 }
 
 async function stopScan() {
-  await fetch('/api/scan/stop', { method: 'POST', headers: authHeaders() });
+  await apiFetch('/api/scan/stop', { method: 'POST' }).catch(function () {});
 }
 
 // ============================================================
-// Helpers
+// PAGE: Scan History
 // ============================================================
+registerPage('scan-history', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Scan History</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/scans?limit=100');
+    if (isStaleNav(gen)) return;
+    var scans = data.scans || [];
+    var rows = scans.map(function (s) {
+      var sid = s.id || s.scan_id || '';
+      return '<tr class="clickable-row" data-scan-id="' + esc(sid) + '">' +
+        '<td class="mono">' + esc(sid.slice(0, 8)) + '</td>' +
+        '<td>' + esc(s.target_name || '-') + '</td>' +
+        '<td><span class="status-pill status-' + esc(s.status || 'unknown') + '">' + esc(s.status || '-') + '</span></td>' +
+        '<td>' + (s.total_findings || 0) + '</td>' +
+        '<td>' + (s.duration ? s.duration.toFixed(1) + 's' : '-') + '</td>' +
+        '<td>' + fmtDate(s.created_at) + '</td></tr>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Scan History</h1><p class="page-sub">' + (data.total || 0) + ' scans recorded</p></div>' +
+      (scans.length === 0 ? '<div class="empty-state">No scans yet. Run your first scan from Live Scan.</div>' :
+        '<div class="data-table"><table><thead><tr><th>Scan ID</th><th>Target</th><th>Status</th><th>Findings</th><th>Duration</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+      '</div>';
+    el.querySelectorAll('.clickable-row').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var id = row.getAttribute('data-scan-id');
+        if (id) navigateTo('scan-detail', { scanId: id });
+      });
+    });
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load scans: ' + esc(e.message) + '</div></div>';
+  }
+});
 
-function escapeHtml(str) {
-  // Escapes &, <, >, ", ', / — safe for both element content and attribute values.
-  // Escaping the slash defends against scripts that try to break out via </script>.
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/\//g, '&#x2F;');
-}
+// ============================================================
+// PAGE: Scan Detail
+// ============================================================
+registerPage('scan-detail', async function (el, params, gen) {
+  var scanId = params.scanId;
+  el.innerHTML = '<div class="content"><div class="page-loading">Loading scan details\u2026</div></div>';
+  try {
+    var results = await Promise.all([
+      apiJson('/api/scans/' + scanId),
+      apiJson('/api/scans/' + scanId + '/findings'),
+      apiJson('/api/scans/' + scanId + '/compound-paths').catch(function () { return { compound_paths: [] }; }),
+    ]);
+    if (isStaleNav(gen)) return;
+    var scan = results[0].scan || {};
+    var agents = results[0].agents || [];
+    var findings = results[1].findings || [];
+    var paths = results[2].compound_paths || [];
+
+    var findingRows = findings.map(function (f) {
+      return renderFindingRow(f);
+    }).join('');
+
+    var pathCards = paths.map(function (p) {
+      var steps = p.steps || p.chain_steps || [];
+      var stepHtml = steps.map(function (s, i) {
+        var txt = typeof s === 'string' ? s : (s.description || s.title || JSON.stringify(s));
+        return '<div class="chain-step">' + (i + 1) + '. ' + esc(txt) + '</div>';
+      }).join('');
+      return '<div class="chain-card"><div class="chain-title">' + esc(p.title || p.name || 'Attack Chain') + '</div>' +
+        '<div class="chain-meta">Exploitability: ' + (p.exploitability_score || '-') + '/10 \u00B7 Steps: ' + steps.length + '</div>' +
+        (stepHtml ? '<div class="chain-steps">' + stepHtml + '</div>' : '') + '</div>';
+    }).join('');
+
+    var agentRows = agents.map(function (a) {
+      return '<tr><td>' + esc(agentName(a.agent_type)) + '</td>' +
+        '<td><span class="status-pill status-' + esc(a.status || '') + '">' + esc(a.status || '') + '</span></td>' +
+        '<td>' + (a.findings_count || 0) + '</td>' +
+        '<td>' + (a.techniques_attempted || 0) + '</td>' +
+        '<td>' + (a.duration ? a.duration.toFixed(1) + 's' : '-') + '</td></tr>';
+    }).join('');
+
+    var sid = scan.id || scan.scan_id || scanId;
+    el.innerHTML =
+      '<div class="content">' +
+        '<div class="page-header"><div class="breadcrumb-nav"><a class="back-link" id="back-to-history">\u2190 Scan History</a></div>' +
+          '<h1>Scan ' + esc(sid.slice(0, 8)) + '</h1>' +
+          '<p class="page-sub">' + esc(scan.target_name || '') + ' \u00B7 ' + esc(scan.status || '') + ' \u00B7 ' + fmtDate(scan.created_at) + '</p></div>' +
+        '<div class="kpi-row">' +
+          '<div class="kpi-card"><div class="kpi-value">' + (scan.total_findings || 0) + '</div><div class="kpi-label">Findings</div></div>' +
+          '<div class="kpi-card kpi-critical"><div class="kpi-value">' + findings.filter(function (f) { return f.severity === 'critical'; }).length + '</div><div class="kpi-label">Critical</div></div>' +
+          '<div class="kpi-card kpi-high"><div class="kpi-value">' + findings.filter(function (f) { return f.severity === 'high'; }).length + '</div><div class="kpi-label">High</div></div>' +
+          '<div class="kpi-card"><div class="kpi-value">' + paths.length + '</div><div class="kpi-label">Attack Chains</div></div>' +
+        '</div>' +
+        '<h3 class="section-title">Findings (' + findings.length + ')</h3>' +
+        (findings.length === 0 ? '<div class="empty-state">No findings for this scan.</div>' :
+          '<div class="data-table"><table><thead><tr><th>Severity</th><th>Agent</th><th>Title</th><th>Technique</th><th>Status</th></tr></thead><tbody>' + findingRows + '</tbody></table></div>') +
+        (paths.length > 0 ? '<h3 class="section-title">Compound Attack Paths (' + paths.length + ')</h3><div class="chain-list">' + pathCards + '</div>' : '') +
+        (agents.length > 0 ? '<h3 class="section-title">Agent Results (' + agents.length + ')</h3><div class="data-table"><table><thead><tr><th>Agent</th><th>Status</th><th>Findings</th><th>Techniques</th><th>Duration</th></tr></thead><tbody>' + agentRows + '</tbody></table></div>' : '') +
+      '</div>';
+    document.getElementById('back-to-history').addEventListener('click', function () { navigateTo('scan-history'); });
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load scan: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Findings
+// ============================================================
+registerPage('findings', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>All Findings</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/findings?limit=200');
+    if (isStaleNav(gen)) return;
+    var findings = data.findings || [];
+    var rows = findings.map(function (f) {
+      return '<tr><td><span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || 'info') + '</span></td>' +
+        '<td class="mono">' + esc(agentName(f.agent_type)) + '</td>' +
+        '<td>' + esc(f.title || '') + '</td>' +
+        '<td class="mono">' + esc((f.scan_id || '').slice(0, 8)) + '</td>' +
+        '<td><span class="' + (f.status === 'validated' ? 'finding-validated' : 'finding-unvalidated') + '">' + (f.status === 'validated' ? '\u2713 validated' : '\u25CB pending') + '</span></td></tr>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>All Findings</h1><p class="page-sub">' + (data.total || findings.length) + ' total</p></div>' +
+      (findings.length === 0 ? '<div class="empty-state">No findings recorded yet.</div>' :
+        '<div class="data-table"><table><thead><tr><th>Severity</th><th>Agent</th><th>Title</th><th>Scan</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load findings: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Attack Chains
+// ============================================================
+registerPage('attack-chains', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Compound Attack Paths</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/compound-paths?limit=100');
+    if (isStaleNav(gen)) return;
+    var paths = data.compound_paths || [];
+    var cards = paths.map(function (p) {
+      var steps = p.steps || p.chain_steps || [];
+      var stepHtml = steps.map(function (s, i) {
+        var txt = typeof s === 'string' ? s : (s.description || s.title || JSON.stringify(s));
+        return '<div class="chain-step">' + (i + 1) + '. ' + esc(txt) + '</div>';
+      }).join('');
+      return '<div class="chain-card"><div class="chain-header">' +
+        '<div class="chain-title">' + esc(p.title || p.name || 'Attack Chain') + '</div>' +
+        '<span class="severity-badge severity-' + esc(p.severity || 'critical') + '">' + esc(p.severity || 'critical') + '</span></div>' +
+        '<div class="chain-meta">Exploitability: <strong>' + (p.exploitability_score || '-') + '/10</strong> \u00B7 Steps: ' + steps.length + ' \u00B7 Scan: ' + esc((p.scan_id || '').slice(0, 8)) + '</div>' +
+        (stepHtml ? '<div class="chain-steps">' + stepHtml + '</div>' : '') + '</div>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Compound Attack Paths</h1><p class="page-sub">' + (data.total || paths.length) + ' chains detected</p></div>' +
+      (paths.length === 0 ? '<div class="empty-state">No compound attack paths found yet.</div>' :
+        '<div class="chain-list">' + cards + '</div>') +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load attack chains: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: OWASP Coverage
+// ============================================================
+registerPage('owasp', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>OWASP Coverage</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/owasp/coverage');
+    if (isStaleNav(gen)) return;
+    var categories = data.categories || [];
+    var cards = categories.map(function (c) {
+      var agentTags = (c.agents || []).map(function (a) { return '<span class="owasp-agent">' + esc(a) + '</span>'; }).join(' ');
+      return '<div class="owasp-card"><div class="owasp-id">' + esc(c.id || '') + '</div>' +
+        '<div class="owasp-name">' + esc(c.name || '') + '</div>' +
+        '<div class="owasp-agents">' + agentTags + '</div>' +
+        '<div class="owasp-count">' + (c.finding_count || 0) + ' findings</div></div>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>OWASP Agentic AI Coverage</h1><p class="page-sub">' + categories.length + ' categories mapped</p></div>' +
+      (categories.length === 0 ? '<div class="empty-state">No OWASP data available.</div>' :
+        '<div class="owasp-grid">' + cards + '</div>') +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load OWASP data: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Targets
+// ============================================================
+registerPage('targets', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Target Registry</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/targets');
+    if (isStaleNav(gen)) return;
+    var targets = data.targets || [];
+    var rows = targets.map(function (t) {
+      var ep = t.agent_endpoint || (t.mcp_server_urls && t.mcp_server_urls[0]) || '-';
+      return '<tr><td><strong>' + esc(t.name || '') + '</strong></td>' +
+        '<td><span class="status-pill">' + esc(t.target_type || 'generic') + '</span></td>' +
+        '<td>' + esc(t.environment || '-') + '</td>' +
+        '<td class="mono">' + esc(ep.slice(0, 50)) + '</td>' +
+        '<td>' + fmtDate(t.created_at) + '</td></tr>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Target Registry</h1><p class="page-sub">' + (data.total || targets.length) + ' targets registered</p></div>' +
+      (targets.length === 0 ? '<div class="empty-state">No targets registered. Add targets via CLI or API.</div>' :
+        '<div class="data-table"><table><thead><tr><th>Name</th><th>Type</th><th>Environment</th><th>Endpoint</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load targets: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Agent Status
+// ============================================================
+registerPage('agents', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Agent Status</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/agents/status');
+    if (isStaleNav(gen)) return;
+    var agentList = data.agents || [];
+    var cards = agentList.map(function (a) {
+      var display = AGENTS[a.type] || { name: a.type, badge: '?', icon: '?', color: '#888' };
+      return '<div class="attacker-card">' +
+        '<div class="attacker-header"><div class="attacker-name"><span>' + display.icon + '</span> <span>' + esc(display.name) + '</span> <span class="attacker-badge">' + esc(display.badge) + '</span></div></div>' +
+        '<div class="attacker-stats">' +
+          '<div class="stat-item">scans <span class="stat-item-value">' + (a.scans || 0) + '</span></div>' +
+          '<div class="stat-item">findings <span class="stat-item-value yellow">' + (a.findings || 0) + '</span></div>' +
+          '<div class="stat-item">techniques <span class="stat-item-value">' + (a.techniques || 0) + '</span></div>' +
+        '</div></div>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Agent Status</h1><p class="page-sub">' + agentList.length + ' agents registered</p></div>' +
+      '<div class="attacker-grid">' + cards + '</div></div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load agents: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Attack Corpus
+// ============================================================
+registerPage('corpus', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Attack Corpus</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var data = await apiJson('/api/corpus/patterns');
+    if (isStaleNav(gen)) return;
+    var patterns = data.patterns || [];
+    var rows = patterns.map(function (p) {
+      return '<tr><td><span class="status-pill">' + esc(p.category || '') + '</span></td>' +
+        '<td>' + esc(p.name || p.title || '') + '</td>' +
+        '<td>' + ((p.variants || []).length || p.variant_count || 0) + '</td>' +
+        '<td class="mono">' + esc(p.agent_type || '-') + '</td></tr>';
+    }).join('');
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Attack Corpus</h1><p class="page-sub">' + (data.total || patterns.length) + ' patterns loaded</p></div>' +
+      (patterns.length === 0 ? '<div class="empty-state">No corpus patterns loaded.</div>' :
+        '<div class="data-table"><table><thead><tr><th>Category</th><th>Name</th><th>Variants</th><th>Agent</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load corpus: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// PAGE: Settings
+// ============================================================
+registerPage('settings', async function (el, _params, gen) {
+  el.innerHTML = '<div class="content"><div class="page-header"><h1>Settings</h1></div><div class="page-loading">Loading\u2026</div></div>';
+  try {
+    var results = await Promise.all([
+      apiJson('/api/system/tier').catch(function () { return {}; }),
+      apiJson('/api/system/db-status').catch(function () { return {}; }),
+    ]);
+    if (isStaleNav(gen)) return;
+    var tierData = results[0];
+    var dbData = results[1];
+    var tableRows = '';
+    if (dbData.tables) {
+      var keys = Object.keys(dbData.tables);
+      tableRows = keys.map(function (k) {
+        return '<div class="setting-row"><span class="setting-label">' + esc(k) + '</span><span class="setting-value">' + esc(String(dbData.tables[k])) + '</span></div>';
+      }).join('');
+    }
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>Settings</h1></div>' +
+      '<div class="settings-grid">' +
+        '<div class="card"><h3 class="card-title">Tier</h3>' +
+          '<div class="setting-row"><span class="setting-label">Active Tier</span><span class="setting-value">' + esc(tierData.name || tierData.tier || 'core') + '</span></div>' +
+          '<div class="setting-row"><span class="setting-label">Features</span><span class="setting-value">' + (tierData.enabled_count || '-') + ' / ' + (tierData.total_count || '-') + '</span></div></div>' +
+        '<div class="card"><h3 class="card-title">Database</h3>' +
+          '<div class="setting-row"><span class="setting-label">Status</span><span class="setting-value">' + esc(dbData.status || 'unknown') + '</span></div>' +
+          tableRows + '</div>' +
+        '<div class="card"><h3 class="card-title">Session</h3>' +
+          '<div class="setting-row"><span class="setting-label">Token</span><span class="setting-value mono">' + esc(AUTH.token.slice(0, 12)) + '\u2026</span></div>' +
+          '<button class="btn-secondary" id="btn-logout">Logout</button></div>' +
+      '</div></div>';
+    document.getElementById('btn-logout').addEventListener('click', function () {
+      AUTH.clear();
+      if (sseSource) { sseSource.close(); sseSource = null; }
+      showLogin();
+    });
+  } catch (e) {
+    el.innerHTML = '<div class="content"><div class="page-error">Failed to load settings: ' + esc(e.message) + '</div></div>';
+  }
+});
+
+// ============================================================
+// Init
+// ============================================================
+document.addEventListener('DOMContentLoaded', async function () {
+  document.querySelectorAll('.nav-item[data-page]').forEach(function (item) {
+    item.addEventListener('click', function (e) {
+      e.preventDefault();
+      navigateTo(item.getAttribute('data-page'));
+    });
+  });
+
+  var loginBtn = document.getElementById('login-btn');
+  var loginInput = document.getElementById('login-token');
+  if (loginBtn) {
+    loginBtn.addEventListener('click', function () {
+      var token = loginInput.value.trim();
+      if (token) attemptLogin(token);
+    });
+  }
+  if (loginInput) {
+    loginInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        var token = loginInput.value.trim();
+        if (token) attemptLogin(token);
+      }
+    });
+  }
+
+  if (AUTH.token) {
+    try {
+      var res = await fetch('/api/status', { headers: AUTH.headers() });
+      if (res.ok) {
+        hideLogin();
+        connectSSE();
+        navigateTo('dashboard');
+        updateBadges();
+        return;
+      }
+    } catch (e) { /* fall through to login */ }
+    AUTH.clear();
+  }
+  showLogin();
+});
