@@ -982,7 +982,12 @@ class ModelExtractionAgent(LLMAttackAgent):
                 action=f"Send identical/varying prompts to {chat_path} and compare responses",
                 input_data=prompt[:500],
                 expected_result="Responses should come from the same model consistently",
-                actual_result=f"Multiple models detected: {evidence.get('models_detected', evidence.get('min_similarity', 'N/A'))}",
+                actual_result="Routing evidence: {}".format(
+                    evidence.get(
+                        "models_detected",
+                        "response similarity {}".format(evidence.get("min_similarity", "N/A")),
+                    )
+                ),
             ),
         ]
         proof = f"Model routing exploitation ({technique}) at {chat_path}: {description}. Evidence: {evidence}."
@@ -1005,7 +1010,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         await self.emit_finding(finding)
 
     # ------------------------------------------------------------------
-    # Phase 5: Credential/Token Harvesting via Tool Responses
+    # Phase 3: Credential/Token Harvesting via Tool Responses
     # ------------------------------------------------------------------
 
     _CREDENTIAL_HARVEST_PROMPTS: list[dict[str, str]] = [
