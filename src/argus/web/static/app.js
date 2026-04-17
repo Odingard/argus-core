@@ -869,7 +869,8 @@ registerPage('settings', async function (el, _params, gen) {
         var provider = btn.getAttribute('data-provider');
         if (!confirm('Remove ' + provider + ' API key?')) return;
         try {
-          await apiFetch('/api/settings/llm-keys/' + provider, { method: 'DELETE' });
+          var res = await apiFetch('/api/settings/llm-keys/' + provider, { method: 'DELETE' });
+          if (!res.ok) throw new Error('API ' + res.status);
           navigateTo('settings'); // Refresh page
         } catch (e) {
           alert('Failed to remove key: ' + e.message);
