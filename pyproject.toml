@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-redteam"
-version = "0.1.6"
+version = "0.1.7"
 description = "ARGUS — Autonomous AI Red Team Platform. 13 specialized agents attack AI systems, MCP servers, and multi-agent workflows in parallel."
 requires-python = ">=3.11"
 license = {text = "BSL-1.1"}
@@ -99,6 +99,7 @@ ignore = [
 "src/argus/web/auth.py" = ["B008"]  # Depends() in defaults is FastAPI's standard pattern
 "src/argus/reporting/html_report.py" = ["E501"]  # inline CSS in HTML template strings
 "src/argus/prometheus/modules_lib/*.py" = ["E501"]  # attack module payloads are long strings
+"src/argus/evolution/*.py" = ["E501", "S311"]  # evolution engine: long strings + random for genetic algorithm ops (not crypto)
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
