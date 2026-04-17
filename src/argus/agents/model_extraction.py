@@ -918,12 +918,21 @@ class ModelExtractionAgent(LLMAttackAgent):
                     found_models.append(model_name)
             model_mentions.append((prompt, found_models))
 
-        # Detect contradictions: different model names across responses
+        # Detect contradictions: different responses identify as different
+        # models.  A single response mentioning multiple model names (e.g.
+        # "I'm Claude, not GPT-4") is NOT evidence of routing — we need
+        # at least two responses whose model sets are disjoint.
+        responses_with_models = [(p, set(m)) for p, m in model_mentions if m]
+        has_contradiction = False
         all_models: set[str] = set()
-        for _, models in model_mentions:
-            all_models.update(models)
+        for i, (_, m_i) in enumerate(responses_with_models):
+            for j in range(i + 1, len(responses_with_models)):
+                _, m_j = responses_with_models[j]
+                if m_i.isdisjoint(m_j):
+                    has_contradiction = True
+            all_models.update(m_i)
 
-        if len(all_models) > 1:
+        if has_contradiction:
             self._techniques_succeeded += 1
             evidence = {
                 "models_detected": sorted(all_models),
