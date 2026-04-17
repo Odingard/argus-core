@@ -10,14 +10,14 @@ from dataclasses import dataclass, field
 
 # All agent categories present in ARGUS
 ARGUS_AGENT_CATEGORIES = [
-    "cross_agent",
+    "cross_agent_exfiltration",
     "identity_spoof",
-    "memory_boundary",
+    "memory_boundary_collapse",
     "memory_poisoning",
     "model_extraction",
     "persona_hijacking",
     "privilege_escalation",
-    "prompt_injection",
+    "prompt_injection_hunter",
     "race_condition",
     "supply_chain",
     "tool_poisoning",

@@ -505,6 +505,11 @@ class Orchestrator:
             logger.info("Skipping evolution pass — no findings from standard scan")
             return None
 
+        # Guard: need an actual endpoint URL for HTTP probes
+        if not target.agent_endpoint:
+            logger.info("Skipping evolution pass — no agent_endpoint configured")
+            return None
+
         try:
             from argus.evolution.adaptive_scan import adaptive_scan
             from argus.evolution.argus_bridge import execute_genome
@@ -540,7 +545,7 @@ class Orchestrator:
 
             logger.info("Starting adaptive evolution pass (3 generations)")
             evo_results = await adaptive_scan(
-                target=target.name,
+                target=target.agent_endpoint,
                 scan_fn=_scan_fn,
                 generations=3,
                 population_size=min(len(self._agent_registry), 13),
