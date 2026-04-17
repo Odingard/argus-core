@@ -111,7 +111,7 @@ class MutationEngine:
 
         # Crossover corpus patterns
         if parent_a.corpus_patterns and parent_b.corpus_patterns:
-            split = len(parent_a.corpus_patterns) // 2
+            split = min(len(parent_a.corpus_patterns), len(parent_b.corpus_patterns)) // 2
             child.corpus_patterns = parent_a.corpus_patterns[:split] + parent_b.corpus_patterns[split:]
 
         # Crossover decision thresholds (average)

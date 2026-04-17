@@ -454,12 +454,13 @@ class Orchestrator:
         # ── Adaptive Evolution Pass (auto-fires on every scan) ───────
         # Runs deterministic mutation (Levels 1-4, Core tier) after the
         # standard scan pass.  No separate CLI command needed.
+        # Compute remaining timeout budget for evolution pass
+        elapsed = (datetime.now(UTC) - result.started_at).total_seconds()
+        remaining_budget = max(0.0, timeout - elapsed)
         evolution_results = await self._run_evolution_pass(
             target=target,
-            scan_id=scan_id,
             result=result,
-            timeout=timeout,
-            demo_pace_seconds=demo_pace_seconds,
+            timeout=remaining_budget,
         )
         if evolution_results:
             result.evolution_data = evolution_results  # type: ignore[attr-defined]
@@ -488,16 +489,18 @@ class Orchestrator:
     async def _run_evolution_pass(
         self,
         target: TargetConfig,
-        scan_id: str,
         result: ScanResult,
         timeout: float,
-        demo_pace_seconds: float,
     ) -> dict | None:
         """Run the adaptive evolution pass after the standard scan.
 
         This auto-fires on every scan — no separate CLI command needed.
         Uses deterministic mutations (Levels 1-4, Core tier).
         LLM mutations (Levels 5-6) are gated behind Enterprise tier.
+
+        The timeout is the *remaining* budget from the original scan timeout.
+        The evolution pass is bounded by asyncio.wait_for so it cannot
+        exceed this budget or block the scan lock indefinitely.
         """
         # Only run evolution if the first pass produced findings
         # (no point evolving against a target that returned nothing)
@@ -543,14 +546,22 @@ class Orchestrator:
                     target_config=target,
                 )
 
-            logger.info("Starting adaptive evolution pass (3 generations)")
-            evo_results = await adaptive_scan(
-                target=target.agent_endpoint,
-                scan_fn=_scan_fn,
-                generations=3,
-                population_size=min(len(self._agent_registry), 13),
-                base_genome=seed,
-                verbose=True,
+            # Bound the evolution pass to the remaining timeout budget
+            evo_timeout = max(10.0, timeout)  # at least 10s
+            logger.info(
+                "Starting adaptive evolution pass (3 generations, %.0fs budget)",
+                evo_timeout,
+            )
+            evo_results = await asyncio.wait_for(
+                adaptive_scan(
+                    target=target.agent_endpoint,
+                    scan_fn=_scan_fn,
+                    generations=3,
+                    population_size=min(len(self._agent_registry), 13),
+                    base_genome=seed,
+                    verbose=True,
+                ),
+                timeout=evo_timeout,
             )
 
             if evo_results:
