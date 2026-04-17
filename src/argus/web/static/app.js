@@ -837,8 +837,8 @@ registerPage('settings', async function (el, _params, gen) {
           if (epInput && epInput.value.trim()) body.endpoint = epInput.value.trim();
           if (statusEl) { statusEl.textContent = 'Saving\u2026'; statusEl.style.color = 'var(--text-muted)'; }
           var res = await apiJson('/api/settings/llm-keys', { method: 'POST', body: JSON.stringify(body) });
-          if (statusEl) { statusEl.textContent = '\u2713 Saved \u00B7 ' + esc(res.masked_key || ''); statusEl.style.color = 'var(--accent-green)'; }
-          input.value = '';
+          navigateTo('settings'); // Refresh page to update card state
+          return;
         } catch (e) {
           if (statusEl) { statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = 'var(--accent-red)'; }
         }
