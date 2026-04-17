@@ -110,6 +110,16 @@ class APIKeyCreate(BaseModel):
     role: str = Field(default="viewer", pattern="^(admin|operator|viewer)$")
 
 
+class LLMKeySet(BaseModel):
+    provider: str = Field(..., pattern="^(anthropic|openai|google|custom)$")
+    api_key: str = Field(..., min_length=1, max_length=2000)
+    endpoint: str | None = Field(default=None, max_length=500)
+
+
+class LLMKeyDelete(BaseModel):
+    provider: str = Field(..., pattern="^(anthropic|openai|google|custom)$")
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -1141,14 +1151,6 @@ def create_production_router() -> APIRouter:
     # ------------------------------------------------------------------
     # LLM API Key Management (stored in ~/.argusrc)
     # ------------------------------------------------------------------
-
-    class LLMKeySet(BaseModel):
-        provider: str = Field(..., pattern="^(anthropic|openai|google|custom)$")
-        api_key: str = Field(..., min_length=1, max_length=2000)
-        endpoint: str | None = Field(default=None, max_length=500)
-
-    class LLMKeyDelete(BaseModel):
-        provider: str = Field(..., pattern="^(anthropic|openai|google|custom)$")
 
     _PROVIDER_CONFIG_MAP = {
         "anthropic": "anthropic_api_key",
