@@ -451,6 +451,19 @@ class Orchestrator:
         # Collect signal history
         result.signals = await self.signal_bus.get_history()
 
+        # ── Adaptive Evolution Pass (auto-fires on every scan) ───────
+        # Runs deterministic mutation (Levels 1-4, Core tier) after the
+        # standard scan pass.  No separate CLI command needed.
+        evolution_results = await self._run_evolution_pass(
+            target=target,
+            scan_id=scan_id,
+            result=result,
+            timeout=timeout,
+            demo_pace_seconds=demo_pace_seconds,
+        )
+        if evolution_results:
+            result.evolution_data = evolution_results  # type: ignore[attr-defined]
+
         # Cleanup — clear active agents but preserve signal subscribers so
         # long-lived consumers (web dashboard, tests) keep receiving signals
         # across subsequent scans on the same Orchestrator instance.
@@ -471,6 +484,83 @@ class Orchestrator:
         )
 
         return result
+
+    async def _run_evolution_pass(
+        self,
+        target: TargetConfig,
+        scan_id: str,
+        result: ScanResult,
+        timeout: float,
+        demo_pace_seconds: float,
+    ) -> dict | None:
+        """Run the adaptive evolution pass after the standard scan.
+
+        This auto-fires on every scan — no separate CLI command needed.
+        Uses deterministic mutations (Levels 1-4, Core tier).
+        LLM mutations (Levels 5-6) are gated behind Enterprise tier.
+        """
+        # Only run evolution if the first pass produced findings
+        # (no point evolving against a target that returned nothing)
+        if not result.findings:
+            logger.info("Skipping evolution pass — no findings from standard scan")
+            return None
+
+        try:
+            from argus.evolution.adaptive_scan import adaptive_scan
+            from argus.evolution.argus_bridge import execute_genome
+            from argus.evolution.genome import AgentGenome
+
+            # Build a seed genome from the best-performing agent in this scan
+            best_agent = None
+            best_findings = 0
+            for ar in result.agent_results:
+                if ar.findings_count > best_findings:
+                    best_findings = ar.findings_count
+                    best_agent = ar
+
+            seed = None
+            if best_agent is not None:
+                seed = AgentGenome(
+                    agent_id=f"seed-{best_agent.agent_type.value}",
+                    agent_category=best_agent.agent_type.value,
+                    corpus_patterns=[],
+                )
+
+            # Wrap execute_genome to bind orchestrator + target_config
+            async def _scan_fn(
+                tgt: str,
+                genome: AgentGenome,
+            ) -> object:
+                return await execute_genome(
+                    target=tgt,
+                    genome=genome,
+                    orchestrator=None,  # lightweight mode — don't recurse
+                    target_config=target,
+                )
+
+            logger.info("Starting adaptive evolution pass (3 generations)")
+            evo_results = await adaptive_scan(
+                target=target.name,
+                scan_fn=_scan_fn,
+                generations=3,
+                population_size=min(len(self._agent_registry), 13),
+                base_genome=seed,
+                verbose=True,
+            )
+
+            if evo_results:
+                logger.info(
+                    "Evolution pass complete — %d generations, best fitness %.4f",
+                    evo_results.get("generations_completed", 0),
+                    evo_results.get("fitness_progression", [0])[-1] if evo_results.get("fitness_progression") else 0,
+                )
+
+            return evo_results
+
+        except Exception as exc:
+            logger.warning("Evolution pass failed (non-fatal): %s", type(exc).__name__)
+            logger.debug("Evolution pass exception: %s", exc)
+            return None
 
     async def _run_agent_with_timeout(self, agent: BaseAttackAgent, timeout: float) -> AgentResult:
         """Run an agent with a timeout. Returns AgentResult regardless."""
