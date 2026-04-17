@@ -1178,10 +1178,10 @@ def create_production_router() -> APIRouter:
             providers.append(entry)
         return {"providers": providers}
 
-    @router.post("/settings/llm-keys", dependencies=[Depends(require_role("write"))])
+    @router.post("/settings/llm-keys", dependencies=[Depends(require_role("admin"))])
     async def set_llm_key(body: LLMKeySet) -> dict[str, Any]:
         """Save an LLM API key to the persistent config."""
-        from argus.config import mask_key, set_value
+        from argus.config import _read_config, _write_config, mask_key
 
         config_key = _PROVIDER_CONFIG_MAP.get(body.provider)
         if not config_key:
@@ -1192,16 +1192,19 @@ def create_production_router() -> APIRouter:
                 _validate_target_endpoint(body.endpoint)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-        set_value(config_key, body.api_key)
+        # Atomic write: read once, apply all changes, write once
+        data = _read_config()
+        data[config_key] = body.api_key
         if body.provider == "custom" and body.endpoint:
-            set_value("custom_endpoint", body.endpoint)
+            data["custom_endpoint"] = body.endpoint
+        _write_config(data)
         return {
             "status": "saved",
             "provider": body.provider,
             "masked_key": mask_key(body.api_key),
         }
 
-    @router.delete("/settings/llm-keys/{provider}", dependencies=[Depends(require_role("write"))])
+    @router.delete("/settings/llm-keys/{provider}", dependencies=[Depends(require_role("admin"))])
     async def delete_llm_key(provider: str) -> dict[str, Any]:
         """Remove an LLM API key from the persistent config."""
         from argus.config import delete as config_delete
@@ -1214,7 +1217,7 @@ def create_production_router() -> APIRouter:
             config_delete("custom_endpoint")
         return {"status": "deleted" if found else "not_found", "provider": provider}
 
-    @router.post("/settings/llm-keys/{provider}/test", dependencies=[Depends(require_role("write"))])
+    @router.post("/settings/llm-keys/{provider}/test", dependencies=[Depends(require_role("admin"))])
     async def test_llm_key(provider: str) -> dict[str, Any]:
         """Test an LLM API key by making a minimal API call."""
         import httpx
