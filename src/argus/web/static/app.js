@@ -695,43 +695,189 @@ registerPage('corpus', async function (el, _params, gen) {
 });
 
 // ============================================================
-// PAGE: Settings
+// PAGE: Settings (with LLM API Key Management)
 // ============================================================
+
+var LLM_PROVIDERS = [
+  { id: 'anthropic', name: 'Anthropic', models: 'Claude Sonnet, Opus, Haiku', placeholder: 'sk-ant-api03-...', icon: '\u25C6' },
+  { id: 'openai', name: 'OpenAI', models: 'GPT-4o, GPT-4 Turbo, o1', placeholder: 'sk-proj-...', icon: '\u25CF' },
+  { id: 'google', name: 'Google Gemini', models: 'Gemini 2.5 Pro, Flash, Ultra', placeholder: 'AIza...', icon: '\u25C6' },
+  { id: 'custom', name: 'Custom Provider', models: 'Any OpenAI-compatible endpoint', placeholder: 'API key...', icon: '\u2699', hasEndpoint: true },
+];
+
+function renderProviderCard(p, keyData) {
+  var configured = keyData && keyData.configured;
+  var masked = keyData ? keyData.masked_key || '' : '';
+  var borderStyle = configured ? 'border-color: var(--accent-green);' : '';
+  var dotColor = configured ? 'var(--accent-green)' : 'var(--text-muted)';
+  var nameColor = configured ? 'var(--accent-purple)' : 'var(--text-secondary)';
+  var statusText = configured ? '\u2713 Configured \u00B7 ' + esc(masked) : 'Not configured';
+  var statusColor = configured ? 'var(--accent-green)' : 'var(--text-muted)';
+
+  var endpointField = '';
+  if (p.hasEndpoint) {
+    var epVal = (keyData && keyData.endpoint) || '';
+    endpointField = '<input type="text" class="input key-endpoint-input" data-provider="' + p.id + '" placeholder="https://your-endpoint.com/v1" value="' + esc(epVal) + '" style="margin-bottom:8px;" />';
+  }
+
+  return '<div class="card provider-card" style="' + borderStyle + '">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:16px;">' + p.icon + '</span>' +
+        '<div><div style="font-weight:700;color:' + nameColor + ';">' + esc(p.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);">' + esc(p.models) + '</div></div>' +
+      '</div>' +
+      '<div style="width:10px;height:10px;border-radius:50%;background:' + dotColor + ';"></div>' +
+    '</div>' +
+    endpointField +
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">' +
+      '<input type="password" class="input key-input" data-provider="' + p.id + '" placeholder="' + esc(p.placeholder) + '" style="flex:1;font-family:var(--font-mono);font-size:12px;" />' +
+      '<button class="btn-secondary key-toggle-btn" style="padding:8px 10px;" title="Show/hide">\uD83D\uDC41</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:6px;align-items:center;">' +
+      '<button class="btn-primary key-save-btn" data-provider="' + p.id + '" style="font-size:12px;padding:6px 14px;">Save</button>' +
+      '<button class="btn-secondary key-test-btn" data-provider="' + p.id + '" style="font-size:12px;padding:6px 14px;">Test</button>' +
+      (configured ? '<button class="btn-secondary key-remove-btn" data-provider="' + p.id + '" style="font-size:12px;padding:6px 14px;color:var(--accent-red);border-color:var(--accent-red);">Remove</button>' : '') +
+    '</div>' +
+    '<div class="key-status" data-provider="' + p.id + '" style="font-size:11px;color:' + statusColor + ';margin-top:6px;">' + statusText + '</div>' +
+  '</div>';
+}
+
 registerPage('settings', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Settings</h1></div><div class="page-loading">Loading\u2026</div></div>';
   try {
     var results = await Promise.all([
       apiJson('/api/system/tier').catch(function () { return {}; }),
       apiJson('/api/system/db-status').catch(function () { return {}; }),
+      apiJson('/api/settings/llm-keys').catch(function () { return { providers: [] }; }),
     ]);
     if (isStaleNav(gen)) return;
     var tierData = results[0];
     var dbData = results[1];
-    var tableRows = '';
+    var keysData = results[2];
+
+    // Build provider key lookup
+    var keyMap = {};
+    (keysData.providers || []).forEach(function (k) { keyMap[k.provider] = k; });
+    var activeCount = (keysData.providers || []).filter(function (k) { return k.configured; }).length;
+
+    var providerCards = LLM_PROVIDERS.map(function (p) {
+      return renderProviderCard(p, keyMap[p.id]);
+    }).join('');
+
+    var dbRows = '';
     if (dbData.tables) {
-      var keys = Object.keys(dbData.tables);
-      tableRows = keys.map(function (k) {
-        return '<div class="setting-row"><span class="setting-label">' + esc(k) + '</span><span class="setting-value">' + esc(String(dbData.tables[k])) + '</span></div>';
-      }).join('');
+      Object.keys(dbData.tables).forEach(function (k) {
+        dbRows += '<div class="setting-row"><span class="setting-label">' + esc(k) + '</span><span class="setting-value mono">' + esc(String(dbData.tables[k])) + '</span></div>';
+      });
     }
+
     el.innerHTML =
       '<div class="content"><div class="page-header"><h1>Settings</h1></div>' +
+
+      // LLM API Keys Section
+      '<div class="card" style="margin-bottom:20px;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">' +
+          '<div><h3 class="card-title" style="margin:0;">LLM API Keys</h3>' +
+            '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Configure API keys for LLM-augmented attack phases (4\u20136). Keys are stored in <code style="font-family:var(--font-mono);font-size:11px;">~/.argusrc</code> with 0600 permissions.</div></div>' +
+          '<span class="badge" style="background:' + (activeCount > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.08)') + ';color:' + (activeCount > 0 ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + activeCount + ' active</span>' +
+        '</div>' +
+        '<div class="settings-grid">' + providerCards + '</div>' +
+        '<div style="margin-top:12px;padding:10px 14px;background:rgba(212,160,23,0.06);border:1px solid rgba(212,160,23,0.15);border-radius:var(--radius-sm);font-size:12px;color:var(--accent-purple);">' +
+          '\uD83D\uDD12 Keys never leave your machine. Core tier uses keys for Phases 4\u20136 (LLM-augmented variants). Without a key, ARGUS runs in deterministic mode (Phases 1\u20133).' +
+        '</div>' +
+      '</div>' +
+
+      // Tier + DB + Session
       '<div class="settings-grid">' +
-        '<div class="card"><h3 class="card-title">Tier</h3>' +
-          '<div class="setting-row"><span class="setting-label">Active Tier</span><span class="setting-value">' + esc(tierData.name || tierData.tier || 'core') + '</span></div>' +
-          '<div class="setting-row"><span class="setting-label">Features</span><span class="setting-value">' + (tierData.enabled_count || '-') + ' / ' + (tierData.total_count || '-') + '</span></div></div>' +
+        '<div class="card"><h3 class="card-title">Tier Information</h3>' +
+          '<div class="setting-row"><span class="setting-label">Active Tier</span><span class="setting-value" style="font-weight:700;color:var(--accent-purple);">' + esc(tierData.name || tierData.tier || 'CORE').toUpperCase() + '</span></div>' +
+          '<div class="setting-row"><span class="setting-label">Version</span><span class="setting-value mono">v' + esc(tierData.version || '0.1.8') + '</span></div>' +
+          '<div class="setting-row"><span class="setting-label">Features</span><span class="setting-value">' + (tierData.enabled_count || '-') + ' / ' + (tierData.total_count || '-') + '</span></div>' +
+        '</div>' +
         '<div class="card"><h3 class="card-title">Database</h3>' +
-          '<div class="setting-row"><span class="setting-label">Status</span><span class="setting-value">' + esc(dbData.status || 'unknown') + '</span></div>' +
-          tableRows + '</div>' +
+          '<div class="setting-row"><span class="setting-label">Status</span><span class="setting-value">' +
+            '<span style="color:' + (dbData.status === 'healthy' ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + esc(dbData.status || 'unknown') + '</span></span></div>' +
+          dbRows +
+        '</div>' +
         '<div class="card"><h3 class="card-title">Session</h3>' +
-          '<div class="setting-row"><span class="setting-label">Token</span><span class="setting-value mono">' + esc(AUTH.token.slice(0, 12)) + '\u2026</span></div>' +
-          '<button class="btn-secondary" id="btn-logout">Logout</button></div>' +
-      '</div></div>';
+          '<div class="setting-row"><span class="setting-label">Auth Token</span><span class="setting-value mono">' + esc(AUTH.token.slice(0, 12)) + '\u2026</span></div>' +
+          '<button class="btn-secondary" id="btn-logout" style="margin-top:8px;">Logout</button>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
+
+    // --- Wire up event handlers ---
+
+    // Logout
     document.getElementById('btn-logout').addEventListener('click', function () {
       AUTH.clear();
       if (sseSource) { sseSource.close(); sseSource = null; }
       showLogin();
     });
+
+    // Toggle password visibility
+    el.querySelectorAll('.key-toggle-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = btn.previousElementSibling;
+        if (input) input.type = input.type === 'password' ? 'text' : 'password';
+      });
+    });
+
+    // Save key
+    el.querySelectorAll('.key-save-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var provider = btn.getAttribute('data-provider');
+        var input = el.querySelector('.key-input[data-provider="' + provider + '"]');
+        var statusEl = el.querySelector('.key-status[data-provider="' + provider + '"]');
+        if (!input || !input.value.trim()) { if (statusEl) statusEl.textContent = 'Enter an API key first'; return; }
+        try {
+          var body = { provider: provider, api_key: input.value.trim() };
+          var epInput = el.querySelector('.key-endpoint-input[data-provider="' + provider + '"]');
+          if (epInput && epInput.value.trim()) body.endpoint = epInput.value.trim();
+          if (statusEl) { statusEl.textContent = 'Saving\u2026'; statusEl.style.color = 'var(--text-muted)'; }
+          var res = await apiJson('/api/settings/llm-keys', { method: 'POST', body: JSON.stringify(body) });
+          navigateTo('settings'); // Refresh page to update card state
+          return;
+        } catch (e) {
+          if (statusEl) { statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = 'var(--accent-red)'; }
+        }
+      });
+    });
+
+    // Test key
+    el.querySelectorAll('.key-test-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var provider = btn.getAttribute('data-provider');
+        var statusEl = el.querySelector('.key-status[data-provider="' + provider + '"]');
+        try {
+          if (statusEl) { statusEl.textContent = 'Testing\u2026'; statusEl.style.color = 'var(--text-muted)'; }
+          var res = await apiJson('/api/settings/llm-keys/' + provider + '/test', { method: 'POST' });
+          if (statusEl) {
+            statusEl.textContent = (res.status === 'ok' ? '\u2713 ' : '\u2717 ') + (res.message || '');
+            statusEl.style.color = res.status === 'ok' ? 'var(--accent-green)' : 'var(--accent-red)';
+          }
+        } catch (e) {
+          if (statusEl) { statusEl.textContent = 'Test failed: ' + e.message; statusEl.style.color = 'var(--accent-red)'; }
+        }
+      });
+    });
+
+    // Remove key
+    el.querySelectorAll('.key-remove-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var provider = btn.getAttribute('data-provider');
+        if (!confirm('Remove ' + provider + ' API key?')) return;
+        try {
+          var res = await apiFetch('/api/settings/llm-keys/' + provider, { method: 'DELETE' });
+          if (!res.ok) throw new Error('API ' + res.status);
+          navigateTo('settings'); // Refresh page
+        } catch (e) {
+          alert('Failed to remove key: ' + e.message);
+        }
+      });
+    });
+
   } catch (e) {
     el.innerHTML = '<div class="content"><div class="page-error">Failed to load settings: ' + esc(e.message) + '</div></div>';
   }

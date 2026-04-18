@@ -1,35 +1,35 @@
 /* ============================================================
-   ARGUS Web Dashboard — dark sidebar + light content
+   ARGUS War Room — gold/black theme
    ============================================================ */
 
 :root {
-  --bg-app: #f5f6fa;
-  --bg-content: #ffffff;
-  --bg-sidebar: linear-gradient(180deg, #1a1530 0%, #14112a 100%);
-  --bg-card: #ffffff;
-  --bg-terminal: #0e0b1f;
-  --bg-terminal-alt: #15102b;
+  --bg-app: #09090b;
+  --bg-content: #0f0f12;
+  --bg-sidebar: linear-gradient(180deg, #0c0c0f 0%, #09090b 100%);
+  --bg-card: #141418;
+  --bg-terminal: #09090b;
+  --bg-terminal-alt: #0f0f12;
 
-  --border: #e8eaf0;
-  --border-strong: #d4d8e3;
+  --border: #1e1e24;
+  --border-strong: #2a2a33;
 
-  --text-primary: #1a1530;
-  --text-secondary: #5a5a72;
-  --text-muted: #9094a6;
-  --text-on-dark: #e6e3f5;
-  --text-on-dark-muted: #8b86a6;
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --text-muted: #6b6b76;
+  --text-on-dark: #e4e4e7;
+  --text-on-dark-muted: #6b6b76;
 
-  --accent-purple: #8b5cf6;
-  --accent-purple-deep: #6d28d9;
-  --accent-blue: #3b82f6;
+  --accent-purple: #d4a017;
+  --accent-purple-deep: #b8860b;
+  --accent-blue: #d4a017;
   --accent-green: #10b981;
-  --accent-yellow: #f59e0b;
+  --accent-yellow: #d4a017;
   --accent-red: #ef4444;
-  --accent-pink: #ec4899;
+  --accent-pink: #d4a017;
 
-  --shadow-sm: 0 1px 2px rgba(20, 17, 42, 0.05);
-  --shadow-md: 0 4px 12px rgba(20, 17, 42, 0.08);
-  --shadow-lg: 0 8px 24px rgba(20, 17, 42, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -102,13 +102,13 @@ button {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
+  background: linear-gradient(135deg, #d4a017, #b8860b);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  color: white;
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+  color: #09090b;
+  box-shadow: 0 4px 12px rgba(212, 160, 23, 0.4);
 }
 
 .brand-name {
@@ -127,8 +127,8 @@ button {
 .advanced-pill {
   margin: 16px 20px 24px;
   padding: 8px 14px;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(212, 160, 23, 0.15);
+  border: 1px solid rgba(212, 160, 23, 0.3);
   border-radius: 20px;
   font-size: 12px;
   color: var(--accent-purple);
@@ -181,7 +181,7 @@ button {
 }
 
 .nav-item.active {
-  background: rgba(139, 92, 246, 0.2);
+  background: rgba(212, 160, 23, 0.2);
   color: white;
   box-shadow: inset 2px 0 0 var(--accent-purple);
 }
@@ -269,12 +269,12 @@ button {
 .btn-primary {
   background: linear-gradient(135deg, var(--accent-purple), var(--accent-purple-deep));
   color: white;
-  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.35);
+  box-shadow: 0 2px 8px rgba(212, 160, 23, 0.35);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.45);
+  box-shadow: 0 4px 14px rgba(212, 160, 23, 0.45);
 }
 
 .btn-secondary {
@@ -341,7 +341,7 @@ button {
 }
 
 .tab.active .tab-badge {
-  background: rgba(139, 92, 246, 0.15);
+  background: rgba(212, 160, 23, 0.15);
   color: var(--accent-purple);
 }
 
@@ -365,13 +365,13 @@ button {
 }
 
 .status-card.running {
-  background: linear-gradient(135deg, #faf7ff 0%, #f3eeff 100%);
-  border-color: rgba(139, 92, 246, 0.3);
-  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.12);
+  background: rgba(212, 160, 23, 0.08);
+  border-color: rgba(212, 160, 23, 0.3);
+  box-shadow: 0 4px 16px rgba(212, 160, 23, 0.12);
 }
 
 .status-card.completed {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  background: rgba(16, 185, 129, 0.08);
   border-color: rgba(16, 185, 129, 0.3);
 }
 
@@ -398,7 +398,7 @@ button {
   color: white;
   border: none;
   animation: pulse 2s infinite;
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.45);
+  box-shadow: 0 4px 14px rgba(212, 160, 23, 0.45);
 }
 
 .status-card.completed .status-icon {
@@ -409,10 +409,10 @@ button {
 
 @keyframes pulse {
   0%, 100% {
-    box-shadow: 0 4px 14px rgba(139, 92, 246, 0.45);
+    box-shadow: 0 4px 14px rgba(212, 160, 23, 0.45);
   }
   50% {
-    box-shadow: 0 4px 24px rgba(139, 92, 246, 0.65);
+    box-shadow: 0 4px 24px rgba(212, 160, 23, 0.65);
   }
 }
 
@@ -707,9 +707,9 @@ button {
 }
 
 .cw-medium {
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(212, 160, 23, 0.12);
   color: var(--accent-purple);
-  border-color: rgba(139, 92, 246, 0.35);
+  border-color: rgba(212, 160, 23, 0.35);
 }
 
 .cw-low {
@@ -724,7 +724,7 @@ button {
 }
 
 .finding-row:hover {
-  background: #fafbff;
+  background: var(--bg-card);
 }
 
 .finding-row:last-child {
@@ -904,7 +904,7 @@ body.embed-cards .attacker-grid {
 
 .login-card input:focus {
   border-color: var(--accent-purple);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  box-shadow: 0 0 0 3px rgba(212, 160, 23, 0.15);
 }
 
 .login-btn {
@@ -1079,10 +1079,10 @@ body.embed-cards .attacker-grid {
 
 .data-table tbody tr:last-child td { border-bottom: none; }
 
-.data-table tbody tr:hover { background: #fafbff; }
+.data-table tbody tr:hover { background: rgba(212, 160, 23, 0.04); }
 
 .clickable-row { cursor: pointer; }
-.clickable-row:hover { background: rgba(139, 92, 246, 0.04); }
+.clickable-row:hover { background: rgba(212, 160, 23, 0.04); }
 
 .mono { font-family: var(--font-mono); font-size: 12px; }
 
@@ -1099,7 +1099,7 @@ body.embed-cards .attacker-grid {
 }
 
 .status-pill.status-completed { background: rgba(16, 185, 129, 0.12); color: var(--accent-green); }
-.status-pill.status-running { background: rgba(139, 92, 246, 0.12); color: var(--accent-purple); }
+.status-pill.status-running { background: rgba(212, 160, 23, 0.12); color: var(--accent-purple); }
 .status-pill.status-failed { background: rgba(239, 68, 68, 0.12); color: var(--accent-red); }
 .status-pill.status-pending { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
 
@@ -1129,7 +1129,7 @@ body.embed-cards .attacker-grid {
 
 .input:focus {
   border-color: var(--accent-purple);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  box-shadow: 0 0 0 3px rgba(212, 160, 23, 0.1);
 }
 
 /* ============================================================
@@ -1164,7 +1164,7 @@ body.embed-cards .attacker-grid {
 }
 
 .agent-row:hover { background: var(--bg-app); }
-.agent-row.agent-running { background: rgba(139, 92, 246, 0.06); }
+.agent-row.agent-running { background: rgba(212, 160, 23, 0.06); }
 .agent-row.agent-completed { background: rgba(16, 185, 129, 0.04); }
 
 .agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }

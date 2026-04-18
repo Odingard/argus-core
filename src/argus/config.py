@@ -143,6 +143,8 @@ _KEY_MAP: dict[str, str] = {
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "google_api_key": "GOOGLE_API_KEY",
+    "custom_api_key": "ARGUS_CUSTOM_API_KEY",
+    "custom_endpoint": "ARGUS_CUSTOM_ENDPOINT",
     "agent_api_key": "ARGUS_AGENT_API_KEY",
     "default_timeout": "ARGUS_TIMEOUT",
     "default_max_rpm": "ARGUS_MAX_RPM",
@@ -237,7 +239,7 @@ def mask_key(value: str) -> str:
 
 def resolve_llm_api_key() -> str | None:
     """Resolve the LLM API key from env or config. Anthropic checked first."""
-    return get("anthropic_api_key") or get("openai_api_key") or get("google_api_key")
+    return get("anthropic_api_key") or get("openai_api_key") or get("google_api_key") or get("custom_api_key")
 
 
 def resolve_agent_api_key(cli_value: str | None = None) -> str | None:
