@@ -1215,15 +1215,17 @@ def create_production_router() -> APIRouter:
             raise HTTPException(status_code=400, detail="Unknown provider")
         # Atomic delete: read once, remove all related keys, write once
         data = _read_config()
-        found = False
+        changed = False
         keys_section = data.get("keys", {})
         if config_key in keys_section:
             del keys_section[config_key]
-            found = True
+            changed = True
         if provider == "custom" and "custom_endpoint" in data:
             del data["custom_endpoint"]
-        _write_config(data)
-        return {"status": "deleted" if found else "not_found", "provider": provider}
+            changed = True
+        if changed:
+            _write_config(data)
+        return {"status": "deleted" if changed else "not_found", "provider": provider}
 
     @router.post("/settings/llm-keys/{provider}/test", dependencies=[Depends(require_role("admin"))])
     async def test_llm_key(provider: str) -> dict[str, Any]:
