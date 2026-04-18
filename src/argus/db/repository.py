@@ -53,8 +53,8 @@ def _to_dict(obj: Any) -> dict[str, Any]:
 
 
 def _hash_password(password: str, salt: str) -> str:
-    """SHA-256 hash a password with a salt."""
-    return hashlib.sha256(f"{salt}${password}".encode()).hexdigest()
+    """PBKDF2-HMAC-SHA256 hash a password with a salt (600k iterations)."""
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations=600_000).hex()
 
 
 class UserRepository:
