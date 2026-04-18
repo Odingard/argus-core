@@ -644,7 +644,7 @@ registerPage('scan-detail', async function (el, params, gen) {
         if (!panel) return;
         var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
         var evidence = f.evidence || '';
-        var owaspTags = (f.owasp_mapping || []).map(function (o) { return '<span class="owasp-agent">' + esc(typeof o === 'string' ? o : o.id || '') + '</span>'; }).join(' ');
+        var owaspTags = [f.owasp_agentic, f.owasp_llm].filter(Boolean).map(function (o) { return '<span class="owasp-agent">' + esc(String(o)) + '</span>'; }).join(' ');
         panel.style.display = 'block';
         panel.innerHTML =
           '<div class="detail-header">' +
@@ -660,6 +660,7 @@ registerPage('scan-detail', async function (el, params, gen) {
           (owaspTags ? '<div class="detail-owasp">OWASP: ' + owaspTags + '</div>' : '') +
           (proof ? '<div class="detail-section"><div class="detail-label">Proof of Exploitation</div><pre class="detail-pre">' + esc(proof) + '</pre></div>' : '') +
           (evidence ? '<div class="detail-section"><div class="detail-label">Evidence</div><pre class="detail-pre">' + esc(typeof evidence === 'string' ? evidence : JSON.stringify(evidence, null, 2)) + '</pre></div>' : '') +
+          (f.raw_response ? '<div class="detail-section"><div class="detail-label">Raw Response</div><pre class="detail-pre">' + esc(String(f.raw_response).slice(0, 2000)) + '</pre></div>' : '') +
           (f.reproduction_steps ? '<div class="detail-section"><div class="detail-label">Reproduction Steps</div><pre class="detail-pre">' + esc(typeof f.reproduction_steps === 'string' ? f.reproduction_steps : JSON.stringify(f.reproduction_steps, null, 2)) + '</pre></div>' : '');
         document.getElementById('close-finding-detail').addEventListener('click', function () { panel.style.display = 'none'; });
         panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -724,7 +725,7 @@ registerPage('findings', async function (el, _params, gen) {
       var rows = agentFindings.map(function (f, idx) {
         var sev = esc(f.severity || 'info');
         var tierClass = String(f.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        var evidenceSnippet = f.evidence ? String(typeof f.evidence === 'string' ? f.evidence : JSON.stringify(f.evidence)).slice(0, 80) : '';
+        var evidenceSnippet = f.description || f.raw_response ? String(f.description || f.raw_response || '').slice(0, 80) : '';
         return '<tr class="clickable-row finding-global-row" data-severity="' + esc(f.severity || '') + '" data-agent="' + esc(agentKey) + '" data-fidx="' + idx + '">' +
           '<td><span class="severity-badge severity-' + tierClass + '">' + sev + '</span></td>' +
           '<td>' + esc(f.title || '') + '</td>' +
@@ -775,14 +776,17 @@ registerPage('findings', async function (el, _params, gen) {
         var panel = document.getElementById('findings-global-detail');
         if (!panel) return;
         var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
-        var evidence = f.evidence || '';
+        var evidence = f.description || f.raw_response || '';
+        var owaspGlobal = [f.owasp_agentic, f.owasp_llm].filter(Boolean).map(function (o) { return '<span class="owasp-agent">' + esc(String(o)) + '</span>'; }).join(' ');
         panel.style.display = 'block';
         panel.innerHTML =
           '<div class="detail-header"><h4>' + esc(f.title || 'Finding Detail') + '</h4><button class="btn-icon" id="close-global-detail">\u2715</button></div>' +
           '<div class="detail-meta"><span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || '') + '</span> ' +
             '<span class="mono">' + esc(f.agent_type || '') + '</span> \u00B7 <span class="mono">' + esc(f.technique || '') + '</span></div>' +
+          (owaspGlobal ? '<div class="detail-owasp">OWASP: ' + owaspGlobal + '</div>' : '') +
           (proof ? '<div class="detail-section"><div class="detail-label">Proof of Exploitation</div><pre class="detail-pre">' + esc(proof) + '</pre></div>' : '') +
-          (evidence ? '<div class="detail-section"><div class="detail-label">Evidence</div><pre class="detail-pre">' + esc(typeof evidence === 'string' ? evidence : JSON.stringify(evidence, null, 2)) + '</pre></div>' : '');
+          (evidence ? '<div class="detail-section"><div class="detail-label">Evidence</div><pre class="detail-pre">' + esc(typeof evidence === 'string' ? evidence : JSON.stringify(evidence, null, 2)) + '</pre></div>' : '') +
+          (f.raw_response ? '<div class="detail-section"><div class="detail-label">Raw Response</div><pre class="detail-pre">' + esc(String(f.raw_response).slice(0, 2000)) + '</pre></div>' : '');
         document.getElementById('close-global-detail').addEventListener('click', function () { panel.style.display = 'none'; });
         panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       });
