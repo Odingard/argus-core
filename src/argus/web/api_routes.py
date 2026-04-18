@@ -1193,8 +1193,9 @@ def create_production_router() -> APIRouter:
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         # Atomic write: read once, apply all changes, write once
+        # Route API keys to [keys] section to match set_value() convention
         data = _read_config()
-        data[config_key] = body.api_key
+        data.setdefault("keys", {})[config_key] = body.api_key
         if body.provider == "custom" and body.endpoint:
             data["custom_endpoint"] = body.endpoint
         _write_config(data)
