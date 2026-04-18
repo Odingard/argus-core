@@ -229,7 +229,7 @@ class PersonaHijackingAgent(LLMAttackAgent):
         """Run persona hijacking attacks against the target agent."""
         endpoint = self.config.target.agent_endpoint
         if not endpoint:
-            logger.info("PersonaHijacking: no agent_endpoint configured, skipping")
+            await self._emit_skipped("no agent_endpoint configured")
             return
 
         base_url = self._derive_base(endpoint)
@@ -277,8 +277,12 @@ class PersonaHijackingAgent(LLMAttackAgent):
 
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         if not chat_endpoints:
-            logger.debug("PersonaHijacking: %s has no chat surface, skipping", base_url)
-            return
+            fallback = self._configured_endpoint_path()
+            if not fallback:
+                logger.debug("PersonaHijacking: %s has no chat surface, skipping", base_url)
+                return
+            logger.info("PersonaHijacking: using configured endpoint path %s as chat surface", fallback)
+            chat_endpoints = [type("_EP", (), {"path": fallback})]
 
         chat_path = chat_endpoints[0].path
 

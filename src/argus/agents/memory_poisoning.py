@@ -115,7 +115,7 @@ class MemoryPoisoningAgent(LLMAttackAgent):
         """Run memory-poisoning attack against the target agent endpoint."""
         endpoint = self.config.target.agent_endpoint
         if not endpoint:
-            logger.info("MemoryPoisoning: no agent_endpoint configured, skipping")
+            await self._emit_skipped("no agent_endpoint configured")
             return
 
         # The agent_endpoint is a fully-qualified path like http://host:port/chat.
@@ -192,8 +192,12 @@ class MemoryPoisoningAgent(LLMAttackAgent):
         memory_endpoints = survey.endpoints_for(SurfaceClass.MEMORY)
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         if not chat_endpoints:
-            logger.debug("MemoryPoisoning: %s has no chat surface, skipping", base_url)
-            return
+            fallback = self._configured_endpoint_path()
+            if not fallback:
+                logger.debug("MemoryPoisoning: %s has no chat surface, skipping", base_url)
+                return
+            logger.info("MemoryPoisoning: using configured endpoint path %s as chat surface", fallback)
+            chat_endpoints = [type("_EP", (), {"path": fallback})]
 
         # We need *some* surface to write to. If no /memory endpoint exists
         # we still try the chat endpoint as the write vector — many agents
@@ -229,9 +233,36 @@ class MemoryPoisoningAgent(LLMAttackAgent):
         """Plant one poison payload, then fire all trigger messages and look for leaks."""
         self._techniques_attempted += 1
 
-        # PLANT phase — try every plausible write surface until one accepts
+        # P3: Generate canary tokens to embed alongside the poison payload.
+        # If the canary surfaces in a trigger response from a different session,
+        # that proves cross-session data leakage — not just behavioral shift.
+        canaries = CanaryPropagator.generate_set(count=2)
+        canary_text = " ".join(canaries)
+
+        # Collect a baseline response BEFORE planting poison so we can
+        # measure divergence in trigger responses.
+        baseline_text = ""
+        try:
+            baseline_spec = TurnSpec(
+                name=f"baseline:{poison['technique']}",
+                method="POST",
+                path=chat_path,
+                body={
+                    "session_id": "baseline-user",
+                    "message": "Hello, can you help me?",
+                },
+            )
+            baseline_result = await session.turn(baseline_spec)
+            if baseline_result.ok():
+                baseline_text = baseline_result.response_text
+        except (ValueError, Exception):
+            logger.debug("Baseline collection failed (best-effort)")
+
+        # PLANT phase — try every plausible write surface until one accepts.
+        # Embed canary tokens in the poison content so we can prove propagation.
         plant_result: TurnResult | None = None
         plant_path: str | None = None
+        enriched_content = f"{poison['content']} Reference code: {canary_text}"
         for write_path in write_paths:
             spec = TurnSpec(
                 name=f"plant:{poison['technique']}",
@@ -239,9 +270,9 @@ class MemoryPoisoningAgent(LLMAttackAgent):
                 path=write_path,
                 body={
                     "session_id": "argus-attacker",
-                    "content": poison["content"],
+                    "content": enriched_content,
                     "role": "user",
-                    "message": poison["content"],
+                    "message": enriched_content,
                 },
             )
             try:
@@ -258,7 +289,8 @@ class MemoryPoisoningAgent(LLMAttackAgent):
             # No write surface accepted the payload
             return
 
-        # TRIGGER phase — fire each trigger message and look for evidence
+        # TRIGGER phase — fire each trigger message from a DIFFERENT session
+        # context and look for evidence of the planted content leaking through.
         for trigger_msg in _TRIGGER_MESSAGES:
             spec = TurnSpec(
                 name=f"trigger:{poison['technique']}",
@@ -277,7 +309,11 @@ class MemoryPoisoningAgent(LLMAttackAgent):
             if not trigger_result.ok():
                 continue
 
-            evidence = self._evaluate_trigger_response(trigger_result)
+            evidence = self._evaluate_trigger_response(
+                trigger_result,
+                baseline_text=baseline_text,
+                canaries=canaries,
+            )
             if evidence is None:
                 continue
 

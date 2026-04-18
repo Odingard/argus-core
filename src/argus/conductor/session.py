@@ -199,6 +199,9 @@ class ConversationSession:
         auth_token: str | None = None,
         csrf_mode: bool = False,
         pool: ConnectionPool | None = None,
+        body_format: str = "json",
+        prompt_field: str = "message",
+        extra_fields: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         parsed = urlparse(self.base_url)
@@ -213,6 +216,10 @@ class ConversationSession:
         self._transport = transport
         self.history: list[TurnResult] = []
         self._client: httpx.AsyncClient | None = None
+        # P2: Body format negotiation — "json" or "formdata"
+        self._body_format = body_format
+        self._prompt_field = prompt_field
+        self._extra_fields: dict[str, str] = extra_fields or {}
         # T3: CSRF token handling
         self._csrf_mode = csrf_mode
         self._csrf_token: str | None = None
@@ -336,6 +343,28 @@ class ConversationSession:
                     url,
                     files=spec.multipart_files,
                     data=spec.multipart_data or {},
+                    headers=headers,
+                )
+            elif self._body_format == "formdata":
+                # P2: Send as multipart/form-data with configured field names
+                form_data: dict[str, str] = {**self._extra_fields}
+                if spec.body is not None:
+                    # Extract the prompt text from the JSON body using prompt_field
+                    prompt_text = spec.body.get(self._prompt_field, "")
+                    if not prompt_text:
+                        # Fallback: try common field names
+                        for key in ("message", "prompt", "content", "input", "query", "text"):
+                            if key in spec.body and spec.body[key]:
+                                prompt_text = spec.body[key]
+                                break
+                    form_data[self._prompt_field] = str(prompt_text)
+                # Use files= parameter to get true multipart/form-data encoding;
+                # httpx sends application/x-www-form-urlencoded with data= dicts.
+                multipart_fields = {k: (None, v) for k, v in form_data.items()}
+                response = await self._client.request(
+                    spec.method,
+                    url,
+                    files=multipart_fields,
                     headers=headers,
                 )
             else:

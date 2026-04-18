@@ -110,11 +110,53 @@ class LLMAttackAgent(BaseAttackAgent):
         )
 
     def _make_session(self, base_url: str, timeout_seconds: float = 15.0) -> ConversationSession:
-        """Create a ConversationSession with the target's auth token pre-wired."""
+        """Create a ConversationSession with the target's auth token and body format pre-wired."""
+        target = self.config.target
+        # Resolve body_format: "auto" means use json (default); explicit "formdata" threads through
+        body_fmt = target.body_format if target.body_format != "auto" else "json"
         return ConversationSession(
             base_url=base_url,
             timeout_seconds=timeout_seconds,
             auth_token=self._target_auth_token,
+            body_format=body_fmt,
+            prompt_field=target.prompt_field,
+            extra_fields=target.extra_fields if target.extra_fields else None,
+        )
+
+    def _configured_endpoint_path(self) -> str | None:
+        """Extract the path component of the user-configured agent_endpoint.
+
+        When the prober finds no chat surfaces but the user explicitly
+        provided --target / --agent-endpoint, we should use that path
+        as the chat surface rather than silently skipping.
+        """
+        endpoint = self.config.target.agent_endpoint
+        if not endpoint:
+            return None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        return path
+
+    async def _emit_skipped(self, reason: str) -> None:
+        """Emit a SKIPPED status signal and increment the skip counter.
+
+        Call this when the agent cannot operate (no endpoint, no surfaces,
+        etc.) so the scan report clearly shows why 0 findings were produced
+        instead of silently completing.
+        """
+        self._bases_skipped += 1
+        logger.info("%s: SKIPPED — %s", self.agent_type.value, reason)
+        await self.signal_bus.emit(
+            Signal(
+                signal_type=SignalType.AGENT_STATUS,
+                source_agent=self.agent_type.value,
+                source_instance=self.config.instance_id,
+                data={"status": "skipped", "reason": reason},
+            )
         )
 
     async def _check_survey_auth(self, survey: SurveyReport) -> bool:

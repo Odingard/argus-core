@@ -330,7 +330,7 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         """Run privilege escalation attacks."""
         endpoint = self.config.target.agent_endpoint
         if not endpoint:
-            logger.info("PrivilegeEscalation: no agent_endpoint configured, skipping")
+            await self._emit_skipped("no agent_endpoint configured")
             return
 
         base_url = self._derive_base(endpoint)
@@ -382,6 +382,16 @@ class PrivilegeEscalationAgent(LLMAttackAgent):
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         tool_call_endpoints = survey.endpoints_for(SurfaceClass.TOOL_CALL)
         tool_catalog_endpoints = survey.endpoints_for(SurfaceClass.TOOLS)
+
+        # P1 fallback: use configured endpoint path when prober finds no chat surface
+        if not chat_endpoints:
+            fallback = self._configured_endpoint_path()
+            if fallback:
+                logger.info(
+                    "PrivilegeEscalation: using configured endpoint path %s as chat surface",
+                    fallback,
+                )
+                chat_endpoints = [type("_EP", (), {"path": fallback})]
 
         # D1: Baseline collection — send a neutral command before attacks
         # so ResponseDivergence can compare escalated vs normal responses.

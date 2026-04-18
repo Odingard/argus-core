@@ -190,7 +190,7 @@ class ModelExtractionAgent(LLMAttackAgent):
         """Run model extraction attacks."""
         endpoint = self.config.target.agent_endpoint
         if not endpoint:
-            logger.info("ModelExtraction: no agent_endpoint configured, skipping")
+            await self._emit_skipped("no agent_endpoint configured")
             return
 
         base_url = self._derive_base(endpoint)
@@ -269,6 +269,13 @@ class ModelExtractionAgent(LLMAttackAgent):
         chat_endpoints = survey.endpoints_for(SurfaceClass.CHAT)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
+
+        # P1 fallback: use configured endpoint path when prober finds no chat surface
+        if not chat_endpoints:
+            fallback = self._configured_endpoint_path()
+            if fallback:
+                logger.info("ModelExtraction: using configured endpoint path %s as chat surface", fallback)
+                chat_endpoints = [type("_EP", (), {"path": fallback})]
 
         # D1: Baseline collection before attacks — reset first to avoid
         # stale baseline from a previous base URL being used for divergence.

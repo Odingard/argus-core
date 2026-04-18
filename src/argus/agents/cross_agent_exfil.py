@@ -133,7 +133,7 @@ class CrossAgentExfilAgent(LLMAttackAgent):
         """Run cross-agent exfiltration attacks."""
         endpoint = self.config.target.agent_endpoint
         if not endpoint:
-            logger.info("CrossAgentExfil: no agent_endpoint configured, skipping")
+            await self._emit_skipped("no agent_endpoint configured")
             return
 
         base_url = self._derive_base(endpoint)
@@ -191,6 +191,13 @@ class CrossAgentExfilAgent(LLMAttackAgent):
         identity_endpoints = survey.endpoints_for(SurfaceClass.IDENTITY)
         exfil_endpoints = survey.endpoints_for(SurfaceClass.EXFILTRATION)
         admin_endpoints = survey.endpoints_for(SurfaceClass.ADMIN)
+
+        # P1 fallback: use configured endpoint path when prober finds no chat surface
+        if not chat_endpoints:
+            fallback = self._configured_endpoint_path()
+            if fallback:
+                logger.info("CrossAgentExfil: using configured endpoint path %s as chat surface", fallback)
+                chat_endpoints = [type("_EP", (), {"path": fallback})]
 
         # Phase 1: Chat-based relay attacks
         if chat_endpoints:
