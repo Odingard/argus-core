@@ -86,9 +86,6 @@ def init_db() -> None:
     _seed_default_admin()
 
 
-_SEED_ADMIN_PW = os.environ.get("ARGUS_ADMIN_PASSWORD", "argus-admin")
-
-
 def _seed_default_admin() -> None:
     """Create the default admin user if no users exist yet.
 
@@ -100,9 +97,10 @@ def _seed_default_admin() -> None:
         repo = UserRepository()
         try:
             if repo.user_count() == 0:
+                seed_pw = os.environ.get("ARGUS_ADMIN_PASSWORD", "argus-admin")
                 repo.create(
                     username="admin",
-                    password=_SEED_ADMIN_PW,
+                    password=seed_pw,
                     role="admin",
                     display_name="Administrator",
                 )
