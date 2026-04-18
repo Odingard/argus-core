@@ -639,6 +639,19 @@ class ScanRepository:
             paths.append(d)
         return paths
 
+    def delete_scan(self, scan_id: str) -> bool:
+        """Delete a scan and all its children (findings, agents, compound paths)."""
+        scan = self._session.get(DBScan, scan_id)
+        if scan is None:
+            return False
+        self._session.query(DBCompoundPath).filter(DBCompoundPath.scan_id == scan_id).delete()
+        self._session.query(DBFinding).filter(DBFinding.scan_id == scan_id).delete()
+        self._session.query(DBScanAgent).filter(DBScanAgent.scan_id == scan_id).delete()
+        self._session.delete(scan)
+        self._session.commit()
+        logger.info("Deleted scan: %s", scan_id)
+        return True
+
     def get_scan_count(self, target_id: str | None = None, status: str | None = None) -> int:
         query = self._session.query(DBScan)
         if target_id:

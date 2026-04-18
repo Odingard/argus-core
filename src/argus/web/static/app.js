@@ -172,6 +172,7 @@ function connectSSE() {
     scanState.status = 'completed';
     Object.assign(scanState, flattenSnap(JSON.parse(e.data)));
     if (currentPage === 'live-scan') updateLiveScan();
+    updateBadges(); // Fix #4: refresh badges when scan completes
   });
   sseSource.addEventListener('failed', function () { scanState.status = 'failed'; });
   sseSource.addEventListener('cancelled', function () { scanState.status = 'cancelled'; });
@@ -258,13 +259,22 @@ async function doLogout() {
   showLogin();
 }
 
+// Fix #4: Counter badges that actually update from real data
 async function updateBadges() {
   try {
     var d = await apiJson('/api/dashboard/stats');
     var bf = document.getElementById('badge-findings');
-    if (bf) bf.textContent = d.total_findings || 0;
+    if (bf) {
+      var count = d.total_findings || 0;
+      bf.textContent = count;
+      bf.style.display = count > 0 ? '' : 'none';
+    }
     var bs = document.getElementById('badge-scans');
-    if (bs) bs.textContent = d.total_scans || 0;
+    if (bs) {
+      var scount = d.total_scans || 0;
+      bs.textContent = scount;
+      bs.style.display = scount > 0 ? '' : 'none';
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -397,6 +407,9 @@ function renderActivityFromState() {
   (scanState.activityLog || []).slice(-100).forEach(function (a) { appendActivity(a); });
 }
 
+// Fix #5: highlight sensitive keywords (passwords, accounts, secrets) in activity feed
+var SENSITIVE_PATTERNS = /\b(password|passwd|secret|token|api[_-]?key|credential|account|ssn|credit.card|private.key|auth|session|cookie|bearer)\b/gi;
+
 function appendActivity(a) {
   var body = document.getElementById('feed-body');
   if (!body) return;
@@ -404,8 +417,17 @@ function appendActivity(a) {
   var catMap = { finding: 'act-finding', probe: 'act-probe', status: 'act-status', technique: 'act-technique', recon: 'act-recon' };
   var catClass = catMap[cat] || 'act-status';
   var line = document.createElement('div');
+  var actionText = esc(a.action || '');
+  // Fix #5: Highlight sensitive keywords
+  var hasSensitive = SENSITIVE_PATTERNS.test(a.action || '');
+  SENSITIVE_PATTERNS.lastIndex = 0;
+  if (hasSensitive) {
+    actionText = actionText.replace(SENSITIVE_PATTERNS, '<span class="sensitive-highlight">$1</span>');
+    SENSITIVE_PATTERNS.lastIndex = 0;
+    catClass += ' act-sensitive';
+  }
   line.className = 'feed-line ' + catClass;
-  line.innerHTML = '<span class="feed-agent">' + esc((AGENTS[a.agent] || {}).badge || a.agent) + '</span> <span class="feed-cat">' + esc(cat) + '</span> ' + esc(a.action || '');
+  line.innerHTML = '<span class="feed-agent">' + esc((AGENTS[a.agent] || {}).badge || a.agent) + '</span> <span class="feed-cat">' + esc(cat) + '</span> ' + actionText;
   body.appendChild(line);
   if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) {
     body.scrollTop = body.scrollHeight;
@@ -470,7 +492,7 @@ async function stopScan() {
 }
 
 // ============================================================
-// PAGE: Scan History
+// PAGE: Scan History (Fix #1: delete button + actions column)
 // ============================================================
 registerPage('scan-history', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Scan History</h1></div><div class="page-loading">Loading\u2026</div></div>';
@@ -486,17 +508,36 @@ registerPage('scan-history', async function (el, _params, gen) {
         '<td><span class="status-pill status-' + esc(s.status || 'unknown') + '">' + esc(s.status || '-') + '</span></td>' +
         '<td>' + (s.total_findings || 0) + '</td>' +
         '<td>' + (s.duration ? s.duration.toFixed(1) + 's' : '-') + '</td>' +
-        '<td>' + fmtDate(s.created_at) + '</td></tr>';
+        '<td>' + fmtDate(s.created_at) + '</td>' +
+        '<td class="actions-cell"><button class="btn-icon btn-delete-scan" data-scan-id="' + esc(sid) + '" title="Delete scan">\u2717</button></td></tr>';
     }).join('');
     el.innerHTML =
       '<div class="content"><div class="page-header"><h1>Scan History</h1><p class="page-sub">' + (data.total || 0) + ' scans recorded</p></div>' +
       (scans.length === 0 ? '<div class="empty-state">No scans yet. Run your first scan from Live Scan.</div>' :
-        '<div class="data-table"><table><thead><tr><th>Scan ID</th><th>Target</th><th>Status</th><th>Findings</th><th>Duration</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+        '<div class="data-table"><table><thead><tr><th>Scan ID</th><th>Target</th><th>Status</th><th>Findings</th><th>Duration</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
       '</div>';
+    // Click row to drill into scan detail
     el.querySelectorAll('.clickable-row').forEach(function (row) {
-      row.addEventListener('click', function () {
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('.btn-delete-scan')) return; // don't navigate on delete click
         var id = row.getAttribute('data-scan-id');
         if (id) navigateTo('scan-detail', { scanId: id });
+      });
+    });
+    // Delete scan button
+    el.querySelectorAll('.btn-delete-scan').forEach(function (btn) {
+      btn.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var sid = btn.getAttribute('data-scan-id');
+        if (!confirm('Delete scan ' + sid.slice(0, 8) + ' and all its findings?')) return;
+        try {
+          var res = await apiFetch('/api/scans/' + sid, { method: 'DELETE' });
+          if (!res.ok) throw new Error('API ' + res.status);
+          navigateTo('scan-history'); // refresh
+          updateBadges();
+        } catch (err) {
+          alert('Failed to delete: ' + err.message);
+        }
       });
     });
   } catch (e) {
@@ -505,7 +546,7 @@ registerPage('scan-history', async function (el, _params, gen) {
 });
 
 // ============================================================
-// PAGE: Scan Detail
+// PAGE: Scan Detail (Fix #2: clickable findings drill-down, Fix #9: report button, Fix #10: agent progress)
 // ============================================================
 registerPage('scan-detail', async function (el, params, gen) {
   var scanId = params.scanId;
@@ -522,8 +563,17 @@ registerPage('scan-detail', async function (el, params, gen) {
     var findings = results[1].findings || [];
     var paths = results[2].compound_paths || [];
 
-    var findingRows = findings.map(function (f) {
-      return renderFindingRow(f);
+    // Fix #2: clickable finding rows with drill-down
+    var findingRows = findings.map(function (f, idx) {
+      var sev = esc(f.severity || 'info');
+      var tierClass = String(f.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return '<tr class="clickable-row finding-row" data-finding-idx="' + idx + '">' +
+        '<td><span class="severity-badge severity-' + tierClass + '">' + sev + '</span></td>' +
+        '<td class="mono">' + esc(f.agent_type || '') + '</td>' +
+        '<td>' + esc(f.title || '') + '</td>' +
+        '<td class="mono">' + esc(f.technique || '') + '</td>' +
+        '<td><span class="' + (f.status === 'validated' ? 'finding-validated' : 'finding-unvalidated') + '">' +
+        (f.status === 'validated' ? '\u2713 validated' : '\u25CB pending') + '</span></td></tr>';
     }).join('');
 
     var pathCards = paths.map(function (p) {
@@ -537,9 +587,14 @@ registerPage('scan-detail', async function (el, params, gen) {
         (stepHtml ? '<div class="chain-steps">' + stepHtml + '</div>' : '') + '</div>';
     }).join('');
 
+    // Fix #10: agent progress with completion status
+    var completedAgents = agents.filter(function (a) { return a.status === 'completed'; }).length;
+    var runningAgents = agents.filter(function (a) { return a.status === 'running'; }).length;
+    var skippedAgents = agents.filter(function (a) { return a.status === 'skipped'; }).length;
     var agentRows = agents.map(function (a) {
+      var statusClass = a.status === 'completed' ? 'status-completed' : a.status === 'running' ? 'status-running' : a.status === 'skipped' ? 'status-skipped' : 'status-' + esc(a.status || '');
       return '<tr><td>' + esc(agentName(a.agent_type)) + '</td>' +
-        '<td><span class="status-pill status-' + esc(a.status || '') + '">' + esc(a.status || '') + '</span></td>' +
+        '<td><span class="status-pill ' + statusClass + '">' + esc(a.status || '') + '</span></td>' +
         '<td>' + (a.findings_count || 0) + '</td>' +
         '<td>' + (a.techniques_attempted || 0) + '</td>' +
         '<td>' + (a.duration ? a.duration.toFixed(1) + 's' : '-') + '</td></tr>';
@@ -550,27 +605,91 @@ registerPage('scan-detail', async function (el, params, gen) {
       '<div class="content">' +
         '<div class="page-header"><div class="breadcrumb-nav"><a class="back-link" id="back-to-history">\u2190 Scan History</a></div>' +
           '<h1>Scan ' + esc(sid.slice(0, 8)) + '</h1>' +
-          '<p class="page-sub">' + esc(scan.target_name || '') + ' \u00B7 ' + esc(scan.status || '') + ' \u00B7 ' + fmtDate(scan.created_at) + '</p></div>' +
+          '<p class="page-sub">' + esc(scan.target_name || '') + ' \u00B7 ' + esc(scan.status || '') + ' \u00B7 ' + fmtDate(scan.created_at) + '</p>' +
+          '<div class="header-actions">' +
+            '<button class="btn-secondary" id="btn-download-report" title="Download HTML Report">\u2B07 Report</button>' +
+          '</div>' +
+        '</div>' +
         '<div class="kpi-row">' +
           '<div class="kpi-card"><div class="kpi-value">' + (scan.total_findings || 0) + '</div><div class="kpi-label">Findings</div></div>' +
           '<div class="kpi-card kpi-critical"><div class="kpi-value">' + findings.filter(function (f) { return f.severity === 'critical'; }).length + '</div><div class="kpi-label">Critical</div></div>' +
           '<div class="kpi-card kpi-high"><div class="kpi-value">' + findings.filter(function (f) { return f.severity === 'high'; }).length + '</div><div class="kpi-label">High</div></div>' +
           '<div class="kpi-card"><div class="kpi-value">' + paths.length + '</div><div class="kpi-label">Attack Chains</div></div>' +
         '</div>' +
+        // Fix #10: Agent completion summary bar
+        '<div class="agent-progress-bar">' +
+          '<span class="progress-label">Agents: </span>' +
+          '<span class="progress-completed">' + completedAgents + ' completed</span>' +
+          (runningAgents > 0 ? ' <span class="progress-running">' + runningAgents + ' running</span>' : '') +
+          (skippedAgents > 0 ? ' <span class="progress-skipped">' + skippedAgents + ' skipped</span>' : '') +
+          ' <span class="progress-total">/ ' + agents.length + ' total</span>' +
+        '</div>' +
         '<h3 class="section-title">Findings (' + findings.length + ')</h3>' +
         (findings.length === 0 ? '<div class="empty-state">No findings for this scan.</div>' :
           '<div class="data-table"><table><thead><tr><th>Severity</th><th>Agent</th><th>Title</th><th>Technique</th><th>Status</th></tr></thead><tbody>' + findingRows + '</tbody></table></div>') +
+        // Fix #2: Finding detail panel (hidden by default)
+        '<div class="finding-detail-panel" id="finding-detail" style="display:none;"></div>' +
         (paths.length > 0 ? '<h3 class="section-title">Compound Attack Paths (' + paths.length + ')</h3><div class="chain-list">' + pathCards + '</div>' : '') +
         (agents.length > 0 ? '<h3 class="section-title">Agent Results (' + agents.length + ')</h3><div class="data-table"><table><thead><tr><th>Agent</th><th>Status</th><th>Findings</th><th>Techniques</th><th>Duration</th></tr></thead><tbody>' + agentRows + '</tbody></table></div>' : '') +
       '</div>';
     document.getElementById('back-to-history').addEventListener('click', function () { navigateTo('scan-history'); });
+
+    // Fix #2: Wire finding row click to show detail panel
+    el.querySelectorAll('.finding-row').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var idx = parseInt(row.getAttribute('data-finding-idx'), 10);
+        var f = findings[idx];
+        if (!f) return;
+        var panel = document.getElementById('finding-detail');
+        if (!panel) return;
+        var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
+        var evidence = f.evidence || '';
+        var owaspTags = [f.owasp_agentic, f.owasp_llm].filter(Boolean).map(function (o) { return '<span class="owasp-agent">' + esc(String(o)) + '</span>'; }).join(' ');
+        panel.style.display = 'block';
+        panel.innerHTML =
+          '<div class="detail-header">' +
+            '<h4>' + esc(f.title || 'Finding Detail') + '</h4>' +
+            '<button class="btn-icon" id="close-finding-detail">\u2715</button>' +
+          '</div>' +
+          '<div class="detail-meta">' +
+            '<span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || '') + '</span> ' +
+            '<span class="mono">' + esc(f.agent_type || '') + '</span> \u00B7 ' +
+            '<span class="mono">' + esc(f.technique || '') + '</span> \u00B7 ' +
+            (f.status === 'validated' ? '<span class="finding-validated">\u2713 validated</span>' : '<span class="finding-unvalidated">\u25CB pending</span>') +
+          '</div>' +
+          (owaspTags ? '<div class="detail-owasp">OWASP: ' + owaspTags + '</div>' : '') +
+          (proof ? '<div class="detail-section"><div class="detail-label">Proof of Exploitation</div><pre class="detail-pre">' + esc(proof) + '</pre></div>' : '') +
+          (evidence ? '<div class="detail-section"><div class="detail-label">Evidence</div><pre class="detail-pre">' + esc(typeof evidence === 'string' ? evidence : JSON.stringify(evidence, null, 2)) + '</pre></div>' : '') +
+          (f.raw_response ? '<div class="detail-section"><div class="detail-label">Raw Response</div><pre class="detail-pre">' + esc(String(f.raw_response).slice(0, 2000)) + '</pre></div>' : '') +
+          (f.reproduction_steps ? '<div class="detail-section"><div class="detail-label">Reproduction Steps</div><pre class="detail-pre">' + esc(typeof f.reproduction_steps === 'string' ? f.reproduction_steps : JSON.stringify(f.reproduction_steps, null, 2)) + '</pre></div>' : '');
+        document.getElementById('close-finding-detail').addEventListener('click', function () { panel.style.display = 'none'; });
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+
+    // Fix #9: Report download button
+    document.getElementById('btn-download-report').addEventListener('click', async function () {
+      try {
+        var res = await apiFetch('/api/scans/' + scanId + '/report?format=html');
+        if (res.status === 404) { alert('HTML report not generated for this scan. Run a new scan to generate.'); return; }
+        if (!res.ok) throw new Error('API ' + res.status);
+        var html = await res.text();
+        var blob = new Blob([html], { type: 'text/html' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'argus-report-' + sid.slice(0, 8) + '.html'; a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Report download failed: ' + err.message);
+      }
+    });
   } catch (e) {
     el.innerHTML = '<div class="content"><div class="page-error">Failed to load scan: ' + esc(e.message) + '</div></div>';
   }
 });
 
 // ============================================================
-// PAGE: Findings
+// PAGE: Findings (Fix #3: grouped by agent, evidence/proof, drill-down)
 // ============================================================
 registerPage('findings', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>All Findings</h1></div><div class="page-loading">Loading\u2026</div></div>';
@@ -578,18 +697,100 @@ registerPage('findings', async function (el, _params, gen) {
     var data = await apiJson('/api/findings?limit=200');
     if (isStaleNav(gen)) return;
     var findings = data.findings || [];
-    var rows = findings.map(function (f) {
-      return '<tr><td><span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || 'info') + '</span></td>' +
-        '<td class="mono">' + esc(agentName(f.agent_type)) + '</td>' +
-        '<td>' + esc(f.title || '') + '</td>' +
-        '<td class="mono">' + esc((f.scan_id || '').slice(0, 8)) + '</td>' +
-        '<td><span class="' + (f.status === 'validated' ? 'finding-validated' : 'finding-unvalidated') + '">' + (f.status === 'validated' ? '\u2713 validated' : '\u25CB pending') + '</span></td></tr>';
-    }).join('');
-    el.innerHTML =
-      '<div class="content"><div class="page-header"><h1>All Findings</h1><p class="page-sub">' + (data.total || findings.length) + ' total</p></div>' +
-      (findings.length === 0 ? '<div class="empty-state">No findings recorded yet.</div>' :
-        '<div class="data-table"><table><thead><tr><th>Severity</th><th>Agent</th><th>Title</th><th>Scan</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+
+    // Fix #3: Group findings by agent
+    var byAgent = {};
+    findings.forEach(function (f) {
+      var key = f.agent_type || 'unknown';
+      if (!byAgent[key]) byAgent[key] = [];
+      byAgent[key].push(f);
+    });
+
+    // Severity filter pills
+    var critCount = findings.filter(function (f) { return f.severity === 'critical'; }).length;
+    var highCount = findings.filter(function (f) { return f.severity === 'high'; }).length;
+    var medCount = findings.filter(function (f) { return f.severity === 'medium'; }).length;
+    var filterHtml =
+      '<div class="filter-pills">' +
+        '<button class="filter-pill active" data-filter="all">All (' + findings.length + ')</button>' +
+        '<button class="filter-pill filter-critical" data-filter="critical">Critical (' + critCount + ')</button>' +
+        '<button class="filter-pill filter-high" data-filter="high">High (' + highCount + ')</button>' +
+        '<button class="filter-pill filter-medium" data-filter="medium">Medium (' + medCount + ')</button>' +
       '</div>';
+
+    // Build grouped sections
+    var sections = Object.keys(byAgent).sort().map(function (agentKey) {
+      var agentFindings = byAgent[agentKey];
+      var agentDisplay = agentName(agentKey);
+      var rows = agentFindings.map(function (f, idx) {
+        var sev = esc(f.severity || 'info');
+        var tierClass = String(f.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        var evidenceSnippet = f.description || f.raw_response ? String(f.description || f.raw_response || '').slice(0, 80) : '';
+        return '<tr class="clickable-row finding-global-row" data-severity="' + esc(f.severity || '') + '" data-agent="' + esc(agentKey) + '" data-fidx="' + idx + '">' +
+          '<td><span class="severity-badge severity-' + tierClass + '">' + sev + '</span></td>' +
+          '<td>' + esc(f.title || '') + '</td>' +
+          '<td class="mono">' + esc(f.technique || '') + '</td>' +
+          '<td class="evidence-cell">' + esc(evidenceSnippet) + '</td>' +
+          '<td class="mono">' + esc((f.scan_id || '').slice(0, 8)) + '</td>' +
+          '<td><span class="' + (f.status === 'validated' ? 'finding-validated' : 'finding-unvalidated') + '">' + (f.status === 'validated' ? '\u2713' : '\u25CB') + '</span></td></tr>';
+      }).join('');
+      return '<div class="agent-group" data-agent="' + esc(agentKey) + '">' +
+        '<div class="agent-group-header">' +
+          '<span class="agent-group-name">' + esc(agentDisplay) + '</span>' +
+          '<span class="agent-group-count">' + agentFindings.length + ' findings</span>' +
+        '</div>' +
+        '<div class="data-table"><table><thead><tr><th>Severity</th><th>Title</th><th>Technique</th><th>Evidence</th><th>Scan</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '</div>';
+    }).join('');
+
+    el.innerHTML =
+      '<div class="content"><div class="page-header"><h1>All Findings</h1><p class="page-sub">' + (data.total || findings.length) + ' total across ' + Object.keys(byAgent).length + ' agents</p></div>' +
+      filterHtml +
+      (findings.length === 0 ? '<div class="empty-state">No findings recorded yet.</div>' : sections) +
+      '<div class="finding-detail-panel" id="findings-global-detail" style="display:none;"></div>' +
+      '</div>';
+
+    // Severity filter logic
+    el.querySelectorAll('.filter-pill').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        el.querySelectorAll('.filter-pill').forEach(function (p) { p.classList.remove('active'); });
+        pill.classList.add('active');
+        var filterVal = pill.getAttribute('data-filter');
+        el.querySelectorAll('.finding-global-row').forEach(function (row) {
+          if (filterVal === 'all' || row.getAttribute('data-severity') === filterVal) {
+            row.style.display = '';
+          } else {
+            row.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // Click finding row to show detail panel
+    el.querySelectorAll('.finding-global-row').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var agentKey = row.getAttribute('data-agent');
+        var fidx = parseInt(row.getAttribute('data-fidx'), 10);
+        var f = byAgent[agentKey] && byAgent[agentKey][fidx];
+        if (!f) return;
+        var panel = document.getElementById('findings-global-detail');
+        if (!panel) return;
+        var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
+        var evidence = f.description || f.raw_response || '';
+        var owaspGlobal = [f.owasp_agentic, f.owasp_llm].filter(Boolean).map(function (o) { return '<span class="owasp-agent">' + esc(String(o)) + '</span>'; }).join(' ');
+        panel.style.display = 'block';
+        panel.innerHTML =
+          '<div class="detail-header"><h4>' + esc(f.title || 'Finding Detail') + '</h4><button class="btn-icon" id="close-global-detail">\u2715</button></div>' +
+          '<div class="detail-meta"><span class="severity-badge severity-' + esc(f.severity || 'info') + '">' + esc(f.severity || '') + '</span> ' +
+            '<span class="mono">' + esc(f.agent_type || '') + '</span> \u00B7 <span class="mono">' + esc(f.technique || '') + '</span></div>' +
+          (owaspGlobal ? '<div class="detail-owasp">OWASP: ' + owaspGlobal + '</div>' : '') +
+          (proof ? '<div class="detail-section"><div class="detail-label">Proof of Exploitation</div><pre class="detail-pre">' + esc(proof) + '</pre></div>' : '') +
+          (evidence ? '<div class="detail-section"><div class="detail-label">Evidence</div><pre class="detail-pre">' + esc(typeof evidence === 'string' ? evidence : JSON.stringify(evidence, null, 2)) + '</pre></div>' : '') +
+          (f.raw_response ? '<div class="detail-section"><div class="detail-label">Raw Response</div><pre class="detail-pre">' + esc(String(f.raw_response).slice(0, 2000)) + '</pre></div>' : '');
+        document.getElementById('close-global-detail').addEventListener('click', function () { panel.style.display = 'none'; });
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
   } catch (e) {
     el.innerHTML = '<div class="content"><div class="page-error">Failed to load findings: ' + esc(e.message) + '</div></div>';
   }
@@ -653,7 +854,7 @@ registerPage('owasp', async function (el, _params, gen) {
 });
 
 // ============================================================
-// PAGE: Targets
+// PAGE: Targets (Fix #7: add/edit/delete via UI)
 // ============================================================
 registerPage('targets', async function (el, _params, gen) {
   el.innerHTML = '<div class="content"><div class="page-header"><h1>Target Registry</h1></div><div class="page-loading">Loading\u2026</div></div>';
@@ -663,17 +864,82 @@ registerPage('targets', async function (el, _params, gen) {
     var targets = data.targets || [];
     var rows = targets.map(function (t) {
       var ep = t.agent_endpoint || (t.mcp_server_urls && t.mcp_server_urls[0]) || '-';
-      return '<tr><td><strong>' + esc(t.name || '') + '</strong></td>' +
+      var tid = t.id || '';
+      return '<tr>' +
+        '<td><strong>' + esc(t.name || '') + '</strong></td>' +
         '<td><span class="status-pill">' + esc(t.target_type || 'generic') + '</span></td>' +
         '<td>' + esc(t.environment || '-') + '</td>' +
         '<td class="mono">' + esc(ep.slice(0, 50)) + '</td>' +
-        '<td>' + fmtDate(t.created_at) + '</td></tr>';
+        '<td>' + fmtDate(t.created_at) + '</td>' +
+        '<td class="actions-cell"><button class="btn-icon btn-delete-target" data-target-id="' + esc(tid) + '" title="Delete target">\u2717</button></td></tr>';
     }).join('');
+
+    // Fix #7: Add target form
+    var addForm =
+      '<div class="card add-target-form" style="margin-bottom:20px;">' +
+        '<h3 class="card-title">Add New Target</h3>' +
+        '<div class="form-row">' +
+          '<input type="text" id="new-target-name" class="input" placeholder="Target name (e.g. Production API)" />' +
+          '<input type="text" id="new-target-endpoint" class="input" placeholder="Agent endpoint URL" />' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<input type="text" id="new-target-mcp" class="input" placeholder="MCP URLs (comma-separated, optional)" />' +
+          '<select id="new-target-type" class="input" style="max-width:180px;">' +
+            '<option value="ai_agent">AI Agent</option>' +
+            '<option value="mcp_server">MCP Server</option>' +
+            '<option value="pipeline">Pipeline</option>' +
+            '<option value="generic">Generic</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<input type="text" id="new-target-env" class="input" placeholder="Environment (e.g. production, staging)" style="max-width:250px;" />' +
+          '<button class="btn-primary" id="btn-add-target">+ Add Target</button>' +
+        '</div>' +
+      '</div>';
+
     el.innerHTML =
       '<div class="content"><div class="page-header"><h1>Target Registry</h1><p class="page-sub">' + (data.total || targets.length) + ' targets registered</p></div>' +
-      (targets.length === 0 ? '<div class="empty-state">No targets registered. Add targets via CLI or API.</div>' :
-        '<div class="data-table"><table><thead><tr><th>Name</th><th>Type</th><th>Environment</th><th>Endpoint</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+      addForm +
+      (targets.length === 0 ? '<div class="empty-state">No targets registered yet.</div>' :
+        '<div class="data-table"><table><thead><tr><th>Name</th><th>Type</th><th>Environment</th><th>Endpoint</th><th>Created</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
       '</div>';
+
+    // Wire add target button
+    document.getElementById('btn-add-target').addEventListener('click', async function () {
+      var name = document.getElementById('new-target-name').value.trim();
+      var endpoint = document.getElementById('new-target-endpoint').value.trim();
+      var mcp = document.getElementById('new-target-mcp').value.trim();
+      var ttype = document.getElementById('new-target-type').value;
+      var env = document.getElementById('new-target-env').value.trim();
+      if (!name) { alert('Enter a target name'); return; }
+      var body = { name: name, target_type: ttype };
+      if (endpoint) body.agent_endpoint = endpoint;
+      if (mcp) body.mcp_server_urls = mcp.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (env) body.environment = env;
+      try {
+        var res = await apiFetch('/api/targets', { method: 'POST', body: JSON.stringify(body) });
+        if (!res.ok) { var err = await res.json().catch(function () { return {}; }); throw new Error(err.detail || 'API ' + res.status); }
+        navigateTo('targets'); // refresh
+        updateBadges();
+      } catch (err) {
+        alert('Failed to add target: ' + err.message);
+      }
+    });
+
+    // Wire delete buttons
+    el.querySelectorAll('.btn-delete-target').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var tid = btn.getAttribute('data-target-id');
+        if (!confirm('Delete this target?')) return;
+        try {
+          var res = await apiFetch('/api/targets/' + tid, { method: 'DELETE' });
+          if (!res.ok) throw new Error('API ' + res.status);
+          navigateTo('targets'); // refresh
+        } catch (err) {
+          alert('Failed to delete: ' + err.message);
+        }
+      });
+    });
   } catch (e) {
     el.innerHTML = '<div class="content"><div class="page-error">Failed to load targets: ' + esc(e.message) + '</div></div>';
   }
@@ -825,11 +1091,25 @@ registerPage('settings', async function (el, _params, gen) {
         '</div>' +
       '</div>' +
 
+      // Fix #8: CTF / Engagement Mode
+      '<div class="card" style="margin-bottom:20px;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
+          '<div><h3 class="card-title" style="margin:0;">CTF / Engagement Mode</h3>' +
+            '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">When enabled, ARGUS highlights and collects extracted secrets (passwords, tokens, keys) found during scans for red team engagements and CTF events.</div></div>' +
+          '<label class="toggle-switch"><input type="checkbox" id="ctf-mode-toggle" ' + (localStorage.getItem('argus_ctf_mode') === 'true' ? 'checked' : '') + ' /><span class="toggle-slider"></span></label>' +
+        '</div>' +
+        '<div id="ctf-secrets-panel" style="' + (localStorage.getItem('argus_ctf_mode') === 'true' ? '' : 'display:none;') + '">' +
+          '<div class="detail-label">Captured Secrets (from all scans)</div>' +
+          '<div id="ctf-secrets-list" class="ctf-secrets-list"><div style="color:var(--text-muted);font-size:12px;">Loading\u2026</div></div>' +
+          '<button class="btn-secondary" id="btn-export-secrets" style="margin-top:8px;font-size:12px;">Export Secrets CSV</button>' +
+        '</div>' +
+      '</div>' +
+
       // Tier + DB + Session
       '<div class="settings-grid">' +
         '<div class="card"><h3 class="card-title">Tier Information</h3>' +
           '<div class="setting-row"><span class="setting-label">Active Tier</span><span class="setting-value" style="font-weight:700;color:var(--accent-purple);">' + esc(tierData.name || tierData.tier || 'CORE').toUpperCase() + '</span></div>' +
-          '<div class="setting-row"><span class="setting-label">Version</span><span class="setting-value mono">v' + esc(tierData.version || '0.1.8') + '</span></div>' +
+          '<div class="setting-row"><span class="setting-label">Version</span><span class="setting-value mono">v' + esc(tierData.version || '0.2.0') + '</span></div>' +
           '<div class="setting-row"><span class="setting-label">Features</span><span class="setting-value">' + (tierData.enabled_count || '-') + ' / ' + (tierData.total_count || '-') + '</span></div>' +
         '</div>' +
         '<div class="card"><h3 class="card-title">Database</h3>' +
@@ -912,6 +1192,82 @@ registerPage('settings', async function (el, _params, gen) {
         }
       });
     });
+
+    // Fix #8: CTF Mode toggle + secrets collection
+    var ctfToggle = document.getElementById('ctf-mode-toggle');
+    var ctfPanel = document.getElementById('ctf-secrets-panel');
+    if (ctfToggle) {
+      ctfToggle.addEventListener('change', function () {
+        localStorage.setItem('argus_ctf_mode', ctfToggle.checked ? 'true' : 'false');
+        if (ctfPanel) ctfPanel.style.display = ctfToggle.checked ? '' : 'none';
+        if (ctfToggle.checked) loadCTFSecrets();
+      });
+      if (ctfToggle.checked) loadCTFSecrets();
+    }
+
+    async function loadCTFSecrets() {
+      var list = document.getElementById('ctf-secrets-list');
+      if (!list) return;
+      try {
+        var data = await apiJson('/api/findings?limit=500');
+        var findings = data.findings || [];
+        // Extract secrets from findings that have proof_of_exploitation containing [EXTRACTED]
+        var secrets = [];
+        findings.forEach(function (f) {
+          var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
+          var evidence = typeof f.evidence === 'string' ? f.evidence : JSON.stringify(f.evidence || '');
+          var combined = proof + ' ' + evidence;
+          // Look for extracted secrets patterns
+          var extractMatch = combined.match(/\[EXTRACTED\]\s*(.+?)(?:\n|$)/i);
+          if (extractMatch) {
+            secrets.push({ agent: f.agent_type || '', technique: f.technique || '', secret: extractMatch[1].trim(), scan: (f.scan_id || '').slice(0, 8), severity: f.severity || '' });
+          }
+          // Also catch password/token/key disclosures
+          var passMatch = combined.match(/(?:password|secret|token|key)\s*(?:is|:|=)\s*["']?([^\s"'<>,]{3,})["']?/i);
+          if (passMatch && !extractMatch) {
+            secrets.push({ agent: f.agent_type || '', technique: f.technique || '', secret: passMatch[1].trim(), scan: (f.scan_id || '').slice(0, 8), severity: f.severity || '' });
+          }
+        });
+        if (secrets.length === 0) {
+          list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">No extracted secrets found yet. Run scans with CTF mode enabled.</div>';
+        } else {
+          var rows = secrets.map(function (s) {
+            return '<div class="ctf-secret-row">' +
+              '<span class="severity-badge severity-' + esc(s.severity) + '">' + esc(s.severity) + '</span> ' +
+              '<span class="mono ctf-secret-value">' + esc(s.secret) + '</span> ' +
+              '<span style="color:var(--text-muted);font-size:11px;">' + esc(s.agent) + ' / ' + esc(s.technique) + ' (scan ' + esc(s.scan) + ')</span>' +
+            '</div>';
+          }).join('');
+          list.innerHTML = '<div style="font-size:12px;color:var(--accent-green);margin-bottom:6px;">' + secrets.length + ' secrets captured</div>' + rows;
+        }
+      } catch (err) {
+        list.innerHTML = '<div style="color:var(--accent-red);font-size:12px;">Failed to load secrets: ' + esc(err.message) + '</div>';
+      }
+    }
+
+    // Export secrets as CSV
+    var exportBtn = document.getElementById('btn-export-secrets');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async function () {
+        var data = await apiJson('/api/findings?limit=500').catch(function () { return { findings: [] }; });
+        var findings = data.findings || [];
+        var csv = 'Agent,Technique,Secret,Scan ID,Severity\n';
+        findings.forEach(function (f) {
+          var proof = f.proof_of_exploitation || (f.validation && f.validation.proof_of_exploitation) || '';
+          var evidence = typeof f.evidence === 'string' ? f.evidence : JSON.stringify(f.evidence || '');
+          var combined = proof + ' ' + evidence;
+          var match = combined.match(/\[EXTRACTED\]\s*(.+?)(?:\n|$)/i) || combined.match(/(?:password|secret|token|key)\s*(?:is|:|=)\s*["']?([^\s"'<>,]{3,})["']?/i);
+          if (match) {
+            csv += '"' + (f.agent_type || '').replace(/"/g, '""') + '","' + (f.technique || '').replace(/"/g, '""') + '","' + match[1].trim().replace(/"/g, '""') + '","' + (f.scan_id || '').slice(0, 8) + '","' + (f.severity || '') + '"\n';
+          }
+        });
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'argus-secrets-export.csv'; a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
 
   } catch (e) {
     el.innerHTML = '<div class="content"><div class="page-error">Failed to load settings: ' + esc(e.message) + '</div></div>';

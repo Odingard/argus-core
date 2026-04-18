@@ -282,6 +282,17 @@ def create_production_router() -> APIRouter:
         finally:
             repo.close()
 
+    @router.delete("/scans/{scan_id}", dependencies=[Depends(require_role("write"))])
+    async def delete_scan(scan_id: str) -> dict[str, str]:
+        """Delete a scan and all its children (findings, agents, compound paths)."""
+        repo = ScanRepository()
+        try:
+            if not repo.delete_scan(scan_id):
+                raise HTTPException(status_code=404, detail="Scan not found")
+            return {"status": "deleted", "scan_id": scan_id}
+        finally:
+            repo.close()
+
     @router.get("/scans/{scan_id}/compound-paths", dependencies=[Depends(require_role("read"))])
     async def get_scan_compound_paths(scan_id: str) -> dict[str, Any]:
         repo = ScanRepository()
