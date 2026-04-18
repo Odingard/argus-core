@@ -1208,14 +1208,21 @@ def create_production_router() -> APIRouter:
     @router.delete("/settings/llm-keys/{provider}", dependencies=[Depends(require_role("admin"))])
     async def delete_llm_key(provider: str) -> dict[str, Any]:
         """Remove an LLM API key from the persistent config."""
-        from argus.config import delete as config_delete
+        from argus.config import _read_config, _write_config
 
         config_key = _PROVIDER_CONFIG_MAP.get(provider)
         if not config_key:
             raise HTTPException(status_code=400, detail="Unknown provider")
-        found = config_delete(config_key)
-        if provider == "custom":
-            config_delete("custom_endpoint")
+        # Atomic delete: read once, remove all related keys, write once
+        data = _read_config()
+        found = False
+        keys_section = data.get("keys", {})
+        if config_key in keys_section:
+            del keys_section[config_key]
+            found = True
+        if provider == "custom" and "custom_endpoint" in data:
+            del data["custom_endpoint"]
+        _write_config(data)
         return {"status": "deleted" if found else "not_found", "provider": provider}
 
     @router.post("/settings/llm-keys/{provider}/test", dependencies=[Depends(require_role("admin"))])
