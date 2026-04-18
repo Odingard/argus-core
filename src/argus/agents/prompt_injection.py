@@ -1842,9 +1842,9 @@ class PromptInjectionHunter(LLMAttackAgent):
                 if len(val) >= 2 and val not in extracted_secrets:
                     extracted_secrets.append(val)
 
-        proof = f"Injection payload caused observable behavior change. " f"Response excerpt: {resp_text[:300]}"
+        proof = f"Injection payload caused observable behavior change. Response excerpt: {resp_text[:300]}"
         if extracted_secrets:
-            proof = f"[EXTRACTED] Secret disclosed: {', '.join(extracted_secrets)}\n" f"Response: {resp_text[:300]}"
+            proof = f"[EXTRACTED] Secret disclosed: {', '.join(extracted_secrets)}\nResponse: {resp_text[:300]}"
 
         finding = self._build_finding(
             title=title,
