@@ -148,14 +148,23 @@ class ReportRenderer:
             findings_table.add_column("Severity", justify="center", width=10)
             findings_table.add_column("Agent", width=22)
             findings_table.add_column("Title")
+            findings_table.add_column("Evidence", max_width=60)
 
             for f in sorted(validated, key=lambda x: list(FindingSeverity).index(x.severity)):
                 sev_style = sev_styles.get(f.severity, "white")
                 agent_color = agent_color_by_value(f.agent_type)
+                # Surface extracted secrets prominently
+                evidence_text = ""
+                proof = getattr(f, "proof_of_exploitation", "") or ""
+                if proof.startswith("[EXTRACTED]"):
+                    evidence_text = proof.split("\n")[0]
+                elif f.raw_response:
+                    evidence_text = f.raw_response[:80] + ("..." if len(f.raw_response) > 80 else "")
                 findings_table.add_row(
                     Text(f.severity.value.upper(), style=sev_style),
                     Text(f.agent_type, style=f"bold {agent_color}"),
                     f.title,
+                    Text(evidence_text, style="bold green" if "[EXTRACTED]" in evidence_text else "dim"),
                 )
 
         # Assemble output
