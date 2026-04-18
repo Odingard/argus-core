@@ -24,6 +24,8 @@ from argus.db.models import (
     DBScan,
     DBScanAgent,
     DBTarget,
+    DBUser,
+    DBUserSession,
 )
 from argus.db.session import get_session
 
@@ -43,6 +45,155 @@ def _hash_key(raw_key: str) -> str:
 def _to_dict(obj: Any) -> dict[str, Any]:
     """Convert a SQLAlchemy model instance to a plain dict."""
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+
+
+# ---------------------------------------------------------------------------
+# User CRUD
+# ---------------------------------------------------------------------------
+
+
+def _hash_password(password: str, salt: str) -> str:
+    """SHA-256 hash a password with a salt."""
+    return hashlib.sha256(f"{salt}${password}".encode()).hexdigest()
+
+
+class UserRepository:
+    """CRUD operations for user accounts and sessions."""
+
+    VALID_ROLES = frozenset({"admin", "operator", "viewer"})
+
+    def __init__(self, session: Session | None = None) -> None:
+        self._session = session or get_session()
+
+    def create(
+        self,
+        username: str,
+        password: str,
+        role: str = "viewer",
+        email: str | None = None,
+        display_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new user. Raises ValueError if username already exists."""
+        if role not in self.VALID_ROLES:
+            raise ValueError(f"Invalid role: {role}")
+        if len(username) < 3:
+            raise ValueError("Username must be at least 3 characters")
+        if len(password) < 6:
+            raise ValueError("Password must be at least 6 characters")
+
+        existing = self._session.query(DBUser).filter(DBUser.username == username).first()
+        if existing:
+            raise ValueError(f"Username '{username}' already exists")
+
+        salt = secrets.token_hex(16)
+        pw_hash = _hash_password(password, salt)
+
+        user = DBUser(
+            username=username,
+            password_hash=pw_hash,
+            password_salt=salt,
+            email=email,
+            display_name=display_name or username,
+            role=role,
+        )
+        self._session.add(user)
+        self._session.commit()
+        logger.info("Created user: %s (role=%s)", username, role)
+        return self._safe_dict(user)
+
+    def authenticate(self, username: str, password: str) -> dict[str, Any] | None:
+        """Verify username/password. Returns user dict or None."""
+        user = self._session.query(DBUser).filter(DBUser.username == username, DBUser.is_active.is_(True)).first()
+        if user is None:
+            return None
+        expected = _hash_password(password, user.password_salt)
+        if not secrets.compare_digest(expected, user.password_hash):
+            return None
+        user.last_login_at = datetime.now(UTC)
+        self._session.commit()
+        return self._safe_dict(user)
+
+    def create_session(
+        self,
+        user_id: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        ttl_hours: int = 24,
+    ) -> dict[str, Any]:
+        """Create a new login session for a user. Returns session with raw token."""
+        from datetime import timedelta
+
+        token = f"argus_sess_{secrets.token_urlsafe(48)}"
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        sess = DBUserSession(
+            user_id=user_id,
+            session_token=token_hash,
+            expires_at=datetime.now(UTC) + timedelta(hours=ttl_hours),
+            ip_address=ip_address,
+            user_agent=(user_agent or "")[:500],
+        )
+        self._session.add(sess)
+        self._session.commit()
+        result = _to_dict(sess)
+        result["raw_token"] = token
+        return result
+
+    def validate_session(self, raw_token: str) -> dict[str, Any] | None:
+        """Validate a session token. Returns user dict if valid, None otherwise."""
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        sess = self._session.query(DBUserSession).filter(DBUserSession.session_token == token_hash).first()
+        if sess is None:
+            return None
+        expires = sess.expires_at if sess.expires_at.tzinfo else sess.expires_at.replace(tzinfo=UTC)
+        if expires < datetime.now(UTC):
+            self._session.delete(sess)
+            self._session.commit()
+            return None
+        user = self._session.get(DBUser, sess.user_id)
+        if user is None or not user.is_active:
+            return None
+        return self._safe_dict(user)
+
+    def invalidate_session(self, raw_token: str) -> bool:
+        """Invalidate (delete) a session token."""
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        sess = self._session.query(DBUserSession).filter(DBUserSession.session_token == token_hash).first()
+        if sess is None:
+            return False
+        self._session.delete(sess)
+        self._session.commit()
+        return True
+
+    def get_by_username(self, username: str) -> dict[str, Any] | None:
+        user = self._session.query(DBUser).filter(DBUser.username == username, DBUser.is_active.is_(True)).first()
+        if user is None:
+            return None
+        return self._safe_dict(user)
+
+    def get_by_id(self, user_id: str) -> dict[str, Any] | None:
+        user = self._session.get(DBUser, user_id)
+        if user is None or not user.is_active:
+            return None
+        return self._safe_dict(user)
+
+    def list_all(self, active_only: bool = True) -> list[dict[str, Any]]:
+        query = self._session.query(DBUser)
+        if active_only:
+            query = query.filter(DBUser.is_active.is_(True))
+        query = query.order_by(desc(DBUser.created_at))
+        return [self._safe_dict(u) for u in query.all()]
+
+    def user_count(self) -> int:
+        return self._session.query(DBUser).filter(DBUser.is_active.is_(True)).count()
+
+    def _safe_dict(self, user: DBUser) -> dict[str, Any]:
+        d = _to_dict(user)
+        d.pop("password_hash", None)
+        d.pop("password_salt", None)
+        return d
+
+    def close(self) -> None:
+        self._session.close()
 
 
 # ---------------------------------------------------------------------------

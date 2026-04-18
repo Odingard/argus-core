@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import status as http_status
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
-from argus.db.repository import APIKeyRepository, ScanRepository, TargetRepository, _to_dict
+from argus.db.repository import APIKeyRepository, ScanRepository, TargetRepository, UserRepository, _to_dict
 from argus.db.session import init_db
 from argus.web.auth import AuthContext, require_role
 
@@ -103,6 +104,19 @@ class TargetUpdate(BaseModel):
 
 class FindingStatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(open|triaged|resolved|false_positive|unvalidated|validated)$")
+
+
+class UserLogin(BaseModel):
+    username: str = Field(..., min_length=3, max_length=100)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class UserRegister(BaseModel):
+    username: str = Field(..., min_length=3, max_length=100)
+    password: str = Field(..., min_length=6, max_length=200)
+    email: str | None = Field(default=None, max_length=200)
+    display_name: str | None = Field(default=None, max_length=200)
+    role: str = Field(default="viewer", pattern="^(admin|operator|viewer)$")
 
 
 class APIKeyCreate(BaseModel):
@@ -332,6 +346,120 @@ def create_production_router() -> APIRouter:
             "key_name": auth.key_name,
             "auth_method": auth.auth_method,
         }
+
+    # ------------------------------------------------------------------
+    # User Login (username/password)
+    # ------------------------------------------------------------------
+
+    @router.post("/auth/user-login")
+    async def user_login(body: UserLogin, request: Request) -> dict[str, Any]:
+        """Authenticate with username/password. Returns a session token."""
+        repo = UserRepository()
+        try:
+            user = repo.authenticate(body.username, body.password)
+            if user is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid username or password",
+                )
+            session = repo.create_session(
+                user_id=user["id"],
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("User-Agent"),
+            )
+            return {
+                "status": "authenticated",
+                "session_token": session["raw_token"],
+                "user": {
+                    "id": user["id"],
+                    "username": user["username"],
+                    "display_name": user.get("display_name", user["username"]),
+                    "email": user.get("email"),
+                    "role": user["role"],
+                },
+            }
+        finally:
+            repo.close()
+
+    @router.post("/auth/user-logout")
+    async def user_logout(
+        request: Request,
+        auth: AuthContext = Depends(require_role("read")),
+    ) -> dict[str, str]:
+        """Invalidate the current session token."""
+        # Extract the raw token from the request
+        alt_token = request.headers.get("X-Argus-Token", "").strip()
+        if alt_token:
+            token = alt_token
+        else:
+            auth_header = request.headers.get("Authorization", "")
+            token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+
+        if token.startswith("argus_sess_"):
+            repo = UserRepository()
+            try:
+                repo.invalidate_session(token)
+            finally:
+                repo.close()
+        return {"status": "logged_out"}
+
+    @router.get("/auth/me")
+    async def auth_me(
+        auth: AuthContext = Depends(require_role("read")),
+    ) -> dict[str, Any]:
+        """Return current user info from session or API key."""
+        result: dict[str, Any] = {
+            "authenticated": True,
+            "role": auth.role.value,
+            "auth_method": auth.auth_method,
+            "key_name": auth.key_name,
+        }
+        if auth.auth_method == "user_session" and auth.key_id:
+            repo = UserRepository()
+            try:
+                user = repo.get_by_id(auth.key_id)
+                if user:
+                    result["user"] = {
+                        "id": user["id"],
+                        "username": user["username"],
+                        "display_name": user.get("display_name", user["username"]),
+                        "email": user.get("email"),
+                        "role": user["role"],
+                    }
+            finally:
+                repo.close()
+        return result
+
+    @router.post("/auth/register")
+    async def register_user(
+        body: UserRegister,
+        auth: AuthContext = Depends(require_role("admin")),
+    ) -> dict[str, Any]:
+        """Register a new user (admin only)."""
+        repo = UserRepository()
+        try:
+            user = repo.create(
+                username=body.username,
+                password=body.password,
+                role=body.role,
+                email=body.email,
+                display_name=body.display_name,
+            )
+            return {"user": user}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            repo.close()
+
+    @router.get("/auth/users", dependencies=[Depends(require_role("admin"))])
+    async def list_users() -> dict[str, Any]:
+        """List all users (admin only)."""
+        repo = UserRepository()
+        try:
+            users = repo.list_all()
+            return {"users": users, "total": len(users)}
+        finally:
+            repo.close()
 
     @router.post("/auth/keys")
     async def create_api_key(

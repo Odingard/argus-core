@@ -1,8 +1,9 @@
 """Authentication and authorization middleware for ARGUS web API.
 
-Supports two auth modes:
-1. Legacy bearer token (ARGUS_WEB_TOKEN) — backwards compatible
+Supports three auth modes (checked in order):
+1. User session token (argus_sess_*) — username/password login sessions
 2. Database API keys with role-based access control (admin/operator/viewer)
+3. Legacy bearer token (ARGUS_WEB_TOKEN) — backwards compatible
 
 Role permissions:
 - admin: Full access (manage keys, targets, scans, view all)
@@ -95,7 +96,34 @@ async def authenticate(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Try database API key first
+    # Try user session token first (argus_sess_* prefix)
+    if token.startswith("argus_sess_"):
+        try:
+            from argus.db.repository import UserRepository
+
+            repo = UserRepository()
+            try:
+                user_info = repo.validate_session(token)
+            finally:
+                repo.close()
+            if user_info:
+                return AuthContext(
+                    authenticated=True,
+                    role=Role(user_info["role"]),
+                    key_name=user_info.get("display_name") or user_info["username"],
+                    key_id=user_info["id"],
+                    auth_method="user_session",
+                )
+        except Exception:  # noqa: S110
+            pass
+        # Session token format but invalid — don't fall through to API key check
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Try database API key
     try:
         from argus.db.repository import APIKeyRepository
 

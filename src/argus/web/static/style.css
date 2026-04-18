@@ -918,6 +918,39 @@ body.embed-cards .attacker-grid {
   min-height: 16px;
 }
 
+.login-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.login-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.login-tab:hover {
+  color: var(--text-primary);
+}
+
+.login-tab.active {
+  color: var(--accent-purple);
+  border-bottom-color: var(--accent-purple);
+}
+
+.login-form {
+  text-align: center;
+}
+
 /* ============================================================
    PAGE STATES
    ============================================================ */

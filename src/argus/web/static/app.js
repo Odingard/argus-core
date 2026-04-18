@@ -198,6 +198,8 @@ function flattenSnap(s) {
 // --- Login ---
 function showLogin() {
   document.getElementById('login-overlay').style.display = 'flex';
+  var errEl = document.getElementById('login-error');
+  if (errEl) errEl.textContent = '';
 }
 
 function hideLogin() {
@@ -219,6 +221,41 @@ async function attemptLogin(token) {
     document.getElementById('login-error').textContent = 'Authentication failed. Check your token.';
     AUTH.clear();
   }
+}
+
+async function attemptUserLogin(username, password) {
+  var errEl = document.getElementById('login-error');
+  if (errEl) errEl.textContent = '';
+  try {
+    var res = await fetch('/api/auth/user-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password }),
+    });
+    if (!res.ok) {
+      var body = await res.json().catch(function () { return {}; });
+      throw new Error(body.detail || 'Invalid username or password');
+    }
+    var data = await res.json();
+    AUTH.setToken(data.session_token);
+    localStorage.setItem('argus_user', JSON.stringify(data.user || {}));
+    hideLogin();
+    connectSSE();
+    navigateTo('dashboard');
+    updateBadges();
+  } catch (e) {
+    if (errEl) errEl.textContent = e.message || 'Login failed';
+  }
+}
+
+async function doLogout() {
+  try {
+    await fetch('/api/auth/user-logout', { method: 'POST', headers: AUTH.headers() });
+  } catch (e) { /* ignore */ }
+  AUTH.clear();
+  localStorage.removeItem('argus_user');
+  if (typeof sseSource !== 'undefined' && sseSource) { sseSource.close(); sseSource = null; }
+  showLogin();
 }
 
 async function updateBadges() {
@@ -811,9 +848,7 @@ registerPage('settings', async function (el, _params, gen) {
 
     // Logout
     document.getElementById('btn-logout').addEventListener('click', function () {
-      AUTH.clear();
-      if (sseSource) { sseSource.close(); sseSource = null; }
-      showLogin();
+      doLogout();
     });
 
     // Toggle password visibility
@@ -894,6 +929,44 @@ document.addEventListener('DOMContentLoaded', async function () {
     });
   });
 
+  // --- Login tab switching ---
+  var loginTabs = document.querySelectorAll('.login-tab');
+  loginTabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      loginTabs.forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      var which = tab.getAttribute('data-tab');
+      var userForm = document.getElementById('login-form-user');
+      var tokenForm = document.getElementById('login-form-token');
+      if (userForm) userForm.style.display = which === 'user' ? 'block' : 'none';
+      if (tokenForm) tokenForm.style.display = which === 'token' ? 'block' : 'none';
+      var errEl = document.getElementById('login-error');
+      if (errEl) errEl.textContent = '';
+    });
+  });
+
+  // --- User login ---
+  var loginBtnUser = document.getElementById('login-btn-user');
+  var usernameInput = document.getElementById('login-username');
+  var passwordInput = document.getElementById('login-password');
+  if (loginBtnUser) {
+    loginBtnUser.addEventListener('click', function () {
+      var u = usernameInput ? usernameInput.value.trim() : '';
+      var p = passwordInput ? passwordInput.value : '';
+      if (u && p) attemptUserLogin(u, p);
+    });
+  }
+  if (passwordInput) {
+    passwordInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        var u = usernameInput ? usernameInput.value.trim() : '';
+        var p = passwordInput.value;
+        if (u && p) attemptUserLogin(u, p);
+      }
+    });
+  }
+
+  // --- Token login (legacy) ---
   var loginBtn = document.getElementById('login-btn');
   var loginInput = document.getElementById('login-token');
   if (loginBtn) {

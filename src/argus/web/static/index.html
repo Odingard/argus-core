@@ -89,9 +89,28 @@
     <div class="login-card">
       <div class="login-logo">&#9673;</div>
       <h2>ARGUS War Room</h2>
-      <p class="login-sub">Enter your API token to continue</p>
-      <input type="password" id="login-token" placeholder="API Token" autocomplete="off" />
-      <button class="btn-primary login-btn" id="login-btn">Authenticate</button>
+
+      <!-- Tab switcher -->
+      <div class="login-tabs" id="login-tabs">
+        <button class="login-tab active" data-tab="user">User Login</button>
+        <button class="login-tab" data-tab="token">API Token</button>
+      </div>
+
+      <!-- User login form -->
+      <div class="login-form" id="login-form-user">
+        <p class="login-sub">Sign in with your username and password</p>
+        <input type="text" id="login-username" placeholder="Username" autocomplete="username" />
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" />
+        <button class="btn-primary login-btn" id="login-btn-user">Sign In</button>
+      </div>
+
+      <!-- Token login form (legacy) -->
+      <div class="login-form" id="login-form-token" style="display:none">
+        <p class="login-sub">Enter your API token to continue</p>
+        <input type="password" id="login-token" placeholder="API Token" autocomplete="off" />
+        <button class="btn-primary login-btn" id="login-btn">Authenticate</button>
+      </div>
+
       <p class="login-error" id="login-error"></p>
     </div>
   </div>

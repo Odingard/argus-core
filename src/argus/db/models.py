@@ -1,6 +1,8 @@
 """SQLAlchemy ORM models for ARGUS persistent storage.
 
 Tables:
+- users: Operator accounts with password authentication
+- user_sessions: Active login sessions (multiple per user)
 - targets: Client target configurations (MCP servers, agent endpoints)
 - api_keys: Authentication keys with role-based access control
 - scans: Scan execution records linked to targets
@@ -37,6 +39,53 @@ def _uuid() -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+class DBUser(Base):
+    """Operator account for ARGUS War Room.
+
+    Supports username/password login with multiple concurrent sessions.
+    Passwords are stored as SHA-256(salt + password) — no external deps.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    username = Column(String(100), nullable=False, unique=True, index=True)
+    password_hash = Column(String(256), nullable=False)  # sha256(salt$password)
+    password_salt = Column(String(64), nullable=False)
+    email = Column(String(200), nullable=True)
+    display_name = Column(String(200), nullable=True)
+    role = Column(String(20), nullable=False, default="viewer")  # admin, operator, viewer
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_login_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    sessions = relationship("DBUserSession", back_populates="user", lazy="dynamic")
+
+
+class DBUserSession(Base):
+    """Active login session for a user.
+
+    Supports multiple concurrent sessions per user (different browsers/devices).
+    """
+
+    __tablename__ = "user_sessions"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    session_token = Column(String(128), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+
+    # Relationship
+    user = relationship("DBUser", back_populates="sessions")
 
 
 class DBTarget(Base):
