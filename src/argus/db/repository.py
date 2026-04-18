@@ -57,6 +57,11 @@ def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations=600_000).hex()
 
 
+def _hash_password_legacy(password: str, salt: str) -> str:
+    """Legacy SHA-256 hash (v0.1.8). Used only for migration fallback."""
+    return hashlib.sha256(f"{salt}${password}".encode()).hexdigest()
+
+
 class UserRepository:
     """CRUD operations for user accounts and sessions."""
 
@@ -102,16 +107,30 @@ class UserRepository:
         return self._safe_dict(user)
 
     def authenticate(self, username: str, password: str) -> dict[str, Any] | None:
-        """Verify username/password. Returns user dict or None."""
+        """Verify username/password. Returns user dict or None.
+
+        Supports transparent migration from legacy SHA-256 hashes (v0.1.8)
+        to PBKDF2-HMAC-SHA256. If the stored hash matches the old algorithm,
+        re-hashes with PBKDF2 and updates the row.
+        """
         user = self._session.query(DBUser).filter(DBUser.username == username, DBUser.is_active.is_(True)).first()
         if user is None:
             return None
         expected = _hash_password(password, user.password_salt)
-        if not secrets.compare_digest(expected, user.password_hash):
-            return None
-        user.last_login_at = datetime.now(UTC)
-        self._session.commit()
-        return self._safe_dict(user)
+        if secrets.compare_digest(expected, user.password_hash):
+            user.last_login_at = datetime.now(UTC)
+            self._session.commit()
+            return self._safe_dict(user)
+        # Fallback: try legacy SHA-256 hash for pre-v0.1.9 users
+        legacy = _hash_password_legacy(password, user.password_salt)
+        if secrets.compare_digest(legacy, user.password_hash):
+            # Transparently upgrade to PBKDF2
+            user.password_hash = expected
+            user.last_login_at = datetime.now(UTC)
+            self._session.commit()
+            logger.info("Migrated user %s password hash to PBKDF2", username)
+            return self._safe_dict(user)
+        return None
 
     def create_session(
         self,
