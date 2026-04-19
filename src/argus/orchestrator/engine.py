@@ -318,6 +318,46 @@ class Orchestrator:
         # Shared intelligence context — Phase 1 writes, Phase 2 reads
         intel = ScanIntelligence()
 
+        # ── Autonomous format detection ──
+        # When body_format is "auto" (default), run a lightweight SURVEY
+        # probe to detect whether the target expects JSON or FormData and
+        # which field name carries the prompt.  The detected format is
+        # applied to TargetConfig so ALL agents use it automatically —
+        # no manual --body-format / --prompt-field flags needed.
+        if target.body_format == "auto" and target.agent_endpoint:
+            try:
+                from urllib.parse import urlparse
+
+                from argus.survey import EndpointProber
+
+                parsed = urlparse(target.agent_endpoint)
+                base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+                pre_prober = EndpointProber(
+                    base_url=base_url,
+                    timeout_seconds=min(10.0, timeout / 10.0),
+                    auth_token=target.agent_api_key,
+                )
+                pre_survey = await pre_prober.probe_all()
+                if pre_survey.detected_body_format != "json":
+                    target.body_format = pre_survey.detected_body_format
+                    target.prompt_field = pre_survey.detected_prompt_field
+                    logger.info(
+                        "ARGUS SCAN %s — auto-detected format: %s, field: '%s'",
+                        scan_id[:8],
+                        target.body_format,
+                        target.prompt_field,
+                    )
+                else:
+                    # Explicitly set to json so agents don't re-probe
+                    target.body_format = "json"
+            except Exception as exc:
+                logger.debug(
+                    "Pre-scan format detection failed: %s — defaulting to JSON",
+                    type(exc).__name__,
+                )
+                target.body_format = "json"
+
         # Split agents into Phase 1 (recon) and Phase 2 (attack)
         # Phase 1 agents run first to gather intelligence for Phase 2
         _RECON_AGENTS = {AgentType.MODEL_EXTRACTION}

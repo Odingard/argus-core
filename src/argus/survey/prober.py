@@ -519,7 +519,11 @@ class DiscoveredEndpoint(BaseModel):
     is_html_catchall: bool = Field(default=False, description="True when response is an HTML SPA shell (T1)")
     request_format: str = Field(
         default="message",
-        description="Body format that got a successful response: message, openai, prompt, form (T6)",
+        description="Body format that got a successful response: message, openai, prompt, formdata (T6)",
+    )
+    detected_prompt_field: str = Field(
+        default="message",
+        description="The field name the target accepts for the user prompt (auto-detected by format negotiation)",
     )
     error: str | None = None
 
@@ -553,6 +557,15 @@ class SurveyReport(BaseModel):
     auth_failure_count: int = Field(
         default=0,
         description="Number of probes that returned 401/403 — indicates missing or invalid auth",
+    )
+    # Autonomous format detection results — populated by format negotiation
+    detected_body_format: str = Field(
+        default="json",
+        description="Best body format detected: json or formdata",
+    )
+    detected_prompt_field: str = Field(
+        default="message",
+        description="Best prompt field name detected during format negotiation",
     )
 
     @property
@@ -893,6 +906,21 @@ class EndpointProber:
 
         report.auth_failure_count = auth_failures
 
+        # ── Propagate autonomous format detection results ──
+        # If any endpoint was successfully probed via FormData negotiation,
+        # record the detected format + field name on the SurveyReport so
+        # the orchestrator can apply it to all agents automatically.
+        for d in all_discoveries:
+            if d.request_format == "formdata" and d.is_live():
+                report.detected_body_format = "formdata"
+                report.detected_prompt_field = d.detected_prompt_field
+                logger.info(
+                    "SURVEY %s — auto-detected body format: formdata, prompt field: '%s'",
+                    self.base_url,
+                    d.detected_prompt_field,
+                )
+                break
+
         live_count = sum(1 for d in all_discoveries if d.is_live())
         logger.info(
             "SURVEY %s — %d/%d endpoints live across %d surface classes",
@@ -910,6 +938,10 @@ class EndpointProber:
                 len(all_discoveries),
             )
         return report
+
+    # Common prompt field names that real AI targets use — tried in order
+    # during autonomous format negotiation.
+    _FORMDATA_FIELD_NAMES = ("prompt", "message", "query", "input", "text")
 
     async def _probe_one(
         self,
@@ -931,6 +963,8 @@ class EndpointProber:
                 surface_class=surface,
                 error="absolute path rejected",
             )
+
+        # ── Initial probe (JSON body) ──
         async with self._semaphore:
             try:
                 resp = await client.request(method, url, json=body)
@@ -943,7 +977,50 @@ class EndpointProber:
                     error=f"{type(exc).__name__}: {str(exc)[:120]}",
                 )
 
-        # Use a larger snippet for the root probe to capture full endpoint indexes
+        # ── Autonomous format negotiation ──
+        # If the JSON probe was rejected with 405/415/422, the target may
+        # expect FormData instead (e.g. Gandalf uses multipart/form-data).
+        # Retry with FormData using common field names until one succeeds.
+        negotiated_format = "json"
+        negotiated_field = "message"
+        _FORMAT_REJECT_CODES = (405, 415, 422)
+
+        if method == "POST" and body is not None and resp.status_code in _FORMAT_REJECT_CODES:
+            logger.info(
+                "SURVEY %s %s — JSON rejected (%d), trying FormData negotiation...",
+                method,
+                url,
+                resp.status_code,
+            )
+            formdata_resp = None
+            for field_name in self._FORMDATA_FIELD_NAMES:
+                multipart_fields = {field_name: (None, "Hello, can you help me?")}
+                async with self._semaphore:
+                    try:
+                        formdata_resp = await client.request(
+                            method,
+                            url,
+                            files=multipart_fields,
+                        )
+                    except httpx.HTTPError:
+                        continue
+
+                # A 2xx status means this format+field combo works.
+                # 5xx / 3xx / 404 don't confirm format acceptance.
+                if 200 <= formdata_resp.status_code < 300:
+                    negotiated_format = "formdata"
+                    negotiated_field = field_name
+                    resp = formdata_resp
+                    logger.info(
+                        "SURVEY %s %s — FormData accepted with field '%s' (status %d)",
+                        method,
+                        url,
+                        field_name,
+                        resp.status_code,
+                    )
+                    break
+
+        # ── Parse the (possibly renegotiated) response ──
         max_snippet = 8192 if path == "/" else 1024
         raw_text = resp.text
         ct = resp.headers.get("content-type", "")
@@ -973,14 +1050,17 @@ class EndpointProber:
         html_catch = _is_html_catchall(ct, snippet)
 
         # T6: Record the body format that succeeded so agents can reuse it
-        fmt = "message"  # default
-        if body is not None:
-            if "messages" in body:
-                fmt = "openai"
-            elif "prompt" in body:
-                fmt = "prompt"
-            elif "input" in body:
-                fmt = "input"
+        if negotiated_format == "formdata":
+            fmt = "formdata"
+        else:
+            fmt = "message"  # default
+            if body is not None:
+                if "messages" in body:
+                    fmt = "openai"
+                elif "prompt" in body:
+                    fmt = "prompt"
+                elif "input" in body:
+                    fmt = "input"
 
         return DiscoveredEndpoint(
             base_url=self.base_url,
@@ -993,6 +1073,7 @@ class EndpointProber:
             content_type=ct,
             is_html_catchall=html_catch,
             request_format=fmt,
+            detected_prompt_field=negotiated_field,
         )
 
 
