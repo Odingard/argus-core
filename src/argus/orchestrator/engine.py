@@ -237,6 +237,35 @@ class Orchestrator:
     def get_registered_agents(self) -> list[AgentType]:
         return list(self._agent_registry.keys())
 
+    def _make_agent(
+        self,
+        agent_type: AgentType,
+        scan_id: str,
+        target: TargetConfig,
+        demo_pace_seconds: float,
+        verdict_adapter: VerdictAdapter,
+        intel: ScanIntelligence,
+        signal_bus: SignalBus | None = None,
+    ) -> BaseAttackAgent:
+        """Create and configure an attack agent instance.
+
+        Promoted to an instance method so the RecursivePlanner (and any
+        future sub-orchestrators) can spawn agents dynamically mid-scan.
+        """
+        config = AgentConfig(
+            agent_type=agent_type,
+            scan_id=scan_id,
+            target=target,
+            demo_pace_seconds=demo_pace_seconds,
+        )
+        agent_class = self._agent_registry[agent_type]
+        bus = signal_bus or self.signal_bus
+        agent = agent_class(config=config, signal_bus=bus)
+        agent.attach_verdict_adapter(verdict_adapter)
+        agent.attach_intel(intel)
+        self._active_agents[config.instance_id] = agent
+        return agent
+
     async def run_scan(
         self,
         target: TargetConfig,
@@ -318,6 +347,20 @@ class Orchestrator:
         # Shared intelligence context — Phase 1 writes, Phase 2 reads
         intel = ScanIntelligence()
 
+        # ── RecursivePlanner: always-on signal-driven pivoting ──
+        # Attaches to the signal bus and can spawn new agents mid-scan
+        # when it detects CVE signatures, trust-state changes, or
+        # high-value tool dependencies.
+        from argus.planning.recursive_planner import RecursivePlanner
+
+        planner = RecursivePlanner(self)
+        await planner.attach_to_scan(
+            scan_id=scan_id,
+            target=target,
+            verdict=verdict_adapter,
+            demo_pace=demo_pace_seconds,
+        )
+
         # ── Autonomous format detection ──
         # When body_format is "auto" (default), run a lightweight SURVEY
         # probe to detect whether the target expects JSON or FormData and
@@ -364,19 +407,18 @@ class Orchestrator:
         phase1_types = [t for t in types_to_deploy if t in _RECON_AGENTS]
         phase2_types = [t for t in types_to_deploy if t not in _RECON_AGENTS]
 
-        def _make_agent(agent_type: AgentType) -> BaseAttackAgent:
-            config = AgentConfig(
+        # Use the promoted instance method for agent creation.
+        # Bind local scan context so callers just pass agent_type.
+        def _make_agent_local(agent_type: AgentType) -> BaseAttackAgent:
+            return self._make_agent(
                 agent_type=agent_type,
                 scan_id=scan_id,
                 target=target,
                 demo_pace_seconds=demo_pace_seconds,
+                verdict_adapter=verdict_adapter,
+                intel=intel,
+                signal_bus=scan_signal_bus,
             )
-            agent_class = self._agent_registry[agent_type]
-            agent = agent_class(config=config, signal_bus=scan_signal_bus)
-            agent.attach_verdict_adapter(verdict_adapter)
-            agent.attach_intel(intel)
-            self._active_agents[config.instance_id] = agent
-            return agent
 
         all_agents: list[BaseAttackAgent] = []
         all_agent_results: list[AgentResult | Exception] = []
@@ -388,7 +430,7 @@ class Orchestrator:
 
         # ── Phase 1: Recon agents (model_extraction) ──
         if phase1_types:
-            phase1_agents = [_make_agent(t) for t in phase1_types]
+            phase1_agents = [_make_agent_local(t) for t in phase1_types]
             all_agents.extend(phase1_agents)
             logger.info(
                 "Phase 1 — Deploying [bold]%d[/] recon agent(s) for intelligence gathering (timeout %.0fs)",
@@ -418,7 +460,7 @@ class Orchestrator:
             phase1_elapsed = (datetime.now(UTC) - scan_start).total_seconds()
             p2_timeout = max(timeout - phase1_elapsed, 0.1)
 
-            phase2_agents = [_make_agent(t) for t in phase2_types]
+            phase2_agents = [_make_agent_local(t) for t in phase2_types]
             all_agents.extend(phase2_agents)
             logger.info(
                 "Phase 2 — Deploying [bold]%d[/] attack agents%s (timeout %.0fs)",
@@ -465,6 +507,14 @@ class Orchestrator:
                 all_findings.extend(all_agents[i].findings)
             else:
                 logger.warning("Unexpected result type from agent %s", all_agents[i].agent_type.value)
+
+        # ── Collect pivot agent results from RecursivePlanner ──
+        pivot_results = await planner.collect_pivot_results()
+        for pr in pivot_results:
+            result.agent_results.append(pr)
+            # Pivot agents store findings on the AgentResult directly
+            if hasattr(pr, "findings") and pr.findings:
+                all_findings.extend(pr.findings)
 
         # Validate all findings
         logger.info("Validating %d findings...", len(all_findings))

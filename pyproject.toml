@@ -47,6 +47,8 @@ dependencies = [
     "sse-starlette>=2.1.0,<3.0",
     "verdict-weight>=1.0.0,<2.0",
     "sqlalchemy>=2.0.0,<3.0",
+    "networkx>=3.2,<4.0",
+    "jinja2>=3.1.0,<4.0",
 ]
 
 [project.optional-dependencies]
