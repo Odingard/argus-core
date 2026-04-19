@@ -218,26 +218,40 @@ class RecursivePlanner:
     async def collect_pivot_results(self) -> list[AgentResult]:
         """Await all pivot tasks and return their results.
 
-        Also unsubscribes from the signal bus to prevent stale handlers
-        from firing on subsequent scans.  We gather first, *then*
-        unsubscribe — this avoids a race where ``emit()`` has already
-        snapshotted the handler list and delivers a signal after
-        ``_unsubscribe()`` but before ``gather()`` captures the task
-        set, which would leave newly-spawned tasks unattended.
+        The shutdown sequence is carefully ordered to avoid orphaned tasks:
+
+        1. **Unsubscribe** — prevents new signal deliveries from reaching
+           ``_handle_signal``.  ``SignalBus.emit()`` delivers handlers
+           sequentially under the bus lock, so once ``unsubscribe_broadcast``
+           returns no *new* invocations of our handler can start.  However,
+           a handler invocation that was already in-flight (started before
+           unsubscribe) may still be executing ``_try_pivot``.
+        2. **Acquire ``_pivot_lock``** — waits for any in-flight
+           ``_try_pivot`` to finish adding its task to ``_running_tasks``.
+           After the lock is released we are guaranteed the task dict is
+           complete.
+        3. **Snapshot & gather** — now safe because no further mutations
+           can occur.
         """
         results: list[AgentResult] = []
 
-        if not self._running_tasks:
-            # Nothing to collect — just clean up the subscription.
-            await self._unsubscribe()
+        # Step 1: Stop accepting new signals.
+        await self._unsubscribe()
+
+        # Step 2: Wait for any in-progress _try_pivot to finish so its
+        # newly-spawned task lands in _running_tasks before we snapshot.
+        async with self._pivot_lock:
+            tasks = dict(self._running_tasks)
+
+        if not tasks:
             return results
 
         logger.info(
             "Collecting %d pivot agent result(s)...",
-            len(self._running_tasks),
+            len(tasks),
         )
         done = await asyncio.gather(
-            *self._running_tasks.values(),
+            *tasks.values(),
             return_exceptions=True,
         )
         for item in done:
@@ -249,10 +263,6 @@ class RecursivePlanner:
                     type(item).__name__,
                 )
         self._running_tasks.clear()
-
-        # Unsubscribe *after* gathering so no late-arriving signal can
-        # spawn a task that never gets awaited.
-        await self._unsubscribe()
         return results
 
     async def _unsubscribe(self) -> None:
