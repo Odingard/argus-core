@@ -360,8 +360,47 @@ class Orchestrator:
             verdict=verdict_adapter,
             demo_pace=demo_pace_seconds,
             intel=intel,
+            timeout=timeout,
         )
 
+        # Wrap the rest of the scan in try/finally so the planner's
+        # signal-bus handler is always cleaned up — even if the scan
+        # throws an unhandled exception.  Without this, a leaked handler
+        # from a failed scan would fire with stale context on the next
+        # scan, potentially spawning pivot agents for the wrong target.
+        try:
+            return await self._run_scan_body(
+                scan_id=scan_id,
+                result=result,
+                target=target,
+                types_to_deploy=types_to_deploy,
+                timeout=timeout,
+                demo_pace_seconds=demo_pace_seconds,
+                planner=planner,
+                verdict_adapter=verdict_adapter,
+                intel=intel,
+                scan_signal_bus=scan_signal_bus,
+            )
+        finally:
+            # Ensure the planner is unsubscribed even on failure.
+            # On the happy path collect_pivot_results() already calls
+            # _unsubscribe(), but a second call is harmless (idempotent).
+            await planner._unsubscribe()
+
+    async def _run_scan_body(
+        self,
+        scan_id: str,
+        result: ScanResult,
+        target: TargetConfig,
+        types_to_deploy: list[AgentType],
+        timeout: float,
+        demo_pace_seconds: float,
+        planner: object,
+        verdict_adapter: object,
+        intel: object,
+        scan_signal_bus: object,
+    ) -> ScanResult:
+        """Inner scan body extracted so _run_scan_locked can wrap it in try/finally."""
         # ── Autonomous format detection ──
         # When body_format is "auto" (default), run a lightweight SURVEY
         # probe to detect whether the target expects JSON or FormData and

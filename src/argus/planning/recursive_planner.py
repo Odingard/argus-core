@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from argus.models.agents import AgentResult, AgentType, TargetConfig
 from argus.orchestrator.signal_bus import Signal, SignalType
@@ -64,6 +65,8 @@ class RecursivePlanner:
         self._target: TargetConfig | None = None
         self._verdict: VerdictAdapter | None = None
         self._demo_pace: float = 0.0
+        self._scan_timeout: float = 600.0
+        self._scan_start: float = 0.0
 
     # ── Signal handler ─────────────────────────────────────────────
 
@@ -163,8 +166,13 @@ class RecursivePlanner:
                     verdict_adapter=self._verdict,
                     intel=self._intel,
                 )
+                # Use remaining scan budget instead of a hardcoded timeout
+                # so the overall scan never exceeds the user's configured
+                # timeout.
+                elapsed = time.monotonic() - self._scan_start
+                remaining = max(10.0, self._scan_timeout - elapsed)
                 task = asyncio.create_task(
-                    self._orch._run_agent_with_timeout(new_agent, 120),
+                    self._orch._run_agent_with_timeout(new_agent, remaining),
                     name=f"pivot-{agent_type.value}",
                 )
                 self._running_tasks[new_agent.config.instance_id] = task
@@ -185,6 +193,7 @@ class RecursivePlanner:
         verdict: VerdictAdapter,
         demo_pace: float = 0.0,
         intel: object | None = None,
+        timeout: float = 600.0,
     ) -> None:
         """Bind the planner to a specific scan and subscribe to the bus.
 
@@ -194,11 +203,17 @@ class RecursivePlanner:
                 intelligence so they can leverage model names, system
                 prompt fragments, and tool inventories discovered during
                 recon — instead of starting from a blank slate.
+            timeout: The overall scan timeout in seconds.  Pivot agents
+                are given the *remaining* budget rather than a hardcoded
+                value, preventing scans from exceeding the user's
+                configured timeout.
         """
         self._scan_id = scan_id
         self._target = target
         self._verdict = verdict
         self._demo_pace = demo_pace
+        self._scan_timeout = timeout
+        self._scan_start = time.monotonic()
         self._active_campaigns.clear()
         self._running_tasks.clear()
 
