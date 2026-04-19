@@ -382,10 +382,25 @@ class Orchestrator:
                 scan_signal_bus=scan_signal_bus,
             )
         finally:
-            # Ensure the planner is unsubscribed even on failure.
-            # On the happy path collect_pivot_results() already calls
-            # _unsubscribe(), but a second call is harmless (idempotent).
+            # Ensure the planner is fully cleaned up even on failure:
+            # 1. Unsubscribe from signal bus (idempotent — safe if
+            #    collect_pivot_results already called it on the happy path).
+            # 2. Cancel any still-running pivot tasks so they don't keep
+            #    making HTTP requests against the target after the scan
+            #    has failed.
+            # 3. Clear _active_agents to prevent stale entries from
+            #    leaking into subsequent scans on the same Orchestrator.
             await planner._unsubscribe()
+            for task in planner._running_tasks.values():
+                if not task.done():
+                    task.cancel()
+            if planner._running_tasks:
+                await asyncio.gather(
+                    *planner._running_tasks.values(),
+                    return_exceptions=True,
+                )
+                planner._running_tasks.clear()
+            self._active_agents.clear()
 
     async def _run_scan_body(
         self,

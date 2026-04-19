@@ -148,35 +148,39 @@ class AdversarialGraph(ScanIntelligence):
                 if name not in self.graph:
                     self.graph.add_node(name, node_type="tool")
 
-    def merge_from(self, other: object) -> None:
+    async def merge_from(self, other: object) -> None:
         """Copy intelligence from a plain ``ScanIntelligence`` into this graph.
 
         This allows the RecursivePlanner to inherit Phase 1 discoveries
         (model names, system prompt fragments, tool names, refusal topics)
         so that pivot agents start with real recon data instead of a blank
         slate.
+
+        Acquires ``self._lock`` for the duration of the write to stay
+        consistent with every other mutation method on this class.
         """
         from argus.models.agents import ScanIntelligence
 
         if not isinstance(other, ScanIntelligence):
             return
 
-        if other.model_name and not self.model_name:
-            self.model_name = other.model_name
-        for frag in other.system_prompt_fragments:
-            if frag not in self.system_prompt_fragments:
-                self.system_prompt_fragments.append(frag)
-        for name in other.tool_names:
-            if name not in self.tool_names:
-                self.tool_names.append(name)
-            if name not in self.graph:
-                self.graph.add_node(name, node_type="tool")
-        for topic in other.refusal_topics:
-            if topic not in self.refusal_topics:
-                self.refusal_topics.append(topic)
-        for evidence in other.extraction_evidence:
-            if evidence not in self.extraction_evidence:
-                self.extraction_evidence.append(evidence)
+        async with self._lock:
+            if other.model_name and not self.model_name:
+                self.model_name = other.model_name
+            for frag in other.system_prompt_fragments:
+                if frag not in self.system_prompt_fragments:
+                    self.system_prompt_fragments.append(frag)
+            for name in other.tool_names:
+                if name not in self.tool_names:
+                    self.tool_names.append(name)
+                if name not in self.graph:
+                    self.graph.add_node(name, node_type="tool")
+            for topic in other.refusal_topics:
+                if topic not in self.refusal_topics:
+                    self.refusal_topics.append(topic)
+            for evidence in other.extraction_evidence:
+                if evidence not in self.extraction_evidence:
+                    self.extraction_evidence.append(evidence)
 
     @property
     def has_intel(self) -> bool:

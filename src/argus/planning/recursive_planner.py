@@ -156,7 +156,7 @@ class RecursivePlanner:
                 # agent receives all Phase 1 discoveries accumulated
                 # since attach_to_scan was called.
                 if self._scan_intel is not None:
-                    self._intel.merge_from(self._scan_intel)
+                    await self._intel.merge_from(self._scan_intel)
 
                 new_agent = self._orch._make_agent(
                     agent_type=agent_type,
