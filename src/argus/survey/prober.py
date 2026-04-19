@@ -915,7 +915,7 @@ class EndpointProber:
                 report.detected_body_format = "formdata"
                 report.detected_prompt_field = d.detected_prompt_field
                 logger.info(
-                    "SURVEY %s — auto-detected body format: formdata, " "prompt field: '%s'",
+                    "SURVEY %s — auto-detected body format: formdata, prompt field: '%s'",
                     self.base_url,
                     d.detected_prompt_field,
                 )
@@ -1005,8 +1005,9 @@ class EndpointProber:
                     except httpx.HTTPError:
                         continue
 
-                # A non-reject status means this format+field combo works
-                if formdata_resp.status_code not in _FORMAT_REJECT_CODES:
+                # A 2xx status means this format+field combo works.
+                # 5xx / 3xx / 404 don't confirm format acceptance.
+                if 200 <= formdata_resp.status_code < 300:
                     negotiated_format = "formdata"
                     negotiated_field = field_name
                     resp = formdata_resp
