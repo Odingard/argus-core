@@ -1340,6 +1340,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     });
   }
 
+  // --- Populate version label from API (unauthenticated health endpoint) ---
+  try {
+    var healthRes = await fetch('/api/health');
+    if (healthRes.ok) {
+      var healthData = await healthRes.json();
+      var vLabel = document.getElementById('version-label');
+      if (vLabel && healthData.version) {
+        vLabel.textContent = 'v' + healthData.version;
+      }
+    }
+  } catch (e) { /* version display is non-critical */ }
+
   if (AUTH.token) {
     try {
       var res = await fetch('/api/status', { headers: AUTH.headers() });

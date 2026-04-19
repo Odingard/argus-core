@@ -65,6 +65,9 @@ Issues = "https://github.com/Odingard/Argus/issues"
 [project.scripts]
 argus = "argus.cli:main"
 
+[tool.setuptools.package-data]
+"argus.web" = ["static/*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
