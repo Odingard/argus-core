@@ -219,15 +219,17 @@ class RecursivePlanner:
         """Await all pivot tasks and return their results.
 
         Also unsubscribes from the signal bus to prevent stale handlers
-        from firing on subsequent scans.
+        from firing on subsequent scans.  We gather first, *then*
+        unsubscribe — this avoids a race where ``emit()`` has already
+        snapshotted the handler list and delivers a signal after
+        ``_unsubscribe()`` but before ``gather()`` captures the task
+        set, which would leave newly-spawned tasks unattended.
         """
         results: list[AgentResult] = []
 
-        # Unsubscribe from the signal bus so this planner doesn't leak
-        # into subsequent scans on the same Orchestrator instance.
-        await self._unsubscribe()
-
         if not self._running_tasks:
+            # Nothing to collect — just clean up the subscription.
+            await self._unsubscribe()
             return results
 
         logger.info(
@@ -247,6 +249,10 @@ class RecursivePlanner:
                     type(item).__name__,
                 )
         self._running_tasks.clear()
+
+        # Unsubscribe *after* gathering so no late-arriving signal can
+        # spawn a task that never gets awaited.
+        await self._unsubscribe()
         return results
 
     async def _unsubscribe(self) -> None:
