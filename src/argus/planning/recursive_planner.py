@@ -21,7 +21,7 @@ import logging
 from argus.models.agents import AgentResult, AgentType, TargetConfig
 from argus.orchestrator.signal_bus import Signal, SignalType
 from argus.scoring import VerdictAdapter
-from argus.scoring.adversarial_graph import AdversarialGraph
+from argus.scoring.adversarial_graph import SENSITIVE_SINKS, AdversarialGraph
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,7 @@ class RecursivePlanner:
         self._orch = orchestrator
         self._pivot_lock = asyncio.Lock()
         self._active_campaigns: set[AgentType] = set()
-        self._running_tasks: dict[str, asyncio.Task] = []  # type: ignore[assignment]
-        self._running_tasks = {}
+        self._running_tasks: dict[str, asyncio.Task] = {}
         self._intel = AdversarialGraph()
         self._scan_id: str = ""
         self._target: TargetConfig | None = None
@@ -117,7 +116,7 @@ class RecursivePlanner:
 
         # ── High-value tool discovered ─────────────────────────
         for tool_name in tools:
-            if tool_name in self._intel.SENSITIVE_SINKS:
+            if tool_name in SENSITIVE_SINKS:
                 await self._try_pivot(
                     AgentType.PRIVILEGE_ESCALATION,
                     reason=f"High-value sink '{tool_name}' discovered",
@@ -194,8 +193,17 @@ class RecursivePlanner:
         )
 
     async def collect_pivot_results(self) -> list[AgentResult]:
-        """Await all pivot tasks and return their results."""
+        """Await all pivot tasks and return their results.
+
+        Also unsubscribes from the signal bus to prevent stale handlers
+        from firing on subsequent scans.
+        """
         results: list[AgentResult] = []
+
+        # Unsubscribe from the signal bus so this planner doesn't leak
+        # into subsequent scans on the same Orchestrator instance.
+        await self._unsubscribe()
+
         if not self._running_tasks:
             return results
 
@@ -217,6 +225,12 @@ class RecursivePlanner:
                 )
         self._running_tasks.clear()
         return results
+
+    async def _unsubscribe(self) -> None:
+        """Remove this planner's handler from the signal bus."""
+        bus = getattr(self._orch, "signal_bus", None)
+        if bus is not None and hasattr(bus, "unsubscribe_broadcast"):
+            await bus.unsubscribe_broadcast(self._handle_signal)
 
     @property
     def intel(self) -> AdversarialGraph:

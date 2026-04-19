@@ -74,6 +74,14 @@ class SignalBus:
         async with self._lock:
             self._broadcast_subscribers.append(handler)
 
+    async def unsubscribe_broadcast(self, handler: Callable) -> None:
+        """Remove a broadcast subscriber (used by RecursivePlanner cleanup)."""
+        async with self._lock:
+            try:
+                self._broadcast_subscribers.remove(handler)
+            except ValueError:
+                pass  # already removed or never subscribed
+
     async def emit(self, signal: Signal) -> None:
         """Emit a signal to targeted agent(s) or broadcast.
 

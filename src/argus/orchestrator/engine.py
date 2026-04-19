@@ -512,9 +512,11 @@ class Orchestrator:
         pivot_results = await planner.collect_pivot_results()
         for pr in pivot_results:
             result.agent_results.append(pr)
-            # Pivot agents store findings on the AgentResult directly
-            if hasattr(pr, "findings") and pr.findings:
-                all_findings.extend(pr.findings)
+            # Retrieve Finding objects from the agent instance (not from
+            # AgentResult.findings which is list[str] of IDs).
+            pivot_agent = self._active_agents.get(pr.instance_id)
+            if pivot_agent is not None and pivot_agent.findings:
+                all_findings.extend(pivot_agent.findings)
 
         # Validate all findings
         logger.info("Validating %d findings...", len(all_findings))
