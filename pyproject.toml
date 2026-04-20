@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus-core"
+version = "0.1.0"
+description = "Autonomous LLM Swarm Orchestration - Core Engine"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pydantic",
+    "google-generativeai",
+    "anthropic",
+    "openai",
+    "requests",
+    "python-dotenv"
+]
+authors = [
+  { name="ARGUS Defense", email="security@sixsenseenterprise.com" }
+]
+
+[project.scripts]
+argus = "argus.cli:run_pipeline"
