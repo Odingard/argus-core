@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-redteam"
-version = "0.3.1"
+version = "0.4.0"
 description = "Autonomous AI Red Team Platform - Core Engine"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,7 +14,8 @@ dependencies = [
     "anthropic",
     "openai",
     "requests",
-    "python-dotenv"
+    "python-dotenv",
+    "networkx"
 ]
 authors = [
   { name="ARGUS Defense", email="security@sixsenseenterprise.com" }
