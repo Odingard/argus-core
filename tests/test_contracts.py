@@ -71,7 +71,18 @@ def test_no_fabrication_strings_in_source(forbidden):
 
 
 # ── 2. Agent MAAC coverage ────────────────────────────────────────────────────
+# The three tests in this section are skipped for Phase 0 because the
+# pre-2026-04-21 source-scanner agents were archived to legacy/ per
+# PHASES.md; live-runtime agents are rebuilt against the Target Adapter
+# substrate in Phases 1–4. When new agents land, flip these back on by
+# removing the skip marker and bumping EXPECTED_MIN_AGENTS.
+_AGENT_TESTS_SKIP_REASON = (
+    "Phase 0 (2026-04-21 spec reconciliation): pre-spec agents archived "
+    "to legacy/; live-runtime agents ship in Phase 1+. See PHASES.md."
+)
 
+
+@pytest.mark.skip(reason=_AGENT_TESTS_SKIP_REASON)
 def test_every_agent_declares_maac_phases():
     """Every BaseAgent subclass must tag its MAAC phases."""
     import importlib.util
@@ -104,6 +115,7 @@ def test_every_agent_declares_maac_phases():
     )
 
 
+@pytest.mark.skip(reason=_AGENT_TESTS_SKIP_REASON)
 def test_agent_count_meets_minimum():
     """Regression guard — accidental deletion of agent files fails the test."""
     import importlib.util
@@ -130,6 +142,7 @@ def test_agent_count_meets_minimum():
     )
 
 
+@pytest.mark.skip(reason=_AGENT_TESTS_SKIP_REASON)
 def test_swarm_covers_all_nine_maac_phases():
     """
     The overall swarm should cover every MAAC phase. If a phase has no
@@ -158,12 +171,22 @@ def test_swarm_covers_all_nine_maac_phases():
 
 
 # ── 3. PoC reproducibility contract ───────────────────────────────────────────
+# These two read files that now live in legacy/. The contract they
+# encode (real-library imports + ARGUS_POC_LANDED markers + evidence-
+# based validation) is REPLACED in Phase 0 by the argus.validation
+# poc_gates module — which has its own dedicated pytests below. Leaving
+# these as skipped-with-reason so the intent survives the archive.
+_PHASE0_LEGACY_READ_REASON = (
+    "Phase 0: this test read files that are now in legacy/. "
+    "The contract it guarded is now enforced by argus.validation.poc_gates "
+    "and the tests below (call_gate / import_gate) — see PHASES.md."
+)
 
+
+@pytest.mark.skip(reason=_PHASE0_LEGACY_READ_REASON)
 def test_poc_prompt_requires_real_library_imports():
     scanner = (SRC / "layer1" / "scanner.py").read_text(encoding="utf-8")
-    # Both prompts must forbid the thing that got us rejected on 2026-04-20.
     assert "NEVER redefine the class" in scanner or "NEVER recreate them" in scanner
-    # And require the ARGUS_POC_LANDED marker.
     assert "ARGUS_POC_LANDED" in scanner
 
 
@@ -171,17 +194,16 @@ def test_l5_prompt_enforces_poc_reproducibility():
     prompts = (SRC / "shared" / "prompts.py").read_text(encoding="utf-8")
     assert "ARGUS_POC_LANDED" in prompts, (
         "L5 chain synthesis prompt must also enforce the real-library PoC "
-        "contract, otherwise chains will emit theoretical PoCs that L7 can't "
-        "validate."
+        "contract, otherwise chains will emit theoretical PoCs that fail "
+        "the Phase 0+ validation gates."
     )
 
 
 # ── 4. L7 validation contract ─────────────────────────────────────────────────
 
+@pytest.mark.skip(reason=_PHASE0_LEGACY_READ_REASON)
 def test_sandbox_requires_evidence_not_just_exit_zero():
     sandbox = (SRC / "layer7" / "sandbox.py").read_text(encoding="utf-8")
-    # The removed behavior was: if returncode == 0 → validated. Make sure the
-    # new evidence-based matcher is present.
     assert "ARGUS_POC_LANDED" in sandbox
     assert "_has_evidence" in sandbox
     # And we must still install the target before running PoCs — otherwise
@@ -197,7 +219,7 @@ def test_sandbox_call_gate_rejects_import_without_use():
     theoretical PoCs disguised as real ones. AST verifies that the PoC
     calls at least one symbol it imported from the target.
     """
-    from argus.layer7.sandbox import _poc_calls_target
+    from argus.validation import poc_calls_target as _poc_calls_target
 
     # Imports crewai but never calls anything from it — must reject.
     bad = (
@@ -241,7 +263,7 @@ def test_sandbox_static_import_gate_rejects_fake_pocs():
     failure mode from 2026-04-20 and was observed recurring in the
     first CrewAI swarm run before this gate was added.
     """
-    from argus.layer7.sandbox import _poc_imports_target
+    from argus.validation import poc_imports_target as _poc_imports_target
 
     # Fake-import PoC — the class is declared locally, no import of
     # the target shipping library.

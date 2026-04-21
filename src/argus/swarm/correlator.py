@@ -109,7 +109,7 @@ class LiveCorrelator:
         self._target_packages: list[str] = []
         if repo_path:
             try:
-                from argus.layer7.sandbox import target_packages as _tp
+                from argus.validation import target_packages as _tp
                 self._target_packages = _tp(repo_path) or []
             except Exception:
                 pass
