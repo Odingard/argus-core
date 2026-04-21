@@ -281,9 +281,20 @@ def _synthesize_cluster(
             )
 
     try:
+        # Tell Opus the exact installed-package names so it writes
+        # `from crewai...` not `from crewai.src.crewai...`. Falls back
+        # to an empty list when we can't resolve (standalone scans).
+        try:
+            from argus.layer7.sandbox import target_packages as _tp
+            tpkgs = _tp(target) or []
+        except Exception:
+            tpkgs = []
+        tpkg_line = ", ".join(tpkgs) if tpkgs else "(none resolved — derive from file paths)"
+
         prompt = L5_CHAIN_SYNTHESIS_PROMPT.format(
             deviations="\n\n".join(deviation_summary) + l1_context,
-            target=target
+            target=target,
+            target_packages=tpkg_line,
         )
 
         data = _call_opus(client, prompt)

@@ -92,6 +92,7 @@ class LiveCorrelator:
         stop_event: threading.Event,
         verbose: bool = False,
         priors: Optional[object] = None,
+        repo_path: Optional[str] = None,
     ) -> None:
         self.bb           = blackboard
         self.registry     = agent_registry
@@ -101,6 +102,17 @@ class LiveCorrelator:
         # FlywheelPriors or None. When present, Haiku/Opus prompts get a
         # short prior summary and confidence floors rise for boosted classes.
         self.priors       = priors
+        self.repo_path    = repo_path
+        # Resolve the target's installed-package namespace once so the
+        # Opus synthesis prompt knows to write `from crewai...` rather
+        # than `from crewai.src.crewai...` (the disk layout).
+        self._target_packages: list[str] = []
+        if repo_path:
+            try:
+                from argus.layer7.sandbox import target_packages as _tp
+                self._target_packages = _tp(repo_path) or []
+            except Exception:
+                pass
 
         self._seen: list[_SeenFinding] = []
         self._lock  = threading.Lock()
@@ -306,15 +318,25 @@ class LiveCorrelator:
             f"  {f.description[:300]}"
             for f in cluster
         )
+        tpkg_line = (", ".join(self._target_packages)
+                     if self._target_packages
+                     else "(none resolved — derive from file paths shown)")
         prompt = (
             "You are a senior offensive security researcher. The findings "
             "below were flagged as a candidate chain by the correlator. "
             "Produce a reproducible attack chain per the ARGUS PoC contract:\n"
-            "  - Imports from the real shipping library at the file paths "
-            "    shown; NEVER redeclare the vulnerable class.\n"
+            "  - Import from the INSTALLED package namespace listed in "
+            "    TARGET_PACKAGES below — NOT the repo's on-disk layout. "
+            "    e.g. `from crewai.agents.agent_builder.base_agent "
+            "    import BaseAgent`, never `from crewai.src.crewai ...`.\n"
+            "  - NEVER redeclare the vulnerable class in the PoC.\n"
+            "  - Actually CALL an imported symbol with attacker input. "
+            "    PoCs that import but don't call are rejected by the "
+            "    static gate before the sandbox ever runs.\n"
             "  - Prints `ARGUS_POC_LANDED:{chain_id}` on success.\n"
             "  - sys.exit(1) if the vulnerable path is not reached.\n"
             "  - Non-destructive; /tmp marker + stdout only.\n\n"
+            f"TARGET_PACKAGES: {tpkg_line}\n"
             f"CHAIN_ID: {hyp.hypothesis_id}\n"
             f"CANDIDATE TITLE: {hyp.title}\n\n"
             f"FINDINGS:\n{summary}\n\n"

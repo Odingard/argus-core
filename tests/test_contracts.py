@@ -191,6 +191,46 @@ def test_sandbox_requires_evidence_not_just_exit_zero():
 
 # ── 5. Stale vaporware check ──────────────────────────────────────────────────
 
+def test_sandbox_call_gate_rejects_import_without_use():
+    """
+    Second leg of the static gate: imports without actual use are also
+    theoretical PoCs disguised as real ones. AST verifies that the PoC
+    calls at least one symbol it imported from the target.
+    """
+    from argus.layer7.sandbox import _poc_calls_target
+
+    # Imports crewai but never calls anything from it — must reject.
+    bad = (
+        "from crewai import BaseAgent\n"
+        "if 'x' in 'xy':\n"
+        "    print('ARGUS_POC_LANDED:bad')\n"
+    )
+    ok, reason = _poc_calls_target(bad, ["crewai"])
+    assert ok is False
+    assert "never calls" in reason.lower()
+
+    # Imports and instantiates — must accept.
+    good = (
+        "from crewai.agents import BaseAgent\n"
+        "agent = BaseAgent()\n"
+        "print('ARGUS_POC_LANDED:good')\n"
+    )
+    ok, matched = _poc_calls_target(good, ["crewai"])
+    assert ok is True
+
+    # `import crewai` + `crewai.x.y()` — must accept.
+    good_module = (
+        "import crewai\n"
+        "crewai.agents.BaseAgent().run()\n"
+    )
+    ok, _ = _poc_calls_target(good_module, ["crewai"])
+    assert ok is True
+
+    # Empty target list — degrade open.
+    ok, _ = _poc_calls_target(bad, [])
+    assert ok is True
+
+
 def test_sandbox_static_import_gate_rejects_fake_pocs():
     """
     The L7 sandbox MUST statically reject PoCs that don't import any

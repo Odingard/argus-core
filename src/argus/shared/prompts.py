@@ -373,10 +373,15 @@ CHAINING RULES:
 
 POC REPRODUCIBILITY CONTRACT (non-negotiable):
 Every poc_code you emit MUST be executable against the SHIPPING library:
-- Import real symbols from their real module paths (derive from the file
-  path of the component deviations). NEVER redeclare the vulnerable class
-  inside the PoC.
-- Exercise the real dispatch / loader / tool path with attacker input.
+- **Import from the INSTALLED package namespace, not the repo directory
+  layout**. The target's installed package name(s) are listed below as
+  TARGET_PACKAGES. Use exactly those names. Example: if the package is
+  `crewai`, use `from crewai.agents.agent_builder.base_agent import
+  BaseAgent`. DO NOT use `from crewai.src.crewai import ...` — that path
+  exists on disk but is NOT what `pip install -e .` exposes.
+- Import real symbols; NEVER redeclare the vulnerable class inside the PoC.
+- **Actually CALL the imported symbol** with attacker-controlled input.
+  A PoC that imports X but never references X fails the static gate.
 - On success, print `ARGUS_POC_LANDED:<chain-id>` on its own line AND
   write a marker file at /tmp/argus_poc_<chain-id>.
 - `sys.exit(1)` if the vulnerable path wasn't reached (ImportError,
@@ -386,6 +391,10 @@ Every poc_code you emit MUST be executable against the SHIPPING library:
 Triagers reject theoretical PoCs. 22 CRITICAL findings were closed as "not
 reproducible" on 2026-04-20 because the PoCs stubbed the vulnerable class
 instead of importing it. Do not repeat that.
+
+TARGET_PACKAGES (these are the exact `import` names available after
+pip install — use them, NOT the on-disk directory layout):
+{target_packages}
 
 HIGH-CONFIDENCE DEVIATIONS (combined_score >= 0.7):
 {deviations}

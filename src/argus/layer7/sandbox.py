@@ -16,6 +16,7 @@ Validation contract:
     Everything else is reported as unvalidated with the observed output
     for human triage.
 """
+import ast
 import os
 import re
 import tempfile
@@ -156,6 +157,80 @@ def _target_packages(repo_path: str) -> list[str]:
     return sorted(candidates)
 
 
+# Public alias — prompts in other layers call this at format time so
+# Opus is told the real installed-package namespace to import from.
+def target_packages(repo_path: str) -> list[str]:
+    return _target_packages(repo_path)
+
+
+def _poc_calls_target(poc_code: str, target_packages: list[str]) -> tuple[bool, str]:
+    """
+    AST-verify that the PoC doesn't just import the target, it actually
+    USES a symbol it imported. Defeats PoCs of the shape:
+
+        from crewai import X      # import present (passes import gate)
+        if 'command' in s:        # but nothing ever touches X
+            print('ARGUS_POC_LANDED:...')
+
+    Returns (ok, reason). If the PoC imports `crewai` (module) we
+    require either a call like ``crewai.something(...)`` or a call to
+    a symbol imported via ``from crewai ... import Sym`` (e.g.
+    ``Sym(...)`` or ``x.Sym(...)``).
+
+    Degrades open when ``target_packages`` is empty so unusual repo
+    shapes aren't blocked.
+    """
+    if not target_packages:
+        return True, "target package set empty; skipping call check"
+
+    try:
+        tree = ast.parse(poc_code)
+    except SyntaxError as e:
+        return False, f"PoC is not valid Python: {e}"
+
+    target_set = {t.lower() for t in target_packages}
+    imported_syms: set[str] = set()      # symbols imported FROM a target package
+    imported_mods: set[str] = set()      # target packages imported as modules
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0].lower()
+            if root in target_set:
+                for alias in node.names:
+                    imported_syms.add((alias.asname or alias.name).lower())
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                root = (alias.name or "").split(".")[0].lower()
+                if root in target_set:
+                    imported_mods.add((alias.asname or alias.name).split(".")[0].lower())
+
+    if not imported_syms and not imported_mods:
+        # Our import gate should have caught this earlier, but be safe.
+        return False, "no symbols imported from target packages"
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # f(...) form — bare name
+        if isinstance(func, ast.Name) and func.id.lower() in imported_syms:
+            return True, f"calls imported symbol {func.id!r}"
+        # obj.f(...) form — attribute on imported module or symbol
+        if isinstance(func, ast.Attribute):
+            # Walk down to the root name
+            cur = func
+            while isinstance(cur, ast.Attribute):
+                cur = cur.value
+            if isinstance(cur, ast.Name):
+                root = cur.id.lower()
+                if root in imported_syms or root in imported_mods:
+                    return True, f"calls method on {root!r}"
+
+    return False, (
+        "PoC imports target but never calls anything from it. "
+        "Refusing — this is a theoretical PoC disguised as a real one."
+    )
+
+
 def _poc_imports_target(poc_code: str, target_packages: list[str]) -> tuple[bool, str]:
     """
     Check that the PoC imports at least one top-level package from the
@@ -247,7 +322,13 @@ async def _validate_chain_via_docker(chain: ExploitChain, repo_path: str) -> tup
     imports_ok, reason = _poc_imports_target(payload, tpkgs)
     if not imports_ok:
         return False, (
-            f"[static-gate] {reason}\n"
+            f"[static-gate:import] {reason}\n"
+            f"--- rejected PoC ---\n{payload[:600]}"
+        )
+    calls_ok, call_reason = _poc_calls_target(payload, tpkgs)
+    if not calls_ok:
+        return False, (
+            f"[static-gate:call] {call_reason}\n"
             f"--- rejected PoC ---\n{payload[:600]}"
         )
 

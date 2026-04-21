@@ -303,12 +303,15 @@ Vulnerable Code:
 ```
 
 HARD REQUIREMENTS (rejecting any PoC that violates these):
-1. Import the vulnerable symbol from its REAL module path. Derive the
-   import from the file path: a file `src/<pkg>/<...>/<mod>.py` becomes
-   `from <pkg>.<...>.<mod> import <Symbol>`. NEVER redefine the class
-   inside the PoC. If the import would fail, the finding is bogus — say so
-   instead of stubbing.
-2. Call the REAL vulnerable function with attacker-controlled input.
+1. Import from the INSTALLED package namespace — use the names in
+   TARGET_PACKAGES below, NOT the on-disk directory layout. If the
+   file is `src/<pkg>/<a>/<b>.py` the correct import is
+   `from <pkg>.<a>.<b> import <Symbol>` (the `src/` prefix is NOT part
+   of the import path after pip install -e .). NEVER redefine the
+   class inside the PoC.
+2. Actually CALL the imported symbol with attacker-controlled input.
+   A PoC that imports but never references the imported name is
+   statically rejected by the ARGUS gate before the sandbox runs.
 3. On successful exploitation print exactly this marker on its own line:
        ARGUS_POC_LANDED:{title_slug}
    Use a filesystem side-effect as evidence (e.g. write a marker file to
@@ -318,6 +321,9 @@ HARD REQUIREMENTS (rejecting any PoC that violates these):
    the reason. Silent success on a patched library is worse than a crash.
 5. Non-destructive. No rm, no network traffic to real hosts, no DB writes.
    Only the /tmp marker and stdout.
+
+TARGET_PACKAGES (exact import namespaces available after install):
+{target_packages}
 
 Return ONLY valid JSON with no markdown fences:
 {{
@@ -347,21 +353,27 @@ Vulnerable Code:
 ```
 
 HARD REQUIREMENTS (rejecting any PoC that violates these):
-1. Import the real agent / orchestrator / tool classes from their real
-   module paths. NEVER recreate them inside the PoC.
-2. It is OK to stub the LLM response (a fixed string is fine) because the
+1. Import the real agent / orchestrator / tool classes from the INSTALLED
+   package namespace listed in TARGET_PACKAGES below — NOT the on-disk
+   directory layout. NEVER recreate them inside the PoC.
+2. Actually CALL an imported symbol — the static gate rejects
+   import-and-print PoCs that never reference the import.
+3. It is OK to stub the LLM response (a fixed string is fine) because the
    vulnerability is in the ROUTING of that string into privileged
    execution, not in the LLM itself. But the routing code must be the
    shipping library's code, not your recreation of it.
-3. Show: attacker input → library's own dispatch path → privileged call
+4. Show: attacker input → library's own dispatch path → privileged call
    with attacker-controlled argument. Print exactly this marker on its
    own line on success:
        ARGUS_POC_LANDED:{title_slug}
-4. Use a /tmp/argus_poc_{title_slug} filesystem marker as evidence.
-5. If the escalation path doesn't reach the privileged sink
+5. Use a /tmp/argus_poc_{title_slug} filesystem marker as evidence.
+6. If the escalation path doesn't reach the privileged sink
    (authorization gate exists, input validated, dispatch refused),
    sys.exit(1) with the reason. Never stub past a guard.
-6. Non-destructive — no rm, no real network, no DB writes.
+7. Non-destructive — no rm, no real network, no DB writes.
+
+TARGET_PACKAGES (exact import namespaces available after install):
+{target_packages}
 
 Return ONLY valid JSON with no markdown fences:
 {{
@@ -564,9 +576,20 @@ def _title_slug(title: str) -> str:
     return (slug[:48] or "finding")
 
 
-def generate_poc(finding: Finding, client: ArgusClient, verbose: bool = False) -> Finding:
-    """Fix 1 + 6 + 7 + real-library reproducibility."""
+def generate_poc(finding: Finding, client: ArgusClient, verbose: bool = False,
+                 repo_path: Optional[str] = None) -> Finding:
+    """Fix 1 + 6 + 7 + real-library reproducibility + target-package injection."""
     TRIDENT_VULN_CLASSES = {"TRUST_ESCALATION", "MESH_TRUST", "PHANTOM_MEMORY", "TRACE_LATERAL"}
+    # Resolve installed-package names so Opus writes correct imports.
+    tpkgs: list[str] = []
+    if repo_path:
+        try:
+            from argus.layer7.sandbox import target_packages as _tp
+            tpkgs = _tp(repo_path) or []
+        except Exception:
+            pass
+    tpkg_line = ", ".join(tpkgs) if tpkgs else "(none resolved — derive from the file path)"
+
     prompt = (
         POC_PROMPT_TRUST if finding.vuln_class in TRIDENT_VULN_CLASSES
         else POC_PROMPT_STANDARD
@@ -576,6 +599,7 @@ def generate_poc(finding: Finding, client: ArgusClient, verbose: bool = False) -
         description=finding.description, attack_vector=finding.attack_vector,
         code_snippet=finding.code_snippet,
         title_slug=_title_slug(finding.title),
+        target_packages=tpkg_line,
     )
 
     resp = None
@@ -828,7 +852,8 @@ def run_scan(target: str, output_file: Optional[str], skip_poc: bool, skip_chain
                     poc_counter[0] += 1
                     n = poc_counter[0]
                 print(f"  [PoC{tag}] #{n} {finding.title[:60]}", flush=True)
-                enriched_finding = generate_poc(finding, client, verbose)
+                enriched_finding = generate_poc(finding, client, verbose,
+                                                 repo_path=target)
                 with lock:
                     enriched[enriched_finding.id] = enriched_finding
                 poc_queue.task_done()

@@ -170,6 +170,7 @@ def run_swarm(
         stop_event=stop_event,
         verbose=verbose,
         priors=priors,
+        repo_path=repo_path,
     )
     corr_thread = threading.Thread(
         target=correlator.run, name="argus-correlator", daemon=True,
