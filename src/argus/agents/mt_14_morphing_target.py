@@ -39,6 +39,7 @@ class MorphingTargetAgent(BaseAgent):
     VULN_CLASS = "MORPHING_TRANSFORMATION"
     TECHNIQUES = ["MT-T1", "MT-T2", "MT-T3", "MT-T4"]
     MAAC_PHASES = [3, 4, 6, 7]  # Model-Layer + Memory + Orchestration Drift + Multi-Agent
+    PERSONA = "chainer"
 
     # Signals that code is AGENT code (not arbitrary business logic).
     AGENT_CONTEXT_PATTERNS = [

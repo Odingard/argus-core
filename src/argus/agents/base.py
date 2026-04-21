@@ -76,6 +76,11 @@ class BaseAgent(ABC):
     # per-run MAAC coverage and the benchmark layer can attribute chains.
     MAAC_PHASES: list[int] = []
 
+    # Optional specialist persona (see argus.personas). When set, the
+    # _haiku / Opus calls prepend the persona prompt so the specialist
+    # flavor rides along. Unset / unknown = base behaviour.
+    PERSONA: str = ""
+
     def __init__(self, verbose: bool = False):
         self.verbose   = verbose
         self.client    = ArgusClient()
@@ -104,6 +109,13 @@ class BaseAgent(ABC):
         return hashlib.md5(f"{self.AGENT_ID}{raw}".encode()).hexdigest()[:8]
 
     def _haiku(self, prompt: str, max_tokens: int = 2000) -> dict:
+        # Prepend persona bias when the subclass declared one. Cheap,
+        # context-inexpensive, agent code is untouched.
+        if self.PERSONA:
+            from argus.personas import persona_prompt_prefix
+            prefix = persona_prompt_prefix(self.PERSONA)
+            if prefix:
+                prompt = prefix + prompt
         resp = self.client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=max_tokens,

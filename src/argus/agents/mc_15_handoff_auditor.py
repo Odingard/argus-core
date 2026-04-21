@@ -37,6 +37,7 @@ class HandoffAuditorAgent(BaseAgent):
     VULN_CLASS = "HANDOFF_BOUNDARY"
     TECHNIQUES = ["MC-T1", "MC-T2", "MC-T3", "MC-T4"]
     MAAC_PHASES = [2, 5, 7]  # Prompt-Layer + Tool Misuse + Multi-Agent Escalation
+    PERSONA = "chainer"
 
     # Does this file sit on an agent / tool dispatch path?
     DISPATCH_PATTERNS = [

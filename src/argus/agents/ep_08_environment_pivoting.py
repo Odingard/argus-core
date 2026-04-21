@@ -31,6 +31,7 @@ class EnvironmentPivotingAgent(BaseAgent):
     VULN_CLASS = "ENVIRONMENT_PIVOT"
     TECHNIQUES = ["EP-T1", "EP-T2", "EP-T3", "EP-T4"]
     MAAC_PHASES = [8]  # Environment Pivoting
+    PERSONA = "auditor"
 
     # Signals that this file is on an agent / tool execution path.
     TOOL_CONTEXT_PATTERNS = [

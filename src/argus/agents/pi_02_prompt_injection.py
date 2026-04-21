@@ -32,6 +32,7 @@ class PromptInjectionAgent(BaseAgent):
     VULN_CLASS = "PROMPT_INJECTION"
     TECHNIQUES = ["PI-T1", "PI-T2", "PI-T3", "PI-T4"]
     MAAC_PHASES = [2]  # Prompt-Layer Access
+    PERSONA = "fuzzer"
 
     # Signals that code is constructing or dispatching a prompt.
     PROMPT_DISPATCH_PATTERNS = [

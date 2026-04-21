@@ -26,9 +26,6 @@ from __future__ import annotations
 
 import os
 import re
-import sys
-from pathlib import Path
-from typing import Optional
 
 from argus.agents.base import BaseAgent, AgentFinding
 
@@ -44,6 +41,7 @@ class ModelExtractionAgent(BaseAgent):
     VULN_CLASS = "MODEL_EXTRACTION"
     TECHNIQUES = ["ME-T1", "ME-T2", "ME-T3", "ME-T4", "ME-T5", "ME-T6"]
     MAAC_PHASES = [1, 3]  # Reconnaissance + Model-Layer Manipulation
+    PERSONA = "reverser"
 
     # Patterns indicating embedded system prompts
     SYSTEM_PROMPT_PATTERNS = [

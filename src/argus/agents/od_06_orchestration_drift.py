@@ -32,6 +32,7 @@ class OrchestrationDriftAgent(BaseAgent):
     VULN_CLASS = "ORCHESTRATION_DRIFT"
     TECHNIQUES = ["OD-T1", "OD-T2", "OD-T3"]
     MAAC_PHASES = [6]  # Orchestration Drift
+    PERSONA = "chainer"
 
     # Signals that code is doing planning / task decomposition at all.
     PLANNING_PATTERNS = [
