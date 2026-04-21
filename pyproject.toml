@@ -15,7 +15,9 @@ dependencies = [
     "openai",
     "requests",
     "python-dotenv",
-    "networkx"
+    "networkx",
+    "mcp",
+    "docker"
 ]
 authors = [
   { name="ARGUS Defense", email="security@sixsenseenterprise.com" }
