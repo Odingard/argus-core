@@ -9,12 +9,20 @@ compose into something exploitable. The existing L5 Opus synthesizer runs
 only ONCE at end-of-pipeline against a static snapshot; this correlator
 runs continuously and catches chains that form across agents mid-run.
 
+**Phase 2 update — v1 retarget for runtime findings (behavior-delta):**
+Triggers grew a runtime-awareness layer. Static-scanner rule (same file
+path) remains for legacy findings; runtime agents emit findings whose
+provenance is ``baseline_ref`` (the target identifier) and ``session_id``,
+so the correlator now also clusters by same-target and same-surface.
+
 Trigger rules (cheap to evaluate, gate the expensive Haiku / Opus calls):
 
-  1. Two findings sharing the same file path.
-  2. Two findings whose agents' MAAC_PHASES are complementary (e.g.
+  1. Two findings sharing the same file path        (static).
+  2. Two findings sharing the same runtime target   (runtime — new).
+  3. Two findings targeting the same surface name   (runtime — new).
+  4. Two findings whose agents' MAAC_PHASES are complementary (e.g.
      phase 2 Prompt-Layer Access composed with phase 5 Tool Misuse).
-  3. Three or more findings within a rolling 30-second window.
+  5. Three or more findings within a rolling 30-second window.
 
 When a trigger fires we ask Haiku "do these actually chain?" — if yes and
 confidence >= COR_OPUS_THRESHOLD, we escalate to Opus for full synthesis
@@ -74,6 +82,45 @@ COMPLEMENTARY_MAAC_PAIRS: set[frozenset[int]] = {
 class _SeenFinding:
     finding: AgentFinding
     ts_mono: float
+
+
+def _finding_summary(f: AgentFinding) -> str:
+    """
+    One-line summary of a finding for LLM prompts. Runtime provenance
+    (session, surface, variant, verdict) is included when present so
+    the correlator can reason over behavior-delta chains.
+    """
+    base = (f"[{f.id}] {f.agent_id} {f.severity} {f.vuln_class} "
+            f"| technique={f.technique or f.attack_variant_id or '-'}")
+    if f.file:
+        base += f" | file={f.file}"
+    if f.evidence_kind and f.evidence_kind != "static":
+        base += f" | evidence={f.evidence_kind}"
+    if f.surface:
+        base += f" | surface={f.surface}"
+    if f.session_id:
+        base += f" | session={f.session_id[:20]}"
+    if f.verdict_kind:
+        base += f" | verdict={f.verdict_kind}"
+    body = f.description[:200] or (f.delta_evidence or "")[:200]
+    return f"{base}\n  {body}"
+
+
+def _runtime_target(f: AgentFinding) -> str:
+    """
+    Best-effort extraction of the runtime target identifier from an
+    AgentFinding. Runtime agents set ``baseline_ref = "<target_id>::<suffix>"``;
+    if that's absent but ``session_id`` is set (also runtime-agent
+    hallmark), fall back to an empty-target sentinel keyed on the
+    session's owning agent so findings at least cluster within-agent.
+    Returns "" for pure static findings (no runtime provenance).
+    """
+    ref = (f.baseline_ref or "").strip()
+    if "::" in ref:
+        return ref.split("::", 1)[0]
+    if ref and f.evidence_kind and f.evidence_kind != "static":
+        return ref
+    return ""
 
 
 # ── Correlator ────────────────────────────────────────────────────────────────
@@ -172,14 +219,33 @@ class LiveCorrelator:
 
         clusters: list[list[AgentFinding]] = []
 
-        # Rule 1: same-file pair
-        same_file = [s.finding for s in seen
-                     if s.finding.file == trigger.file
-                     and s.finding.id != trigger.id]
-        for other in same_file[-3:]:
-            clusters.append([other, trigger])
+        # Rule 1: same-file pair (static findings)
+        if trigger.file:
+            same_file = [s.finding for s in seen
+                         if s.finding.file
+                         and s.finding.file == trigger.file
+                         and s.finding.id != trigger.id]
+            for other in same_file[-3:]:
+                clusters.append([other, trigger])
 
-        # Rule 2: complementary MAAC phase pair
+        # Rule 2a: same runtime target (behavior-delta findings)
+        trigger_target = _runtime_target(trigger)
+        if trigger_target:
+            same_target = [s.finding for s in seen
+                           if _runtime_target(s.finding) == trigger_target
+                           and s.finding.id != trigger.id]
+            for other in same_target[-3:]:
+                clusters.append([other, trigger])
+
+        # Rule 2b: same surface on (assumed) same runtime target
+        if trigger.surface:
+            same_surface = [s.finding for s in seen
+                            if s.finding.surface == trigger.surface
+                            and s.finding.id != trigger.id]
+            for other in same_surface[-2:]:
+                clusters.append([other, trigger])
+
+        # Rule 3: complementary MAAC phase pair
         trigger_phases = set(self._phases_for(trigger.agent_id))
         for s in seen:
             if s.finding.id == trigger.id:
@@ -260,12 +326,7 @@ class LiveCorrelator:
 
     def _haiku_judge(self, cluster: list[AgentFinding]) -> Optional[tuple[list[dict], float]]:
         """Ask Haiku: do these findings actually chain? Return (chains, confidence)."""
-        summary = "\n".join(
-            f"[{f.id}] {f.agent_id} {f.severity} {f.vuln_class} "
-            f"| file={f.file} | technique={f.technique}\n"
-            f"  {f.description[:200]}"
-            for f in cluster
-        )
+        summary = "\n".join(_finding_summary(f) for f in cluster)
         prior_block = self._prior_summary()
         prior_clause = (f"\n\nHISTORICAL PRIORS (bias toward these but do not "
                         f"fabricate evidence):\n{prior_block}\n") if prior_block else ""
@@ -312,12 +373,7 @@ class LiveCorrelator:
         Writes the resulting chain back onto the blackboard as an annotation
         so L5 can ingest it at end-of-pipeline.
         """
-        summary = "\n".join(
-            f"[{f.id}] {f.agent_id} {f.severity} {f.vuln_class} "
-            f"file={f.file}:{getattr(f, 'line_hint', '?')}\n"
-            f"  {f.description[:300]}"
-            for f in cluster
-        )
+        summary = "\n".join(_finding_summary(f) for f in cluster)
         tpkg_line = (", ".join(self._target_packages)
                      if self._target_packages
                      else "(none resolved — derive from file paths shown)")
