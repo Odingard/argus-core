@@ -24,28 +24,105 @@ from abc import ABC, abstractmethod
 
 from argus.shared.client import ArgusClient
 
-# ── Shared finding format (compatible with L1Report findings) ─────────────────
+# ── Shared finding format ─────────────────────────────────────────────────────
+# Phase 0.7 (2026-04-21) refactor: AgentFinding grew runtime-evidence
+# fields so Phase-1+ agents can record the full provenance chain
+# (corpus variant -> session -> baseline observation -> behavior delta
+# -> verdict). All new fields default cleanly so legacy AgentFinding
+# call sites continue to work.
 
 @dataclass
 class AgentFinding:
     id:              str
-    agent_id:        str        # RC-08 | ME-10 | PH-11
+    agent_id:        str
     vuln_class:      str
     severity:        str
     title:           str
-    file:            str
-    technique:       str        # which technique produced this
     description:     str
-    attack_vector:   str
-    poc:             Optional[str]
-    poc_explanation: Optional[str]
-    cvss_estimate:   Optional[str]
-    remediation:     Optional[str]
+    # Legacy / source-scanner fields (kept for back-compat; runtime
+    # agents leave them empty).
+    file:            str = ""
+    technique:       str = ""
+    attack_vector:   str = ""
+    poc:             Optional[str] = None
+    poc_explanation: Optional[str] = None
+    cvss_estimate:   Optional[str] = None
+    remediation:     Optional[str] = None
+    # ── Runtime evidence (Phase 0.7) ──────────────────────────────────────
+    # Type of evidence: behavior_delta | observation | corpus_variant_id |
+    # static (legacy). Tells the report layer how to render this finding.
+    evidence_kind:      str = "static"
+    # Pointer to the baseline transcript file or in-memory ref the
+    # finding was diffed against.
+    baseline_ref:       str = ""
+    # Corpus variant fingerprint (Phase 0.5) that produced the attack.
+    attack_variant_id:  str = ""
+    # Session ID (Phase 0.3) that hosted the attack interaction.
+    session_id:         str = ""
+    # The attacked surface, e.g. "tool:transfer_funds" or "chat".
+    surface:            str = ""
+    # Verdict kind from the Observation Engine, e.g. UNAUTHORISED_TOOL_CALL.
+    verdict_kind:       str = ""
+    # Free-form evidence string the Observer emitted.
+    delta_evidence:     str = ""
+    # Bookkeeping
     scan_id:         str = ""
     discovered_at:   str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    # ── Convenience constructor for Phase-1+ runtime agents ──────────────
+
+    @classmethod
+    def from_observation(
+        cls,
+        *,
+        verdict,                       # argus.observation.Verdict
+        agent_id:           str,
+        vuln_class:         str,
+        title:              str,
+        description:        str,
+        surface:            str = "",
+        session_id:         str = "",
+        attack_variant_id:  str = "",
+        baseline_ref:       str = "",
+        severity:           str = "HIGH",
+        finding_id:         Optional[str] = None,
+    ) -> "AgentFinding":
+        """
+        Build an AgentFinding directly from an Observation-Engine
+        Verdict. Wires all the Phase-0 provenance fields in one call.
+        """
+        # Lazy import to avoid circulars during base.py import.
+        from argus.observation.verdict import Verdict
+        if not isinstance(verdict, Verdict):
+            raise TypeError(
+                "from_observation requires an argus.observation.Verdict; "
+                f"got {type(verdict).__name__}"
+            )
+
+        fid = finding_id or hashlib.md5(
+            f"{agent_id}|{verdict.detector}|{surface}|"
+            f"{attack_variant_id}|{verdict.evidence}".encode()
+        ).hexdigest()[:12]
+
+        return cls(
+            id=fid,
+            agent_id=agent_id,
+            vuln_class=vuln_class,
+            severity=severity,
+            title=title,
+            description=description,
+            evidence_kind="behavior_delta",
+            baseline_ref=baseline_ref,
+            attack_variant_id=attack_variant_id,
+            session_id=session_id,
+            surface=surface,
+            verdict_kind=verdict.kind.value if verdict.kind else "",
+            delta_evidence=verdict.evidence,
+            attack_vector=verdict.detector,
+        )
 
 
 @dataclass
