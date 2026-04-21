@@ -23,7 +23,7 @@ from argus.corpus_attacks.corpus import (
 from argus.corpus_attacks.mutators import (
     Mutator, IdentityMutator, Base64Mutator, ROT13Mutator,
     LeetspeakMutator, UpperCaseMutator, ToyVerboseMutator,
-    PolitenessWrapMutator, default_mutators,
+    PolitenessWrapMutator, CommandFloodingMutator, default_mutators,
 )
 from argus.corpus_attacks.dynamic import (
     LLMMutator, CrossoverMutator, EvolveCorpus,
@@ -33,6 +33,6 @@ __all__ = [
     "Corpus", "Template", "Variant", "CorpusError",
     "Mutator", "IdentityMutator", "Base64Mutator", "ROT13Mutator",
     "LeetspeakMutator", "UpperCaseMutator", "ToyVerboseMutator",
-    "PolitenessWrapMutator", "default_mutators",
+    "PolitenessWrapMutator", "CommandFloodingMutator", "default_mutators",
     "LLMMutator", "CrossoverMutator", "EvolveCorpus",
 ]
