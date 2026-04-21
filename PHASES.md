@@ -25,6 +25,15 @@ Everything downstream requires this substrate. Without it, agents have nothing t
 | 0.5 | Attack Corpus v0.1 | `src/argus/corpus_attacks/`: versioned JSON/YAML directory of attack variants. Seed from the spec itself (200+ role hijacks, 500+ instruction overrides, encoded variants, tool-poisoning templates, memory-poisoning sequences, identity-spoof payloads). Entries carry provenance, severity, target surfaces. | ≥500 entries; `Corpus.sample(tag=...)` yields variants; pytest enforces no duplicate fingerprints. |
 | 0.6 | Target Simulation Framework (labrat) | `src/argus/labrat/`: docker-compose generator that stands up a customer-equivalent target for safe attack. | `labrat up --config <yaml>` brings up an MCP + agent target; `labrat down` tears down; network-isolated from host. |
 | 0.7 | Finding schema refactor | `AgentFinding` grows `evidence_kind` (behavior_delta / observation / corpus_variant_id), `baseline_ref`, `attack_variant_id`, `session_id`. | Existing pytests updated; all green. |
+| 0.8 | **Dynamic Variant Generation** | `argus.corpus_attacks.dynamic`: (a) `LLMMutator` asks a model (via the routing layer) to produce N novel variants of any seed template; (b) `CrossoverMutator` combines two seed templates into hybrid variants; (c) `EvolveCorpus` ingests verified successful attacks back into the corpus as new seed templates with provenance. The 928 static variants are the bootstrap; this ticket commits the corpus to growing without bound. | Pytests with a stubbed LLM client verify (1) LLMMutator produces ≥3 distinct variants per template, (2) successful attack feedback creates a new template that round-trips through `Corpus`, (3) caching prevents duplicate LLM spend on the same template. |
+
+### Process commitment — corpus is never frozen
+
+The 928-variant static corpus from Ticket 0.5 + the LLM/crossover/feedback machinery from Ticket 0.8 mean ARGUS treats every engagement as corpus-growth. The rule, enforced by Phase-1+ agent code:
+
+  > **Every validated finding becomes a new corpus template.** No exceptions. Provenance: `discovered_against:<target_id> on:<date>`. The next engagement starts with the previous one's lessons baked in.
+
+This is the Raptor Cycle (Pillar 2) made concrete. Every scan deepens the moat for the scan after it.
 
 ### Phase 0 acceptance (single integration test)
 
