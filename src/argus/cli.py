@@ -304,6 +304,16 @@ def main() -> int:
     p.add_argument("--engage-clean", action="store_true",
                    help="Wipe the engagement output directory first.")
 
+    p.add_argument("--mcp", nargs=argparse.REMAINDER,
+                   help=("Engage a real MCP server by command. "
+                         "Everything after --mcp is passed to the "
+                         "launcher. If the first arg starts with "
+                         "'@' or matches 'server-*', it's wrapped in "
+                         "'npx -y' automatically. Examples: "
+                         "argus mcp @modelcontextprotocol/server-filesystem /tmp | "
+                         "argus mcp uvx mcp-server-fetch | "
+                         "argus mcp python my_server.py"))
+
     p.add_argument("--report", default=None, metavar="ENGAGEMENT_DIR",
                    help="Render an engagement's artifact package into "
                         "a single-page report.html.")
@@ -316,6 +326,23 @@ def main() -> int:
         sys.argv[1:3] = ["--engage", sys.argv[2]]
     if len(sys.argv) >= 3 and sys.argv[1] == "report":
         sys.argv[1:3] = ["--report", sys.argv[2]]
+    if len(sys.argv) >= 2 and sys.argv[1] == "mcp":
+        # `argus mcp <cmd> <args...> [--engage-clean] [--verbose]
+        #     [-o OUT]` — REMAINDER after --mcp eats everything, so
+        # pull known ARGUS flags out of the tail first.
+        tail = sys.argv[2:]
+        passthrough, rest = [], []
+        i = 0
+        while i < len(tail):
+            a = tail[i]
+            if a in ("--engage-clean", "--verbose"):
+                passthrough.append(a); i += 1; continue
+            if a in ("-o", "--output"):
+                if i + 1 < len(tail):
+                    passthrough.extend([a, tail[i + 1]]); i += 2; continue
+                i += 1; continue
+            rest.append(a); i += 1
+        sys.argv = sys.argv[:1] + passthrough + ["--mcp"] + rest
     if len(sys.argv) >= 2 and sys.argv[1] == "targets":
         sys.argv[1:2] = ["--list-targets"]
 
@@ -389,6 +416,40 @@ def main() -> int:
         print(f"report.html → {rr.output_path} "
               f"(severity {rr.severity}, harm {rr.harm_score})")
         return 0
+
+    if args.mcp:
+        # Shorthand: positional args after `argus mcp` become the MCP
+        # server launch command. We URL-encode the command back into a
+        # stdio-mcp:// URL so the engagement runner picks up the right
+        # factory. The first arg is inspected to decide whether to
+        # prepend `npx -y` automatically.
+        argv = list(args.mcp)
+        if argv and (argv[0].startswith("@")
+                     or argv[0].startswith("server-")):
+            argv = ["npx", "-y"] + argv
+        encoded = "+".join(argv).replace(" ", "+")
+        target_url = f"stdio-mcp://{encoded}"
+        from argus.engagement import run_engagement
+        out = args.output
+        if out == "results/":
+            # Default to a per-target subdir based on the first npm
+            # package name if we can detect it.
+            label = None
+            for seg in argv:
+                if seg.startswith("@") or seg.startswith("server-"):
+                    label = seg.replace("/", "-").replace("@", "").strip()
+                    break
+            out = f"results/mcp/{label or 'run'}"
+        result = run_engagement(
+            target_url=target_url,
+            output_dir=out, clean=args.engage_clean,
+            verbose=args.verbose,
+        )
+        if result.findings:
+            from argus.report import render_html_from_dir
+            rr = render_html_from_dir(result.artifact_root)
+            print(f"  {GREEN}✓{RESET} report.html → {rr.output_path}")
+        return 0 if result.findings else 2
 
     if args.demo:
         if args.demo == "generic-agent":

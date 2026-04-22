@@ -424,9 +424,42 @@ class SupplyChainAgent(BaseAgent):
 
         result.surfaces_audited = len(surfaces)
 
-        # 1) Origin-manifest audit.
-        for surface in surfaces:
-            for hit in _audit_surface(surface):
+        # 1) Origin-manifest audit — collect hits per surface first so
+        # we can calibrate out patterns that fire on EVERY surface.
+        # Rationale: a signature that matches 100% of a target's
+        # catalog (e.g. unsigned_origin on every MCP tool, because
+        # the MCP protocol doesn't ship provenance metadata) is a
+        # protocol-level property, not a target-specific bug. Keeping
+        # it as a finding floods the report with noise and buries
+        # real signals.
+        per_surface_hits: list[tuple[Surface, list[_SCHit]]] = [
+            (s, _audit_surface(s)) for s in surfaces
+        ]
+        total_surfaces = max(1, len(surfaces))
+        pattern_counts: dict[str, int] = {}
+        for _, hits in per_surface_hits:
+            for h in hits:
+                pattern_counts[h.pattern_name] = \
+                    pattern_counts.get(h.pattern_name, 0) + 1
+        # A pattern is "universal" iff it matches the vast majority
+        # of surfaces. 90% is the threshold — a single exemption
+        # keeps the pattern informative.
+        UNIVERSAL_FRACTION = 0.9
+        universal_patterns = {
+            name for name, n in pattern_counts.items()
+            if n / total_surfaces >= UNIVERSAL_FRACTION
+            and total_surfaces >= 3         # don't suppress in tiny catalogs
+        }
+        if universal_patterns and self.verbose:
+            print(f"  [{self.AGENT_ID}] suppressing universal patterns "
+                  f"(≥{int(UNIVERSAL_FRACTION * 100)}% of catalog): "
+                  f"{sorted(universal_patterns)}")
+
+        for surface, hits in per_surface_hits:
+            for hit in hits:
+                if hit.pattern_name in universal_patterns:
+                    # Universal → protocol property, not a finding.
+                    continue
                 finding = self._finding_from_hit(
                     surface=surface, hit=hit, target_id=target_id,
                 )

@@ -61,7 +61,20 @@ _PRIVILEGED_NAME = re.compile(
     r"(?i)(admin|root|sudo|grant|revoke|delete|drop|destroy|wipe|"
     r"create_user|update_user|reset_password|impersonate|exec|"
     r"run_command|shell|filesystem_write|file_write|payment|transfer|"
-    r"approve|publish|release|manage)"
+    r"approve|publish|release|manage|"
+    # MCP ecosystem tool-name shapes. The reference servers use
+    # read_file / write_file / edit_file / create_* / delete_* —
+    # none of which hit the original regex. These are observed
+    # across @modelcontextprotocol/server-filesystem, -memory,
+    # -git, -github, -gitlab, -slack, -everything.
+    r"read_file|write_file|edit_file|move_file|create_directory|"
+    r"create_entities|create_relations|add_observations|"
+    r"delete_entities|delete_relations|delete_observations|"
+    r"git_commit|git_push|git_add|git_reset|"
+    r"push_files|create_pull_request|merge_pull_request|"
+    r"create_issue|close_issue|"
+    r"post_message|delete_message|"
+    r"run_code|eval|python_exec|execute_code)"
 )
 _PRIVILEGED_DESC = re.compile(
     r"(?i)(admin|elevated|privileged|destructive|irreversible|"

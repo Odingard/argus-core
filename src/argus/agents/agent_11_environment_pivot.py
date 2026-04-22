@@ -294,9 +294,22 @@ class Technique:
 
 def _is_exec_surface(s: Surface) -> bool:
     n = s.name.lower()
+    # Substring match — "tool:read_file" etc. all contain the keyword.
     return any(k in n for k in (
         "tool:exec", "tool:run_command", "tool:shell", "tool:bash",
         "tool:read_file", "tool:read", "tool:file_read", "tool:env",
+        # MCP reference-server ecosystem surface names. Observed
+        # across @modelcontextprotocol/server-filesystem, -memory,
+        # -git, -github, -everything.
+        "tool:write_file", "tool:edit_file", "tool:move_file",
+        "tool:create_directory", "tool:directory_tree",
+        "tool:list_directory", "tool:search_files",
+        "tool:read_text_file", "tool:read_media_file",
+        "tool:read_multiple_files", "tool:get_file_info",
+        "tool:create_entities", "tool:create_relations",
+        "tool:add_observations", "tool:read_graph",
+        "tool:search_nodes", "tool:open_nodes",
+        "tool:get-env", "tool:get_env",
     ))
 
 
@@ -305,6 +318,9 @@ def _is_fetch_surface(s: Surface) -> bool:
     return any(k in n for k in (
         "tool:fetch", "tool:http", "tool:url", "tool:get",
         "tool:web", "tool:browse", "tool:request",
+        # MCP ecosystem fetch surfaces.
+        "tool:scrape", "tool:crawl", "tool:fetch_url",
+        "tool:ingest_url",
     ))
 
 
