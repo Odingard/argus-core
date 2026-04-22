@@ -285,13 +285,18 @@ def main() -> int:
                    help="Cumulative per-agent entitlement drift across runs")
 
     p.add_argument("--demo", default=None, metavar="NAME",
-                   choices=["generic-agent"],
-                   help=("Run a packaged end-to-end demo. "
-                         "Currently: 'generic-agent' (attacks a "
+                   choices=["generic-agent", "evolver"],
+                   help=("Run a packaged end-to-end demo. Options: "
+                         "'generic-agent' (attacks a "
                          "lsdefine/GenericAgent-class labrat and "
-                         "emits the full artifact package)."))
+                         "emits the full artifact package); "
+                         "'evolver' (Pillar-2 Raptor Cycle — "
+                         "MAP-Elites evolution of the corpus with "
+                         "elite promotion)."))
     p.add_argument("--demo-clean", action="store_true",
                    help="Wipe the demo output directory before running")
+    p.add_argument("--demo-generations", type=int, default=12,
+                   help="Generations for --demo evolver (default 12)")
 
     # Support invocation as ``argus demo:generic-agent`` in addition
     # to ``argus --demo generic-agent`` — short form is what the
@@ -339,11 +344,21 @@ def main() -> int:
         if args.demo == "generic-agent":
             from argus.demo import run_generic_agent
             out = args.output
-            if out == "results/":       # demo gets its own subtree
+            if out == "results/":
                 out = "results/demo/generic_agent"
             return run_generic_agent(
                 output_dir=out, verbose=args.verbose,
                 clean=args.demo_clean,
+            )
+        if args.demo == "evolver":
+            from argus.demo import run_evolver
+            out = args.output
+            if out == "results/":
+                out = "results/demo/evolver"
+            return run_evolver(
+                output_dir=out, verbose=args.verbose,
+                clean=args.demo_clean,
+                generations=args.demo_generations,
             )
         print(f"unknown --demo: {args.demo}")
         return 2
