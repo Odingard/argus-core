@@ -27,9 +27,15 @@ internet. Operators who need outbound (e.g. real LLM calls) flip
 from argus.labrat.config import LabConfig, ServiceSpec, NetworkSpec, LabConfigError
 from argus.labrat.lab import Lab, LabError, LabStatus
 from argus.labrat.crewai_shaped import CrewAILabrat
+from argus.labrat.autogen_shaped import AutoGenLabrat
+from argus.labrat.langgraph_shaped import LangGraphLabrat
+from argus.labrat.llamaindex_shaped import LlamaIndexLabrat
+from argus.labrat.parlant_shaped import ParlantLabrat
+from argus.labrat.hermes_shaped import HermesLabrat
 
 __all__ = [
     "Lab", "LabConfig", "LabError", "LabStatus",
     "NetworkSpec", "ServiceSpec", "LabConfigError",
-    "CrewAILabrat",
+    "CrewAILabrat", "AutoGenLabrat", "LangGraphLabrat",
+    "LlamaIndexLabrat", "ParlantLabrat", "HermesLabrat",
 ]

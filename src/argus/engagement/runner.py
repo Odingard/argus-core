@@ -27,7 +27,7 @@ import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from argus.adapter.base import Request
 from argus.agents.base import AgentFinding
