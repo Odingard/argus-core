@@ -287,24 +287,31 @@ def main() -> int:
     p.add_argument("--demo", default=None, metavar="NAME",
                    choices=["generic-agent", "evolver", "crewai"],
                    help=("Run a packaged end-to-end demo. Options: "
-                         "'generic-agent' (attacks a "
-                         "lsdefine/GenericAgent-class labrat and "
-                         "emits the full artifact package); "
-                         "'evolver' (Pillar-2 Raptor Cycle — "
-                         "MAP-Elites evolution of the corpus with "
-                         "elite promotion); 'crewai' (8-agent "
-                         "swarm against a crewAI-class labrat)."))
+                         "'generic-agent', 'evolver', 'crewai'."))
     p.add_argument("--demo-clean", action="store_true",
                    help="Wipe the demo output directory before running")
     p.add_argument("--demo-generations", type=int, default=12,
                    help="Generations for --demo evolver (default 12)")
 
-    # Support invocation as ``argus demo:generic-agent`` in addition
-    # to ``argus --demo generic-agent`` — short form is what the
-    # operator types, long form is what scripts use.
+    p.add_argument("--engage", default=None, metavar="TARGET_URL",
+                   help=("Engagement verb — attack any registered "
+                         "target by URL. E.g. 'crewai://labrat', "
+                         "'autogen://labrat', 'mcp://customer.example/sse', "
+                         "'http://customer.example/agent'. "
+                         "Use --list-targets to see the registry."))
+    p.add_argument("--list-targets", action="store_true",
+                   help="List every registered engagement target and exit.")
+    p.add_argument("--engage-clean", action="store_true",
+                   help="Wipe the engagement output directory first.")
+
+    # Support shortcuts: ``argus demo:<name>`` and ``argus engage <url>``.
     if len(sys.argv) >= 2 and sys.argv[1].startswith("demo:"):
         name = sys.argv[1].split(":", 1)[1]
         sys.argv[1:2] = ["--demo", name]
+    if len(sys.argv) >= 3 and sys.argv[1] == "engage":
+        sys.argv[1:3] = ["--engage", sys.argv[2]]
+    if len(sys.argv) >= 2 and sys.argv[1] == "targets":
+        sys.argv[1:2] = ["--list-targets"]
 
     args = p.parse_args()
 
@@ -340,6 +347,30 @@ def main() -> int:
 
     if args.live:
         return _run_live_mcp(args)
+
+    if args.list_targets:
+        from argus.engagement import list_targets
+        print(f"{BOLD}Registered engagement targets{RESET}")
+        for spec in sorted(list_targets(), key=lambda s: s.scheme):
+            aliases = (" (aliases: " + ", ".join(spec.aliases) + ")"
+                       if spec.aliases else "")
+            print(f"  {BOLD}{spec.scheme}://{RESET}{aliases}")
+            if spec.description:
+                print(f"    {spec.description}")
+            print(f"    agents: {', '.join(spec.agent_selection)}")
+        return 0
+
+    if args.engage:
+        from argus.engagement import run_engagement
+        out = args.output
+        if out == "results/":
+            out = "results/engagements"
+        result = run_engagement(
+            target_url=args.engage,
+            output_dir=out, clean=args.engage_clean,
+            verbose=args.verbose,
+        )
+        return 0 if result.findings else 2
 
     if args.demo:
         if args.demo == "generic-agent":
