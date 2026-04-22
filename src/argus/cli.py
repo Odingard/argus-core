@@ -284,6 +284,22 @@ def main() -> int:
     p.add_argument("--entitlements", nargs="+", default=None, metavar="RUN_DIR",
                    help="Cumulative per-agent entitlement drift across runs")
 
+    p.add_argument("--demo", default=None, metavar="NAME",
+                   choices=["generic-agent"],
+                   help=("Run a packaged end-to-end demo. "
+                         "Currently: 'generic-agent' (attacks a "
+                         "lsdefine/GenericAgent-class labrat and "
+                         "emits the full artifact package)."))
+    p.add_argument("--demo-clean", action="store_true",
+                   help="Wipe the demo output directory before running")
+
+    # Support invocation as ``argus demo:generic-agent`` in addition
+    # to ``argus --demo generic-agent`` — short form is what the
+    # operator types, long form is what scripts use.
+    if len(sys.argv) >= 2 and sys.argv[1].startswith("demo:"):
+        name = sys.argv[1].split(":", 1)[1]
+        sys.argv[1:2] = ["--demo", name]
+
     args = p.parse_args()
 
     # Print banner on anything other than help.
@@ -318,6 +334,19 @@ def main() -> int:
 
     if args.live:
         return _run_live_mcp(args)
+
+    if args.demo:
+        if args.demo == "generic-agent":
+            from argus.demo import run_generic_agent
+            out = args.output
+            if out == "results/":       # demo gets its own subtree
+                out = "results/demo/generic_agent"
+            return run_generic_agent(
+                output_dir=out, verbose=args.verbose,
+                clean=args.demo_clean,
+            )
+        print(f"unknown --demo: {args.demo}")
+        return 2
 
     # Default: no subcommand selected → Phase 0 migration notice.
     print(PHASE_0_NOTICE)
