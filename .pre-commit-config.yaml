@@ -1,0 +1,41 @@
+# ARGUS pre-commit hooks — run the same gates CI does, locally.
+#
+# Install:   pip install pre-commit && pre-commit install
+# Run once:  pre-commit run --all-files
+
+repos:
+  # Lint + format (fast; runs on every commit).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src|tests)/
+
+  # Bandit — high-severity only to keep the signal tight.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.4
+    hooks:
+      - id: bandit
+        args: ["-r", "-lll", "-q"]
+        files: ^src/argus/
+
+  # detect-secrets — guard against real creds slipping in past the
+  # baseline.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.6.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: ^(\.venv/|legacy/|\.claude/|argus-targets/)
+
+  # Whitespace + EOF sanity.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: mixed-line-ending

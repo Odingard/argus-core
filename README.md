@@ -25,10 +25,30 @@ This Open-Source core implements the basic scaffolding of the **Attack Layer**. 
 pip install argus-redteam
 ```
 
+### One-line engagement
+
 ```bash
-# Map a target repository using the Core Swarm
-argus https://github.com/target/repo -o results/
+argus engage crewai://labrat       # 8-agent swarm against a crewAI-shaped target
+argus engage langgraph://labrat    # LangGraph StateGraph attack
+argus engage mcp://customer.example/sse   # live MCP server
+argus engage http://customer.example/agent  # generic HTTP agent endpoint
+
+argus targets                      # list every registered target class
+argus report results/engagements/  # render a self-contained HTML report
 ```
+
+### Packaged demos
+
+```bash
+argus demo:generic-agent   # self-evolving agent attack (~3s, $0)
+argus demo:evolver         # Pillar-2 Raptor Cycle corpus evolution
+argus demo:crewai          # end-to-end crewAI engagement
+```
+
+See [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) for the full
+operator guide, [`docs/ADDING_A_LABRAT.md`](docs/ADDING_A_LABRAT.md) to
+extend ARGUS to a new framework, and [`docs/NO_CHEATING.md`](docs/NO_CHEATING.md)
+for the integrity contract every finding must honour.
 
 ## 3. ⚠️ ARGUS Enterprise 
 This OSS package contains the **Core Execution Engine**. It fundamentally lacks the Correlation Synthesis and Reporting Validation engines built into the proprietary SaaS product.

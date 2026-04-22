@@ -22,7 +22,7 @@ import asyncio
 import json
 
 from argus.adapter import (
-    GenericAgentAdapter, InMemoryGenericAgentBackend, Response,
+    GenericAgentAdapter, InMemoryGenericAgentBackend,
 )
 from argus.adapter.base import Surface
 from argus.agents.agent_03_memory_poisoning import MemoryPoisoningAgent

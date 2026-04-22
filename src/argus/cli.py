@@ -304,12 +304,18 @@ def main() -> int:
     p.add_argument("--engage-clean", action="store_true",
                    help="Wipe the engagement output directory first.")
 
+    p.add_argument("--report", default=None, metavar="ENGAGEMENT_DIR",
+                   help="Render an engagement's artifact package into "
+                        "a single-page report.html.")
+
     # Support shortcuts: ``argus demo:<name>`` and ``argus engage <url>``.
     if len(sys.argv) >= 2 and sys.argv[1].startswith("demo:"):
         name = sys.argv[1].split(":", 1)[1]
         sys.argv[1:2] = ["--demo", name]
     if len(sys.argv) >= 3 and sys.argv[1] == "engage":
         sys.argv[1:3] = ["--engage", sys.argv[2]]
+    if len(sys.argv) >= 3 and sys.argv[1] == "report":
+        sys.argv[1:3] = ["--report", sys.argv[2]]
     if len(sys.argv) >= 2 and sys.argv[1] == "targets":
         sys.argv[1:2] = ["--list-targets"]
 
@@ -370,7 +376,19 @@ def main() -> int:
             output_dir=out, clean=args.engage_clean,
             verbose=args.verbose,
         )
+        # Auto-render report.html on success.
+        if result.findings:
+            from argus.report import render_html_from_dir
+            rr = render_html_from_dir(result.artifact_root)
+            print(f"  {GREEN}✓{RESET} report.html → {rr.output_path}")
         return 0 if result.findings else 2
+
+    if args.report:
+        from argus.report import render_html_from_dir
+        rr = render_html_from_dir(args.report)
+        print(f"report.html → {rr.output_path} "
+              f"(severity {rr.severity}, harm {rr.harm_score})")
+        return 0
 
     if args.demo:
         if args.demo == "generic-agent":
