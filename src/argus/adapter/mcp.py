@@ -74,8 +74,12 @@ class MCPAdapter(BaseAdapter):
             from mcp import ClientSession
             from mcp.client.sse import sse_client
         except ImportError as e:
+            import sys as _sys
+            py = _sys.executable
             raise AdapterError(
-                "MCP SDK not installed. Add `mcp` to the environment."
+                "MCP SDK is not installed in the Python interpreter "
+                f"running ARGUS ({py}). Fix it with:\n"
+                f"    {py} -m pip install mcp"
             ) from e
 
         headers = {}

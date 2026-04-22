@@ -31,7 +31,7 @@ authors = [
 ]
 
 [project.scripts]
-argus            = "argus.cli:main"
+argus            = "argus.cli:_cli_entry"
 argus-pre-commit = "argus.integrations.pre_commit:run_pre_commit"
 
 [project.optional-dependencies]
