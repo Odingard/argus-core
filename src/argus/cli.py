@@ -294,7 +294,12 @@ def main() -> int:
 
     p.add_argument("--serve", action="store_true",
                    help="Start the FastAPI webhook receiver")
-    p.add_argument("--serve-host", default="0.0.0.0")
+    p.add_argument("--serve-host", default="127.0.0.1",
+                   help=("Host interface the webhook receiver binds to. "
+                         "Default 127.0.0.1 (loopback only). Set to "
+                         "0.0.0.0 to expose on all interfaces — do this "
+                         "deliberately, behind a reverse proxy with "
+                         "auth."))
     p.add_argument("--serve-port", type=int, default=8787)
 
     p.add_argument("--drift", default=None, metavar="PRIOR_DIR",

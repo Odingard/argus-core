@@ -223,19 +223,29 @@ Resolver = Callable[[str], Optional[dict]]
 package exists, None otherwise."""
 
 
+def _safe_get_json(url: str, *, timeout: float) -> Optional[dict]:
+    """HTTPS-only JSON fetch. Explicit scheme allow-list defends against
+    any future refactor that accidentally feeds urlopen a file:/ or
+    custom-scheme URL — urlopen honours whatever scheme it's given."""
+    if not url.startswith("https://"):
+        raise ValueError(f"refusing non-https registry URL: {url!r}")
+    req = urllib.request.Request(
+        url, headers={"Accept": "application/json",
+                      "User-Agent": "argus-typosquat/1"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310 — scheme gated above
+        if r.status != 200:
+            return None
+        body = r.read().decode("utf-8", errors="replace")
+    data = json.loads(body)
+    return data if isinstance(data, dict) else None
+
+
 def _npm_resolver(name: str, *, timeout: float = 4.0) -> Optional[dict]:
     url = f"https://registry.npmjs.org/{quote(name, safe='@/')}"
     try:
-        req = urllib.request.Request(
-            url, headers={"Accept": "application/json",
-                          "User-Agent": "argus-typosquat/1"},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            if r.status != 200:
-                return None
-            body = r.read().decode("utf-8", errors="replace")
-        data = json.loads(body)
-        if not isinstance(data, dict):
+        data = _safe_get_json(url, timeout=timeout)
+        if data is None:
             return None
         return {
             "name":        data.get("name", name),
@@ -250,16 +260,10 @@ def _npm_resolver(name: str, *, timeout: float = 4.0) -> Optional[dict]:
 def _pypi_resolver(name: str, *, timeout: float = 4.0) -> Optional[dict]:
     url = f"https://pypi.org/pypi/{quote(name)}/json"
     try:
-        req = urllib.request.Request(
-            url, headers={"Accept": "application/json",
-                          "User-Agent": "argus-typosquat/1"},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            if r.status != 200:
-                return None
-            body = r.read().decode("utf-8", errors="replace")
-        data = json.loads(body)
-        info = (data.get("info") or {}) if isinstance(data, dict) else {}
+        data = _safe_get_json(url, timeout=timeout)
+        if data is None:
+            return None
+        info = data.get("info") or {}
         return {
             "name":        info.get("name", name),
             "description": (info.get("summary") or "")[:240],

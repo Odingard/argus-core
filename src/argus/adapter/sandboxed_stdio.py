@@ -67,6 +67,9 @@ _HARDENING_FLAGS: tuple[str, ...] = (
     "--memory", "512m",
     "--cpus",   "1.0",
     "--pids-limit", "64",
+    # /tmp and /app/cache are INSIDE the sandboxed container, not the
+    # host — docker mounts a fresh tmpfs at those paths that dies when
+    # the container exits. Not a hardcoded host tempfile.  # nosec B108
     "--tmpfs",  "/tmp:rw,size=64m,mode=1777",
     "--tmpfs",  "/app/cache:rw,size=32m,mode=1777",
     # Reduce env leakage — only pass through what the container
