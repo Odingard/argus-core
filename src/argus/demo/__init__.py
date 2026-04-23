@@ -17,7 +17,7 @@ customer:
 
 ``generic_agent`` targets the lsdefine/GenericAgent class — the
 highest-drama showcase in ARGUS' current roster. Future demos will
-add ``vercel_breach`` (OAuth supply-chain), ``parlant_guideline``
+add ``oauth_supply_chain``, ``parlant_guideline``
 (governance harness), and ``hermes_mcp`` (personal-to-enterprise
 pivot).
 """

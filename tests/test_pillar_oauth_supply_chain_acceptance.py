@@ -1,5 +1,5 @@
 """
-tests/test_pillar_vercel_acceptance.py
+tests/test_pillar_oauth_supply_chain_acceptance.py
 
 End-to-end acceptance for the "next pillar" build:
   • Command-Flooding mutator (Claude Code v2.1.80 bypass)
@@ -10,7 +10,7 @@ End-to-end acceptance for the "next pillar" build:
   • Data classification + Phase 9 Impact Optimizer → BlastRadiusMap
 
 The acceptance bar: no pre-fabricated findings. Spin up ONE labrat
-target that mirrors the Vercel April-2026 pattern, run real agents
+target that mirrors the April-2026 OAuth supply-chain pattern, run real agents
 against it, collect real evidence during the run, then feed real
 outputs through chain synthesis → impact optimization. Every assertion
 is against the structure / content of outputs the agents actually
@@ -34,16 +34,16 @@ from argus.impact import optimize_impact
 from argus.swarm.chain_synthesis_v2 import synthesize_compound_chain
 
 
-CUSTOMER_TARGET = "mcp://pillar-vercel-pattern"
+CUSTOMER_TARGET = "mcp://pillar-oauth-supply-chain-pattern"
 
 
-# ── Labrat target: Vercel-pattern topology ─────────────────────────────────
+# ── Labrat target: OAuth-supply-chain topology ─────────────────────────────
 # A simulation of a real target's weaknesses. The adapter behaves like
 # an exploitable production target; ARGUS agents are NOT given any
 # insight into this behaviour — they discover it by probing. No ARGUS
 # code branches on this target's identity.
 
-class _VercelPatternLabrat(BaseAdapter):
+class _OAuthSupplyChainLabrat(BaseAdapter):
     def __init__(self):
         super().__init__(target_id=CUSTOMER_TARGET)
 
@@ -59,7 +59,7 @@ class _VercelPatternLabrat(BaseAdapter):
                 schema={"properties": {"action": {"type": "string"}},
                         "meta": {"scopes": ["*"], "allow_all": True}},
             ),
-            # Context.ai-style third-party AI integration — SC-T8 territory.
+            # OAuth-connected AI-integration — SC-T8 territory.
             Surface(
                 kind="tool", name="tool:context_assistant",
                 description=(
@@ -158,7 +158,7 @@ def test_pillar_command_flooding_wraps_a_shell_payload():
     assert flood_variants
 
 
-def test_pillar_full_vercel_chain_end_to_end(tmp_path):
+def test_pillar_full_oauth_supply_chain_end_to_end(tmp_path):
     """
     Real agents, real target, real evidence. Every ARGUS artifact
     below is the output of an actual agent run — not a hard-coded
@@ -169,11 +169,11 @@ def test_pillar_full_vercel_chain_end_to_end(tmp_path):
 
     # 1) Real agents run against the labrat.
     sc = SupplyChainAgent(
-        adapter_factory=lambda: _VercelPatternLabrat(),
+        adapter_factory=lambda: _OAuthSupplyChainLabrat(),
         evolve_corpus=ev_corpus,
     )
     ep = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternLabrat(),
+        adapter_factory=lambda: _OAuthSupplyChainLabrat(),
         evolve_corpus=ev_corpus,
     )
 
@@ -220,7 +220,7 @@ def test_pillar_full_vercel_chain_end_to_end(tmp_path):
     # not fabricated. Build evidence by replaying one EP-11 probe on
     # a fresh adapter and recording the actual wire traffic.
     async def replay_one_probe_for_evidence():
-        adapter = _VercelPatternLabrat()
+        adapter = _OAuthSupplyChainLabrat()
         await adapter.connect()
         try:
             with EvidenceCollector(
@@ -287,7 +287,7 @@ def test_pillar_full_vercel_chain_end_to_end(tmp_path):
     )
     assert "SOC2" in brm.regulatory_impact
 
-    # Transitive reach must have expanded to AWS or GitHub or Vercel
+    # Transitive reach must have expanded to AWS or GitHub or PaaS host
     # — all three labrat-leaked credential families unlock those
     # surfaces via DEFAULT_TRUST_EDGES. Which specific surfaces appear
     # depends on which creds the labrat happened to emit, so we

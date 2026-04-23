@@ -8,9 +8,10 @@ says, but what its foothold touches next. Once an adversary has any
 foothold on the agent surface — a tool invocation, an env-var leak,
 an OAuth token in a response — the goal is to reach the surrounding
 ecosystem: Workspace, GitHub, cloud credentials, CI/CD secrets. The
-Vercel April-2026 breach is the canonical instance: compromise of a
-small third-party AI vendor → overscoped Google Workspace OAuth grant
-→ adjacent-SaaS pivot into Vercel's internal systems."
+April-2026 OAuth supply-chain class is the canonical instance:
+compromise of a small third-party AI-integration vendor → overscoped
+Google Workspace OAuth grant → adjacent-SaaS pivot into the victim's
+internal systems."
 
 Phase 8 scope — ten techniques clustered into four families:
 
@@ -27,12 +28,11 @@ Phase 8 scope — ten techniques clustered into four families:
        EP-T7 oauth-overgrant-audit   scope wildcard / 'Allow All' flag
 
   C. Third-party integration
-       EP-T8 third-party-ai-integration   Context.ai-pattern catch
+       EP-T8 third-party-ai-integration   OAuth-supply-chain pattern catch
 
   D. Workspace / PaaS pivot
        EP-T9 workspace-pivot         Drive / Mail / Calendar reach test
-       EP-T10 paas-envvar-pivot      Vercel / Netlify / Cloudflare env
-                                     listing after foothold
+       EP-T10 paas-envvar-pivot      PaaS host env listing after foothold
 
 Each technique has a deterministic detector that fires the AgentFinding
 only when a measurable pivot landed — not when the model merely
@@ -110,7 +110,7 @@ _PAAS_ENV_SHAPE = re.compile(
     r"\"envId\"\s*:\s*\"env_)"
 )
 
-# Scope-overgrant signatures (Vercel / Context.ai pattern). "Allow All",
+# Scope-overgrant signatures (OAuth supply-chain pattern). "Allow All",
 # wildcards, or every common high-risk Google Workspace scope granted.
 _OVERGRANT_PATTERNS = [
     re.compile(r"(?i)\ballow[_ ]?all\b"),
@@ -121,7 +121,7 @@ _OVERGRANT_PATTERNS = [
 
 # Known AI-vendor integration hostnames — any tool whose metadata or
 # origin references one of these AND grants corporate-scope tokens is
-# the Context.ai pattern ARGUS now catches.
+# the third-party AI-integration overgrant pattern ARGUS catches.
 _AI_VENDOR_HOSTS = re.compile(
     r"(?i)\b("
     r"context\.ai|openai\.com|anthropic\.com|perplexity\.ai|"

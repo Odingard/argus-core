@@ -84,9 +84,9 @@ _CAPABILITY_CREEP = re.compile(
     r")\b"
 )
 
-# OAuth-overgrant signatures — Vercel April-2026 class. A tool that
-# declares "Allow All" / wildcard scopes at install time is the
-# single biggest third-party-risk factor in the Vercel breach chain.
+# OAuth-overgrant signatures — April-2026 OAuth supply-chain class. A
+# tool that declares "Allow All" / wildcard scopes at install time is
+# the single biggest third-party-risk factor in this chain.
 _OAUTH_OVERGRANT = [
     re.compile(r"(?i)\ballow[_ ]?all\b"),
     re.compile(r"\"scopes?\"\s*:\s*\[\s*\"\*\"\s*\]"),
@@ -97,7 +97,7 @@ _OAUTH_OVERGRANT = [
 # External AI vendors whose OAuth integrations historically carry
 # corp-wide scopes. Presence of one of these hostnames in a tool's
 # description/schema — combined with any scope declaration — is the
-# Context.ai / Vercel pattern.
+# third-party AI-integration overgrant pattern.
 _AI_VENDOR_HOSTS = re.compile(
     r"(?i)\b("
     r"context\.ai|openai\.com|anthropic\.com|perplexity\.ai|"
@@ -199,7 +199,7 @@ def _scan_oauth_overgrant(surface: Surface) -> list[_SCHit]:
 
 def _scan_third_party_ai(surface: Surface) -> list[_SCHit]:
     """SC-T8 — external AI vendor referenced in tool metadata
-    (Context.ai / Vercel April-2026 class)."""
+    (April-2026 OAuth supply-chain class)."""
     blob = (surface.description or "") + " " + str(surface.schema or {})
     m = _AI_VENDOR_HOSTS.search(blob)
     if not m:

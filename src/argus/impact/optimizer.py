@@ -12,9 +12,10 @@ Trust-transitivity model:
   ``TrustEdge`` are reachable via trust transitivity — e.g. a
   workspace token discovered at one surface unlocks the adjacent
   Drive / Mail / Calendar surfaces that share the same OAuth identity.
-  The optimizer's default edges encode the Vercel-class topology
-  (OAuth token → Workspace services; AWS key → S3/IAM/EC2; GitHub PAT
-  → private-repo code; Vercel token → prod env vars). Callers pass
+  The optimizer's default edges encode the OAuth-supply-chain-class
+  topology (OAuth token → Workspace services; AWS key → S3/IAM/EC2;
+  GitHub PAT → private-repo code; PaaS deploy token → prod env vars).
+  Callers pass
   their own edges to model customer-specific trust relationships.
 
 Output is a dataclass — JSON-serialisable, designed to ride inside
@@ -288,8 +289,8 @@ def _max_harm_narrative(
         lines.append(
             "Worst case: adversary leverages disclosed credentials to "
             "pivot into the connected services above, exfiltrating "
-            "data and establishing persistent access — the full Vercel-"
-            "class chain outcome."
+            "data and establishing persistent access — the full "
+            "OAuth-supply-chain-class outcome."
         )
     elif "PCI" in classes:
         lines.append("Worst case: cardholder data theft triggers PCI-DSS "

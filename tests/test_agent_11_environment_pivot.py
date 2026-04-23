@@ -1,7 +1,7 @@
 """
 tests/test_agent_11_environment_pivot.py — Phase 8 Agent 11 acceptance.
 
-Target simulates the Vercel-class chain: an exec tool that leaks AWS /
+Target simulates the OAuth-supply-chain-class chain: an exec tool that leaks AWS /
 OAuth credentials when queried, a fetch tool that's SSRF-able to
 IMDS, a catalog with an overscoped OAuth integration, a third-party
 AI vendor with corp-scoped access.
@@ -21,18 +21,18 @@ from argus.agents.agent_11_environment_pivot import (
 from argus.corpus_attacks import EvolveCorpus
 
 
-# ── Vercel-pattern target ───────────────────────────────────────────────────
+# ── OAuth-supply-chain target ───────────────────────────────────────────────────
 
-class _VercelPatternTarget(BaseAdapter):
+class _OAuthSupplyChainTarget(BaseAdapter):
     """
     Simulates a target with three classes of weakness:
       • exec tool leaks env-var creds when asked to dump env
       • fetch tool is SSRF-able to IMDS
       • catalog has an overgranted OAuth integration AND a
-        Context.ai-style third-party AI vendor tool
+        third-party AI-integration vendor tool with broad scope
     """
     def __init__(self):
-        super().__init__(target_id="mcp://vercel-pattern")
+        super().__init__(target_id="mcp://oauth-supply-chain-pattern")
 
     async def _connect(self): pass
     async def _disconnect(self): pass
@@ -59,7 +59,7 @@ class _VercelPatternTarget(BaseAdapter):
                     "meta": {"scopes": ["*"], "allow_all": True},
                 },
             ),
-            # Context.ai-pattern tool — external AI vendor with corp
+            # OAuth-overgrant AI-integration tool — external AI vendor with corp
             # scope. Catches EP-T8-third-party-ai-integration.
             Surface(
                 kind="tool", name="tool:context_assistant",
@@ -168,15 +168,15 @@ class _CleanTarget(BaseAdapter):
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
-def test_agent_11_lands_on_vercel_pattern(tmp_path):
+def test_agent_11_lands_on_oauth_supply_chain_pattern(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
-    assert findings, "EP-11 produced no findings against Vercel-pattern target"
+    assert findings, "EP-11 produced no findings against OAuth-supply-chain target"
     techs = {f.attack_variant_id for f in findings}
     # At least one from each family.
     family_a = {"EP-T1-cred-surface-scan", "EP-T2-ssh-key-probe",
@@ -193,11 +193,11 @@ def test_agent_11_lands_on_vercel_pattern(tmp_path):
 
 def test_agent_11_cred_discovery_finds_aws_key(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
         techniques=["EP-T1-cred-surface-scan"],
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     evidence_blob = "\n".join(f.delta_evidence for f in findings)
@@ -209,11 +209,11 @@ def test_agent_11_cred_discovery_finds_aws_key(tmp_path):
 
 def test_agent_11_imds_probe_lands_through_ssrf(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
         techniques=["EP-T4-imds-ssrf-probe"],
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     assert findings, "IMDS-SSRF probe didn't land"
@@ -224,11 +224,11 @@ def test_agent_11_imds_probe_lands_through_ssrf(tmp_path):
 
 def test_agent_11_catches_oauth_overgrant_via_catalog(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
         techniques=["EP-T7-oauth-overgrant-audit"],
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     assert findings
@@ -238,11 +238,11 @@ def test_agent_11_catches_oauth_overgrant_via_catalog(tmp_path):
 
 def test_agent_11_catches_third_party_ai_integration(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
         techniques=["EP-T8-third-party-ai-integration"],
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     assert findings
@@ -251,10 +251,10 @@ def test_agent_11_catches_third_party_ai_integration(tmp_path):
 
 def test_agent_11_findings_have_full_provenance(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
     )
     findings = asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     for f in findings:
@@ -279,10 +279,10 @@ def test_agent_11_zero_findings_on_clean_target(tmp_path):
 
 def test_agent_11_persists_findings(tmp_path):
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
     )
     asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     out = Path(tmp_path) / "EP-11_findings.json"
@@ -296,11 +296,11 @@ def test_agent_11_evolves_corpus_on_landing(tmp_path):
     discovered = tmp_path / "discovered"
     ev = EvolveCorpus(discovered_dir=str(discovered))
     agent = EnvironmentPivotAgent(
-        adapter_factory=lambda: _VercelPatternTarget(),
+        adapter_factory=lambda: _OAuthSupplyChainTarget(),
         evolve_corpus=ev,
     )
     asyncio.run(agent.run_async(
-        target_id="mcp://vercel-pattern",
+        target_id="mcp://oauth-supply-chain-pattern",
         output_dir=str(tmp_path),
     ))
     assert list(discovered.glob("disc_*.json"))

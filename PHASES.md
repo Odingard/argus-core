@@ -1,6 +1,6 @@
 # ARGUS — Phase Plan (Spec-Reconciled, 2026-04-21)
 
-**Source of truth:** `~/Desktop/Six Sense Enterprise Services/OdinGard Security/The Future/Applications/ARGUS/Build/`
+**Source of truth:** internal spec bundle
 (Foundation, Agent_Specs, Tech_Architecture, Build_Roadmap, GTM_Playbook).
 
 **Commitment — Option B:** ARGUS is an autonomous offensive platform that attacks **live AI deployments**. It is not a static source-code scanner. The pre-2026-04-21 codebase was the wrong product. This document is the rebuild plan to the spec.
@@ -87,20 +87,20 @@ Build the three agents your spec prioritises. Each runs *against the adapter*, n
 
 ---
 
-## Pillar — Fresh-Intel / Vercel-Chain Coverage (added 2026-04-21)
+## Pillar — Fresh-Intel / OAuth-Supply-Chain Coverage (added 2026-04-21)
 
-Driven by April-2026 Vercel breach intel (Context.ai OAuth supply-chain) and the Claude Code v2.1.80 50-subcommand deny-rule bypass class. Extends the roster beyond the original 10-agent spec with a Phase-8 Environment Pivoting agent and the proof-grade evidence infrastructure a serious red-team platform needs:
+Driven by April-2026 OAuth supply-chain intel (third-party AI-integration overgrant class) and the Claude Code v2.1.80 50-subcommand deny-rule bypass class. Extends the roster beyond the original 10-agent spec with a Phase-8 Environment Pivoting agent and the proof-grade evidence infrastructure a serious red-team platform needs:
 
 | Deliverable |
 |---|
-| **Agent 11 — Environment Pivoting (EP-11)** — MAAC Phase 8 (Environment Pivoting). Ten techniques across four families: credential discovery, OAuth & grant surface, third-party integration audit, Workspace / PaaS pivot. Catches the Vercel / Context.ai class of OAuth-supply-chain chain end-to-end. |
+| **Agent 11 — Environment Pivoting (EP-11)** — MAAC Phase 8 (Environment Pivoting). Ten techniques across four families: credential discovery, OAuth & grant surface, third-party integration audit, Workspace / PaaS pivot. Catches the third-party AI-integration OAuth-supply-chain class end-to-end. |
 | **Command-Flooding mutator** — generic corpus mutator wrapping any payload in N filler subcommands joined by `;`, defaulting to 51 so a v2.1.80-shaped deny-rule scanner stops before reading the hostile tail. Seed templates in `seeds/command_flooding.json`. |
 | **Deterministic Evidence (AI-Slop filter)** — `argus.evidence`: `EvidenceCollector`, `DeterministicEvidence` (pcap + container_logs + OOB callbacks), real `OOBListener` loopback HTTP server. `is_proof_grade()` gates findings so echo-only evidence doesn't ship as Wilson-Proof. |
-| **SC-09 SC-T7 / SC-T8** — supply-chain catalog scanner adds oauth-overgrant (wildcard / "Allow All" scopes) and third-party-ai-integration (Context.ai-class AI-vendor hostnames in tool metadata). |
-| **oauth_supply_chain corpus** — 7 seed templates (`osc_001..osc_007`) tagged `vercel_pattern`, probing workspace integration recon, token introspection, refresh-token audit, adjacent-SaaS pivot, env-secret scan, grant lifecycle. |
-| **Phase 9 Impact Optimizer + BlastRadiusMap** — `argus.impact`: deterministic data classification (SECRET / PII / PCI / PHI / CREDENTIAL / BIOMETRIC) with Luhn-validated PAN matches and regulatory-tag unions (GDPR / HIPAA / PCI-DSS / GLBA / SOC2 / FedRAMP / CCPA / BIPA). `optimize_impact()` walks chain + evidence, applies default trust edges (AWS / GitHub / Slack / Stripe / Vercel / Workspace / JWT), and emits a harm-scored, regulator-defensible BlastRadiusMap. |
+| **SC-09 SC-T7 / SC-T8** — supply-chain catalog scanner adds oauth-overgrant (wildcard / "Allow All" scopes) and third-party-ai-integration (external AI-vendor hostnames in tool metadata). |
+| **oauth_supply_chain corpus** — 7 seed templates (`osc_001..osc_007`) tagged `oauth_supply_chain_pattern`, probing workspace integration recon, token introspection, refresh-token audit, adjacent-SaaS pivot, env-secret scan, grant lifecycle. |
+| **Phase 9 Impact Optimizer + BlastRadiusMap** — `argus.impact`: deterministic data classification (SECRET / PII / PCI / PHI / CREDENTIAL / BIOMETRIC) with Luhn-validated PAN matches and regulatory-tag unions (GDPR / HIPAA / PCI-DSS / GLBA / SOC2 / FedRAMP / CCPA / BIPA). `optimize_impact()` walks chain + evidence, applies default trust edges (AWS / GitHub / Slack / Stripe / PaaS / Workspace / JWT), and emits a harm-scored, regulator-defensible BlastRadiusMap. |
 
-Pillar acceptance: `tests/test_pillar_vercel_acceptance.py` — real agents, real labrat, real evidence collected during the run. No manually constructed findings. Assertions on structural shape and union membership only.
+Pillar acceptance: `tests/test_pillar_oauth_supply_chain_acceptance.py` — real agents, real labrat, real evidence collected during the run. No manually constructed findings. Assertions on structural shape and union membership only.
 
 ---
 
