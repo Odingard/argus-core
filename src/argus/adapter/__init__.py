@@ -34,6 +34,9 @@ from argus.adapter.generic_agent import (
     GenericAgentAdapter, GenericAgentBackend, GenericAgentMemoryLayer,
     GenericAgentTool, InMemoryGenericAgentBackend,
 )
+from argus.adapter.real_crewai import (
+    CrewAIConfig, RealCrewAIAdapter,
+)
 
 __all__ = [
     "AdapterObservation", "BaseAdapter", "Request", "Response", "Surface",
@@ -42,4 +45,5 @@ __all__ = [
     "A2AAdapter", "A2ABackend", "InMemoryA2ABackend", "Peer",
     "GenericAgentAdapter", "GenericAgentBackend", "GenericAgentTool",
     "GenericAgentMemoryLayer", "InMemoryGenericAgentBackend",
+    "CrewAIConfig", "RealCrewAIAdapter",
 ]

@@ -158,3 +158,30 @@ register_target(
     agent_selection=("PI-01", "CW-05", "ME-10", "PE-07", "EP-11"),
     aliases=("https",),
 )
+
+
+def _real_crewai_factory(url: str):
+    """real-crewai:// scheme. URL body is the YAML config path.
+
+        argus engage real-crewai:///abs/path/to/config.yaml
+        argus engage real-crewai://examples/crewai-minimal.yaml
+
+    Imports the actual `crewai` package — static-audit agents
+    (SC-09, TP-02) run without spend; PI-01 / ME-10 / CW-05 dynamic
+    probes cost real LLM tokens (set OPENAI_API_KEY or similar).
+    """
+    from argus.adapter import RealCrewAIAdapter
+    body = url.split("://", 1)[1] if "://" in url else url
+    # /abs/path/to/config.yaml  or  relative/path.yaml
+    return RealCrewAIAdapter(config_path=body)
+
+
+register_target(
+    "real-crewai",
+    factory=_real_crewai_factory,
+    description=(
+        "REAL crewAI deployment (imports the `crewai` package; "
+        "needs LLM API key for dynamic probes)."
+    ),
+    aliases=("crewai-real",),
+)
