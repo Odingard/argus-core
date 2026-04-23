@@ -21,9 +21,7 @@ import sys
 
 import pytest
 
-from argus.pro.consensus import (
-    ConsensusVerdict, require_agreement,
-)
+from argus.pro.consensus import require_agreement
 
 
 # ── Core N-of-M behaviour ────────────────────────────────────────────────────
