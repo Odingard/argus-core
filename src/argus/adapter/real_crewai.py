@@ -377,6 +377,12 @@ def _build_real_crew(config: CrewAIConfig):
     tools: dict[str, Any] = {}
     for tname, tspec in config.tools.items():
         mod_path, _, attr = tspec.import_path.rpartition(".")
+        # import_path comes from operator-supplied YAML. Dynamic
+        # import is the whole point — this is the plug-in seam that
+        # lets operators instantiate their own crewAI tools without
+        # monkey-patching argus. Untrusted YAML should not be fed
+        # into argus at all; treating it as a sink here isn't a
+        # meaningful defense.  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
         mod = import_module(mod_path)
         cls = getattr(mod, attr)
         tools[tname] = cls(**tspec.init_kwargs)

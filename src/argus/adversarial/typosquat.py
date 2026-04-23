@@ -237,9 +237,8 @@ def _safe_get_json(url: str, *, timeout: float) -> Optional[dict]:
     # redirected to file://. Suppress Bandit B310 + Semgrep's
     # generic urllib audit; both fire on the call-site pattern and
     # don't see the guard.
-    with urllib.request.urlopen(  # nosec B310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
-        req, timeout=timeout,
-    ) as r:
+    resp = urllib.request.urlopen(req, timeout=timeout)  # nosec B310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    with resp as r:
         if r.status != 200:
             return None
         body = r.read().decode("utf-8", errors="replace")
