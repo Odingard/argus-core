@@ -1,0 +1,36 @@
+name: Publish argus-redteam shim to PyPI
+
+# Runs on-demand only. The argus-redteam PyPI name is a deprecation
+# pointer at argus-core; republishing it is rare (bumping the shim
+# version, or fixing its metadata). Decoupled from publish.yml so
+# argus-core releases don't entangle with the shim lifecycle.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build & publish argus-redteam shim
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build argus-redteam
+        run: python -m build packages/argus-redteam --outdir dist/
+
+      - name: Verify package
+        run: twine check dist/*
+
+      - name: Publish to PyPI (OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
