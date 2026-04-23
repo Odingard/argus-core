@@ -72,14 +72,18 @@ Source for both tiers lives in this repo. Pro license terms land before any Pro 
 
 ## 5. Migrating from `argus-redteam`
 
-`argus-redteam==0.4.0` remains available on PyPI but is no longer maintained. The Python import name (`import argus`) did not change, so your code still works:
+`argus-redteam==0.4.1` is now a deprecation shim that simply pulls
+`argus-core` as a dependency, so existing `pip install argus-redteam`
+commands and `requirements.txt` pins continue to work with no code
+change. Update at your convenience:
 
 ```diff
 - pip install argus-redteam
 + pip install argus-core
 ```
 
-A `0.4.1` deprecation-pointer release of `argus-redteam` is planned.
+The Python import name (`import argus`) did not change; source code
+works identically under either install name.
 
 ## 6. Docs
 
