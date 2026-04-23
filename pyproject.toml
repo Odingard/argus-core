@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "argus-redteam"
-version = "0.4.0"
-description = "Autonomous AI Red Team Platform - Core Engine"
+name = "argus-core"
+version = "0.5.0"
+description = "Autonomous AI Red Team Platform — Core (OSS tier)"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
