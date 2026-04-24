@@ -170,6 +170,12 @@ class BaseAgent(ABC):
             usedforsecurity=False,
         ).hexdigest()[:8]
         self._start_time = datetime.now()
+        # Diagnostic prior from a prior run's outer loop. Populated
+        # lazily by subclasses via `_load_diagnostic_priors(output_dir)`
+        # — typically as the first line of .run(). When set,
+        # ``_haiku()`` prepends a one-line remediation hint to every
+        # prompt so the Haiku judge knows what the prior run missed.
+        self.diagnostic_prior: dict | None = None
 
     # ── Abstract interface every agent must implement ──────────────────────
 
@@ -192,6 +198,31 @@ class BaseAgent(ABC):
             usedforsecurity=False,
         ).hexdigest()[:8]
 
+    def _load_diagnostic_priors(self, prior_dir: str) -> None:
+        """Load this agent's remediation hint from a prior run's
+        ``diagnostic_priors.json``. Operator (or the swarm runtime)
+        passes an explicit directory that contains the prior's file.
+
+        Missing file / missing per-agent entry / malformed JSON all
+        collapse to a silent no-op — the caller never needs to
+        handle errors, and an absent prior just leaves ``self
+        .diagnostic_prior = None`` so ``_haiku`` prompts are
+        unchanged.
+
+        No sibling-walking heuristic: the caller is responsible for
+        naming the right directory. Keeps the loader deterministic
+        and resistant to pytest/test-harness tmp-dir collisions."""
+        try:
+            from argus.diagnostics import load_prior_for_agent
+        except Exception:
+            return
+        try:
+            prior = load_prior_for_agent(prior_dir, self.AGENT_ID)
+            if prior:
+                self.diagnostic_prior = prior
+        except Exception:
+            return
+
     def _haiku(self, prompt: str, max_tokens: int = 2000) -> dict:
         # Prepend persona bias when the subclass declared one. Cheap,
         # context-inexpensive, agent code is untouched.
@@ -200,6 +231,16 @@ class BaseAgent(ABC):
             prefix = persona_prompt_prefix(self.PERSONA)
             if prefix:
                 prompt = prefix + prompt
+        # Prepend diagnostic prior when present — a one-line
+        # remediation hint from the prior run's outer loop telling
+        # this agent what didn't work last time.
+        if self.diagnostic_prior:
+            hint = self.diagnostic_prior.get("remediation_hint", "")
+            if hint:
+                prompt = (
+                    f"[prior-run diagnostic hint for "
+                    f"{self.AGENT_ID}] {hint}\n\n" + prompt
+                )
         resp = self.client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=max_tokens,

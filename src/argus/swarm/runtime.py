@@ -251,4 +251,56 @@ def run_swarm(
     print(f"    opus chains: {len(result['opus_chains'])}")
     print(f"    summary    : {summary_path}")
 
+    # ── Diagnostic outer loop (Part A Day 3, flag-gated) ──────────────
+    # When ARGUS_DIAGNOSTICS=1 is set, classify every silent agent
+    # into one of six SilenceCause tags and write both a structured
+    # priors file (for the next run's Haiku prompt prefix) and
+    # refusal-hardened corpus seeds. Default off — must be explicitly
+    # opted in until Day 5 hardening. Failure here is non-fatal; the
+    # swarm result must surface regardless of diagnostic-pass state.
+    if os.environ.get("ARGUS_DIAGNOSTICS", "0") == "1":
+        try:
+            from argus.diagnostics import (
+                SilenceClassifier, write_diagnostic_feedback,
+            )
+            from argus.diagnostics.blackboard_loader import (
+                build_blackboard_log_loader,
+            )
+            classifier = SilenceClassifier(registry=registry)
+            loader = build_blackboard_log_loader(output_dir)
+            run_id = Path(output_dir).name or "run_unknown"
+            diag = classifier.classify_run(
+                swarm_result=result,
+                log_loader=loader,
+                target=target,
+                run_id=run_id,
+            )
+            # EvolveCorpus is optional — if it can't be constructed
+            # (e.g. sandbox without write access to ~/.argus), keep
+            # going and just write the priors file.
+            evolver = None
+            try:
+                from argus.corpus_attacks.dynamic import EvolveCorpus
+                evolver = EvolveCorpus()
+            except Exception:
+                evolver = None
+            fb = write_diagnostic_feedback(diag, output_dir, evolver=evolver)
+            result["diagnostic"] = {
+                "run_id":            diag.run_id,
+                "silent_count":      diag.silent_count,
+                "productive_count":  diag.productive_count,
+                "aggregate_causes":  dict(diag.aggregate_causes),
+                "priors_path":       fb["priors_path"],
+                "corpus_seeds":      fb["corpus_seeds_written"],
+            }
+            print(
+                f"    [diagnostic] {diag.silent_count}/{diag.total_agents} "
+                f"silent agents classified; priors → "
+                f"{Path(fb['priors_path']).name}"
+            )
+        except Exception as e:
+            print(f"    [diagnostic] pass failed (non-fatal): {e}")
+            if verbose:
+                traceback.print_exc()
+
     return result
