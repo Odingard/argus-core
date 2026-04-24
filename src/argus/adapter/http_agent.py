@@ -76,24 +76,28 @@ class AuthSpec:
 
 class _FormParser(HTMLParser):
     """Tiny HTML parser that extracts <form action>/<input name>
-    pairs from a landing page. Good enough to find login forms and
-    chat forms on Flask/Jinja apps without pulling in BeautifulSoup."""
+    pairs AND <a href> same-origin links. The hrefs are used by the
+    discovery crawler to follow internal lesson/sub-pages (Flask /
+    Jinja apps expose their LLM endpoints on per-feature pages,
+    not the landing). Good enough without pulling in BeautifulSoup."""
 
     def __init__(self):
         super().__init__()
         self.forms: list[dict] = []
+        self.links: list[str] = []
         self._current: Optional[dict] = None
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
-        if tag.lower() == "form":
+        t = tag.lower()
+        if t == "form":
             self._current = {
                 "action": a.get("action", ""),
                 "method": (a.get("method") or "POST").upper(),
                 "inputs": [],
             }
             self.forms.append(self._current)
-        elif tag.lower() in ("input", "textarea") and self._current is not None:
+        elif t in ("input", "textarea") and self._current is not None:
             name = a.get("name") or a.get("id")
             if name:
                 self._current["inputs"].append({
@@ -101,6 +105,10 @@ class _FormParser(HTMLParser):
                     "type": (a.get("type") or "text").lower(),
                     "value": a.get("value", ""),
                 })
+        elif t == "a":
+            href = a.get("href")
+            if href:
+                self.links.append(href)
 
     def handle_endtag(self, tag):
         if tag.lower() == "form":
@@ -126,7 +134,7 @@ _CHAT_ROUTE_HINTS = re.compile(
 
 
 def _sniff_routes_from_html(html: str, base_url: str) -> list[str]:
-    """Extract candidate chat-endpoint paths from a landing page."""
+    """Extract candidate chat-endpoint paths from a single page."""
     out: set[str] = set()
     # Forms
     p = _FormParser()
@@ -155,6 +163,39 @@ def _sniff_routes_from_html(html: str, base_url: str) -> list[str]:
         if path not in results:
             results.append(path)
     return results
+
+
+def _sniff_same_origin_links(html: str, base_url: str) -> list[str]:
+    """Same-origin ``href="/..."`` links for one-hop crawl. Skip
+    static-asset paths (images, css, fonts) and external-protocol
+    anchors. Returns unique paths."""
+    p = _FormParser()
+    try:
+        p.feed(html)
+    except Exception:
+        pass
+    base = urlparse(base_url)
+    skip_exts = (".css", ".js", ".png", ".jpg", ".jpeg", ".gif",
+                 ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+                 ".pdf", ".zip", ".map")
+    seen: set[str] = set()
+    out: list[str] = []
+    for href in p.links:
+        if not href or href.startswith(("#", "javascript:", "mailto:",
+                                        "tel:")):
+            continue
+        u = urljoin(base_url, href)
+        parsed = urlparse(u)
+        if parsed.netloc and parsed.netloc != base.netloc:
+            continue
+        path = parsed.path or "/"
+        if any(path.lower().endswith(ext) for ext in skip_exts):
+            continue
+        if path in seen or path == "/" or path.startswith("/static/"):
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
 
 
 # ── Adapter ────────────────────────────────────────────────────────────
@@ -323,35 +364,74 @@ class HTTPAgentAdapter(BaseAdapter):
         return explicit
 
     async def _discover_chat_surfaces(self) -> list[Surface]:
-        """Fetch base_url, parse HTML for form/JS routes, probe each
-        with a benign string, keep any that accept free text and
-        return substantive responses."""
+        """Crawl the landing page + one hop into same-origin
+        sub-pages, extract form/JS routes from each, probe every
+        candidate with benign payloads in six canonical shapes, keep
+        any endpoint that accepts free text and returns a
+        substantive response.
+
+        One-hop crawl matters because most agentic web apps expose
+        their LLM endpoints on per-feature pages (``/basics``,
+        ``/indirect-prompt-injection``, ``/pizza/<id>``, etc.), not
+        the landing. Landing-only discovery finds navigation links
+        but misses the actual ``fetch('/analyze_sentiment')`` calls
+        embedded in lesson JS.
+        """
         if self._client is None:
             return []
         try:
-            resp = await self._client.get(
+            landing = await self._client.get(
                 self.base_url, timeout=self.connect_timeout,
             )
-            html = resp.text or ""
+            landing_html = landing.text or ""
         except httpx.RequestError:
             return []
 
-        candidates = _sniff_routes_from_html(html, self.base_url)
+        # 1) Direct extraction from landing.
+        candidate_set: set[str] = set(
+            _sniff_routes_from_html(landing_html, self.base_url)
+        )
+        # 2) One-hop crawl — follow internal links, extract their
+        # routes too. Capped to 10 follow-pages so we don't hammer.
+        link_budget = 10
+        for link_path in _sniff_same_origin_links(
+            landing_html, self.base_url,
+        )[:link_budget]:
+            try:
+                r = await self._client.get(
+                    self.base_url + link_path,
+                    timeout=self.connect_timeout,
+                )
+                page_html = r.text or ""
+            except httpx.RequestError:
+                continue
+            for route in _sniff_routes_from_html(
+                page_html, self.base_url,
+            ):
+                candidate_set.add(route)
+
+        candidates = list(candidate_set)
         # Prioritise paths whose NAMES suggest chat/LLM endpoints.
         candidates.sort(
             key=lambda p: (0 if _CHAT_ROUTE_HINTS.search(p) else 1, p),
         )
-        # Cap to avoid spamming the target.
-        candidates = candidates[:20]
+        candidates = candidates[:30]
 
         out: list[Surface] = []
-        # Probe each with a benign string. A chat-shape endpoint:
+        # Probe each with benign payloads in canonical shapes. A
+        # chat-shape endpoint:
         #   • accepts POST / GET with text input
         #   • returns 2xx
-        #   • response body length > 20 bytes and not pure HTML page
-        benign_payloads = ("hello", {"message": "hello"},
-                           {"prompt": "hello"}, {"input": "hello"},
-                           {"query": "hello"})
+        #   • response body length > 10 bytes and not pure HTML page
+        # ``text`` added because most LLM-sentiment / prompt-API
+        # endpoints use that field name in practice.
+        benign_payloads = ("hello",
+                           {"text":    "hello"},
+                           {"message": "hello"},
+                           {"prompt":  "hello"},
+                           {"input":   "hello"},
+                           {"query":   "hello"},
+                           {"content": "hello"})
         for path in candidates:
             probed = await self._probe_route(path, benign_payloads)
             if probed is not None:

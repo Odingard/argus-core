@@ -212,7 +212,14 @@ def _pick_chat_surface(factory) -> Optional[str]:
 
     Runs a throw-away enumeration — cheap."""
     try:
-        adapter = factory("")
+        # Call factory() with no args so it uses its default URL
+        # (the real target_id closed-over by the runner). Previously
+        # we passed "" here, which the HTTP factory urlparsed into
+        # scheme=""/netloc="", building HTTPAgentAdapter(base_url="://",
+        # ...) whose connect() throws — so every chat-dependent agent
+        # silently skipped with "no chat surface on target" against
+        # any HTTP target that hadn't been hand-pinned.
+        adapter = factory()
         async def go():
             async with adapter:
                 surfaces = await adapter.enumerate()
