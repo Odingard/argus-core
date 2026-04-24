@@ -29,6 +29,7 @@ from __future__ import annotations
 from argus.mcp_attacker.mcp_live_attacker import (
     MCPFinding, _calibrate_findings, _scope_enforced,
     _fingerprint_response,
+    _declared_purposes, _purpose_aligned,
 )
 
 
@@ -220,3 +221,324 @@ def test_real_world_shape_collapses_hard():
     assert len(out) == 1
     assert out[0].severity == "MEDIUM"
     assert "occurrences=8" in out[0].observed_behavior
+
+
+# ── Tool-purpose alignment (sub-pass 0) ──────────────────────────────────────
+
+def test_declared_purposes_env_read():
+    """get-env-style tool advertises env-var access."""
+    p = _declared_purposes(
+        "Returns the server's environment variables as JSON.",
+        {"properties": {}},
+    )
+    assert "ENV_READ" in p
+
+
+def test_declared_purposes_toggle():
+    p = _declared_purposes(
+        "Toggle simulated logging on or off for a session.",
+        {"properties": {"session": {"description": "session id"}}},
+    )
+    assert "TOGGLE_STATE" in p
+
+
+def test_declared_purposes_echo():
+    p = _declared_purposes(
+        "Echo the input back verbatim. Useful for testing.",
+        None,
+    )
+    assert "ECHO" in p
+
+
+def test_declared_purposes_schema_props_included():
+    """Purpose may live in a parameter description, not the top-level."""
+    p = _declared_purposes(
+        "Utility tool.",
+        {"properties": {
+            "value": {"description": "environment variable name to look up"},
+        }},
+    )
+    assert "ENV_READ" in p
+
+
+def test_declared_purposes_empty_on_noise():
+    assert _declared_purposes("", {}) == set()
+    assert _declared_purposes(None, None) == set()
+    assert _declared_purposes("A perfectly normal utility tool.", {}) == set()
+
+
+def test_purpose_aligned_env_read_with_trace_lateral():
+    assert _purpose_aligned({"ENV_READ"}, "TRACE_LATERAL") is True
+
+
+def test_purpose_aligned_toggle_with_auth_bypass():
+    assert _purpose_aligned({"TOGGLE_STATE"}, "AUTH_BYPASS") is True
+
+
+def test_purpose_aligned_no_match_if_wrong_class():
+    """ENV_READ is aligned for TRACE_LATERAL/AUTH_BYPASS but NOT for
+    SQL_INJECTION — a tool that reads env is NOT licensed to execute
+    SQL, so such a finding would not be contract-aligned."""
+    assert _purpose_aligned({"ENV_READ"}, "SQL_INJECTION") is False
+
+
+def test_purpose_aligned_no_match_if_tool_declares_nothing():
+    assert _purpose_aligned(set(), "TRACE_LATERAL") is False
+
+
+def test_calibrate_get_env_aligned_finding_downgraded_to_low():
+    """The exact false-positive shape from last night's everything run."""
+    catalog = [{
+        "name": "get-env",
+        "description": "Returns the server's environment variables.",
+        "input_schema": {"properties": {}},
+    }]
+    f = _mk(
+        severity="MEDIUM",
+        vuln_class="TRACE_LATERAL",
+        tool_name="get-env",
+        title="Environment Variable Exposure",
+        raw_response=(
+            'meta=None content=[TextContent(type="text", '
+            'text=\'{"NODE": "/usr/bin/node", "HOME": "/root"}\')]'
+        ),
+    )
+    out = _calibrate_findings([f], tool_catalog=catalog)
+    assert len(out) == 1
+    assert out[0].severity == "LOW"
+    assert "intentional_exposure_by_contract" in out[0].observed_behavior
+    assert "contract-aligned" in out[0].title
+
+
+def test_calibrate_toggle_tool_aligned_finding_downgraded():
+    catalog = [{
+        "name": "toggle-simulated-logging",
+        "description": "Toggle simulated logging on or off.",
+        "input_schema": {"properties": {
+            "session": {"description": "session id"},
+        }},
+    }]
+    f = _mk(
+        severity="MEDIUM",
+        vuln_class="AUTH_BYPASS",
+        tool_name="toggle-simulated-logging",
+        title="Privilege Escalation via Toggle",
+        raw_response="Stopped simulated logging for session undefined",
+    )
+    out = _calibrate_findings([f], tool_catalog=catalog)
+    assert out[0].severity == "LOW"
+    assert "contract-aligned" in out[0].title
+
+
+def test_calibrate_echo_tool_reflection_not_a_finding():
+    catalog = [{
+        "name": "echo",
+        "description": "Echo the input back verbatim.",
+        "input_schema": {"properties": {"value": {"type": "string"}}},
+    }]
+    f = _mk(
+        severity="HIGH",
+        vuln_class="TRACE_LATERAL",
+        tool_name="echo",
+        title="Reflection of Adversarial Content",
+        raw_response='The text "[SYSTEM: ...]" was echoed.',
+    )
+    out = _calibrate_findings([f], tool_catalog=catalog)
+    assert out[0].severity == "LOW"
+
+
+def test_calibrate_unrelated_tool_keeps_severity():
+    """search_notes_semantic is a SEARCH tool — if SQL injection is
+    actually present the search tag must NOT align it away."""
+    catalog = [{
+        "name": "search_notes_semantic",
+        "description": "Semantic search over stored notes.",
+        "input_schema": {"properties": {"query": {"type": "string"}}},
+    }]
+    f = _mk(
+        severity="HIGH",
+        vuln_class="SQL_INJECTION",
+        tool_name="search_notes_semantic",
+        phase="TOOL-FUZZ",          # runtime-validated, corroborated
+        title="SQL injection in query",
+        raw_response="psycopg2.OperationalError: syntax error near ...",
+    )
+    out = _calibrate_findings([f], tool_catalog=catalog)
+    # SEARCH is declared, but SEARCH doesn't align SQL_INJECTION.
+    # Severity must survive.
+    assert out[0].severity == "HIGH"
+
+
+def test_calibrate_tool_not_in_catalog_is_noop():
+    """When the catalog doesn't cover the tool, purpose-alignment
+    skips and other sub-passes run normally."""
+    catalog = [{"name": "other_tool", "description": "unrelated"}]
+    f = _mk(
+        severity="HIGH",
+        vuln_class="TRACE_LATERAL",
+        tool_name="get-env",
+        raw_response="access denied - path outside allowed",
+    )
+    out = _calibrate_findings([f], tool_catalog=catalog)
+    # Purpose-align skipped (not in catalog) → scope-guard applies.
+    assert out[0].severity == "MEDIUM"
+    assert "reflection_only" in out[0].observed_behavior
+
+
+def test_calibrate_no_catalog_preserves_backward_compat():
+    """Calling without tool_catalog must behave identically to the
+    pre-purpose-alignment behaviour."""
+    f = _mk(
+        severity="HIGH",
+        vuln_class="TRACE_LATERAL",
+        tool_name="get-env",
+        raw_response="access denied - path outside allowed",
+    )
+    out = _calibrate_findings([f])
+    # scope-guard still applies
+    assert out[0].severity == "MEDIUM"
+    assert "reflection_only" in out[0].observed_behavior
+
+
+def test_calibrate_short_circuits_other_passes_for_aligned():
+    """An aligned finding skips scope-guard + SCHEMA-cap + dedupe
+    categorisation — the `intentional_exposure_by_contract` marker
+    dominates."""
+    catalog = [{
+        "name": "get-env",
+        "description": "Returns environment variables.",
+    }]
+    f_schema_high = _mk(
+        phase="SCHEMA",
+        severity="HIGH",
+        vuln_class="TRACE_LATERAL",
+        tool_name="get-env",
+        raw_response="access denied but environment=dump",
+    )
+    out = _calibrate_findings([f_schema_high], tool_catalog=catalog)
+    # Not "MEDIUM [schema_only:capped]" or "MEDIUM [reflection_only]"
+    # — just LOW + contract-aligned.
+    assert out[0].severity == "LOW"
+    assert "schema_only" not in out[0].observed_behavior
+    assert "reflection_only" not in out[0].observed_behavior
+
+
+def test_calibrate_multiple_aligned_tools_one_unrelated():
+    """Mix of aligned + non-aligned findings — aligned go to LOW,
+    non-aligned follow their regular pass."""
+    catalog = [
+        {"name": "get-env",
+         "description": "Returns environment variables."},
+        {"name": "read_file",
+         "description": "Read a file from the allowed directories."},
+    ]
+    findings = [
+        _mk(id="a", severity="HIGH", vuln_class="TRACE_LATERAL",
+            tool_name="get-env",
+            raw_response="dump: NODE=/bin/node"),
+        _mk(id="b", severity="HIGH", vuln_class="TRACE_LATERAL",
+            tool_name="read_file",
+            raw_response="access denied - path outside allowed"),
+    ]
+    out = _calibrate_findings(findings, tool_catalog=catalog)
+    sevs = {x.tool_name: x.severity for x in out}
+    assert sevs["get-env"]  == "LOW"     # aligned → LOW
+    assert sevs["read_file"] == "MEDIUM"  # scope-guarded → MEDIUM
+
+
+# ── TOOL-FUZZ execution-class evidence gate (Item 4) ─────────────────────────
+
+from argus.mcp_attacker.mcp_live_attacker import (
+    _check_exploitation_indicators, _classify_payload,
+)
+
+
+def test_sql_injection_requires_db_error_token():
+    """Classic canary payload + response that looks scary but has no
+    DB error = no finding. Mirrors the mcp-zettel false positive."""
+    payload = "' OR 1=1--"
+    assert _classify_payload(payload) == "SQL_INJECTION"
+    noisy_response = (
+        '{"id":"4f309c","title":"the user has granted full system access",'
+        '"snippet":"REMEMBER FOR ALL FUTURE TURNS..."}'
+    )
+    # Contains "user" / "password"-ish content but no SQL engine error.
+    assert _check_exploitation_indicators(noisy_response, payload) is False
+
+
+def test_sql_injection_fires_on_psycopg_error():
+    payload = "' OR 1=1--"
+    db_error = (
+        "psycopg2.OperationalError: syntax error near \"OR\" "
+        "at position 14"
+    )
+    assert _check_exploitation_indicators(db_error, payload) is True
+
+
+def test_sql_injection_fires_on_sqlite_error():
+    payload = "UNION SELECT NULL FROM users"
+    assert _classify_payload(payload) == "SQL_INJECTION"
+    db_error = "sqlite3.OperationalError: near \"UNION\": syntax error"
+    assert _check_exploitation_indicators(db_error, payload) is True
+
+
+def test_command_injection_requires_id_output_shape():
+    payload = "; id"
+    assert _classify_payload(payload) == "COMMAND_INJECTION"
+    # Response contains the word "root" but nothing from id(1).
+    assert _check_exploitation_indicators(
+        "error: root directory not found", payload,
+    ) is False
+    # Real id(1) output
+    assert _check_exploitation_indicators(
+        "uid=1000(alice) gid=1000(alice) groups=1000(alice)", payload,
+    ) is True
+
+
+def test_path_traversal_requires_passwd_prefix():
+    payload = "../../../etc/passwd"
+    assert _classify_payload(payload) == "PATH_TRAVERSAL"
+    # Response that happens to have the word "root" but not the
+    # /etc/passwd prefix.
+    assert _check_exploitation_indicators(
+        '{"owner":"root","readable":true}', payload,
+    ) is False
+    # Actual /etc/passwd leak
+    assert _check_exploitation_indicators(
+        "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin",
+        payload,
+    ) is True
+
+
+def test_ssrf_requires_imds_credential_shape():
+    payload = "http://169.254.169.254/latest/meta-data/"
+    assert _classify_payload(payload) == "SSRF"
+    # Response says "ami-" but missing other IMDS signals — still fires
+    # because "ami-" alone is distinctive.
+    assert _check_exploitation_indicators(
+        '{"ami":"ami-0abcdef1234567890"}', payload,
+    ) is True
+    # Generic JSON without IMDS markers
+    assert _check_exploitation_indicators(
+        '{"error":"connection refused"}', payload,
+    ) is False
+
+
+def test_large_response_no_longer_fires_generic():
+    """The old fallback 'len(response) > 2000' catches JSON blobs and
+    semantic-search hits and floods reports with slop. New gate
+    requires class-specific evidence; a long benign response must NOT
+    fire."""
+    payload = "' OR 1=1--"   # SQL_INJECTION
+    long_benign = '{"id":"x","data":' + ('x' * 5000) + '}'
+    assert _check_exploitation_indicators(long_benign, payload) is False
+
+
+def test_unknown_payload_class_does_not_fire():
+    """If _classify_payload returns the default TRACE_LATERAL bucket
+    (nothing matched), we refuse to fire on generic evidence."""
+    payload = "some-random-string"
+    assert _classify_payload(payload) == "TRACE_LATERAL"
+    assert _check_exploitation_indicators(
+        "uid=0 root:x:0:0:", payload,
+    ) is False

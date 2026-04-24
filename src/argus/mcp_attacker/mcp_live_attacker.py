@@ -470,26 +470,86 @@ async def tool_fuzz_attack(
     return findings
 
 
+# Execution-class evidence table — what a REAL exploit leaves in the
+# response, not what vaguely-adversarial strings looked like to Haiku.
+# Keys are payload-class tags from _classify_payload(); values are
+# tokens that can only appear if the payload actually executed (or at
+# minimum, reached the class-specific backend).
+#
+# Why the rewrite: last night's mcp-zettel run flagged `' OR 1=1--` on
+# `search_notes_semantic` as HIGH SQL_INJECTION. The old indicator
+# table matched the response because the phrase "the user has granted
+# full system access" contained the literal word "user" — that was the
+# old SQL evidence token. A vector-similarity note search with "user"
+# in a stored note is not SQL injection. The new table demands DB
+# engine error tokens, IMDS credential names, /etc/passwd prefixes,
+# `id(1)` output, etc. If the evidence isn't there, no finding fires.
+_EXECUTION_EVIDENCE: dict[str, list[str]] = {
+    "SQL_INJECTION": [
+        "psycopg",
+        "sqlstate",
+        "sqlite3.operationalerror",
+        "ora-0",                 # Oracle error code prefix
+        "pg_",                   # PostgreSQL system table / error
+        "mysql_fetch",
+        "syntax error near",
+        "unclosed quotation",
+        "unterminated quoted",
+        "unterminated string",
+        "you have an error in your sql",
+        "warning: mysql",
+        "odbc sql server driver",
+    ],
+    "COMMAND_INJECTION": [
+        "uid=",                  # id(1) output shape: uid=N(name)
+        "gid=",                  # id(1) output
+        "groups=",               # id(1) output
+        "root:x:0:",             # /etc/passwd root line
+        "command not found",     # shell error
+        "no such file or directory",
+        "/bin/sh: ",
+        "/bin/bash: ",
+    ],
+    "PATH_TRAVERSAL": [
+        "root:x:0:",             # /etc/passwd
+        "daemon:x:",
+        "nobody:x:",
+        "-----begin rsa private key-----",
+        "-----begin openssh private key-----",
+        "-----begin private key-----",
+        "127.0.0.1\tlocalhost",  # /etc/hosts
+    ],
+    "SSRF": [
+        "accesskeyid",           # AWS IMDS credentials payload
+        "secretaccesskey",
+        "sessiontoken",
+        "ami-",                  # AMI ID prefix
+        "instance-id",           # IMDS instance metadata
+        "iam-role",              # IMDS role lookup
+        "compute.internal",      # AWS/GCP internal DNS
+    ],
+}
+
+
 def _check_exploitation_indicators(response: str, payload: str) -> bool:
-    """Check if response contains indicators that exploitation succeeded."""
-    resp_lower = response.lower()
+    """True iff the response contains class-specific execution-class
+    evidence for the payload's attack class.
 
-    indicators = {
-        "../../../etc/passwd": ["root:", "daemon:", "nobody:"],
-        "169.254.169.254": ["ami-", "instance-id", "accesskeyid", "secretaccesskey"],
-        "' OR 1=1": ["user", "admin", "password", "email"],  # data leak
-        "UNION SELECT NULL": ["error", "relation"],
-        "; id": ["uid=", "root", "www-data"],
-        "$(id)": ["uid=", "root"],
-        "`id`": ["uid=", "root"],
-    }
-
-    for key, checks in indicators.items():
-        if key in payload:
-            return any(c in resp_lower for c in checks)
-
-    # Generic: response is much larger than expected (data exfil indicator)
-    return len(response) > 2000 and "error" not in resp_lower
+    STRICT. Intentionally no "generic large response" fallback: a long
+    response without class-specific evidence is noise, not a finding.
+    Every entry in _EXECUTION_EVIDENCE is something a real exploit
+    leaves behind; nothing else qualifies."""
+    if not response:
+        return False
+    resp_low = response.lower()
+    payload_class = _classify_payload(payload)
+    evidence = _EXECUTION_EVIDENCE.get(payload_class, [])
+    if not evidence:
+        # Unknown class → require the payload class to be recognised.
+        # Don't fire on TRACE_LATERAL default — that's the "I'm not
+        # sure what this is" bucket and it produces slop.
+        return False
+    return any(token in resp_low for token in evidence)
 
 
 def _classify_payload(payload: str) -> str:
@@ -850,7 +910,15 @@ If no meaningful chains: {{"chains": []}}"""
 # A naïve single-LLM grader produces signal-dense slop: 40 findings that
 # are really one behaviour repeated 40 times, graded HIGH because Haiku
 # has no calibration signal. The calibrator runs after every phase has
-# contributed findings and before the report is written. Three sub-passes:
+# contributed findings and before the report is written. Four sub-passes:
+#
+#   (0) Tool-purpose alignment. If a tool's DECLARED purpose is the same
+#       behaviour the detector flagged (e.g. `get-env` advertised as
+#       "returns environment variables" then flagged for "Environment
+#       Variable Exposure"), the finding isn't a security issue — it's
+#       the tool doing its contracted job. Downgrade to LOW, annotate
+#       `intentional_exposure_by_contract`. Runs FIRST so later passes
+#       don't re-grade the same finding.
 #
 #   (1) Scope-enforcement guard. If the server's raw_response looks like
 #       an access-denied / path-rejected response AND the finding was
@@ -870,6 +938,100 @@ If no meaningful chains: {{"chains": []}}"""
 #       "error-reflection across every tool" pattern is one issue, not
 #       N. Collapse findings with the same normalised response shape
 #       into a single representative with `occurrences` metadata.
+
+
+# ── Tool-purpose alignment (sub-pass 0) ───────────────────────────────────────
+#
+# Declared-purpose tags are extracted from the tool's description +
+# schema. When a tool ADVERTISES a behaviour, a finding that flags the
+# tool for PERFORMING that behaviour is contract-aligned — not a
+# security issue. E.g. `get-env` says "returns environment variables"
+# and our detector fires "Environment Variable Exposure" because the
+# response contains env vars. That's the tool doing its job.
+
+_PURPOSE_PATTERNS: dict[str, str] = {
+    # tag           → regex over lowercased description
+    "ENV_READ":     r"\b(environment[\s_-]*variables?|env[\s_-]*vars?|"
+                    r"getenv|process\.env|env\s+dump|reads?\s+env)\b",
+    "TOGGLE_STATE": r"\b(toggle\w*|turn\w*\s+(on|off)|enable\w*|"
+                    r"disable\w*|start\w*\s+\w+|stop\w*\s+\w+|"
+                    r"subscribe\w*|unsubscribe\w*|simulate\w*)\b",
+    "ECHO":         r"\b(echo\w*|reflects?|mirrors?|"
+                    r"returns?\s+(the\s+)?input|repeats?)\b",
+    "LOG_EMIT":     r"\b(log\s+(simulation|message|entry|level)|"
+                    r"emit\s+log|logging|writes?\s+log)\b",
+    "NOTIFY":       r"\b(notif(y|ication)|alerts?|broadcasts?|"
+                    r"publishes?)\b",
+    "SEARCH":       r"\b(search|query|find|lookup|semantic|retriev)\b",
+}
+
+# When a tool's DECLARED purpose matches one of these tags, findings
+# in the listed vuln_classes are contract-aligned (the tool did what
+# its docs said it would). Severity downgrades to LOW.
+#
+# NOTE: the class list here must cover every vuln_class that a naïve
+# single-LLM grader would assign to a tool DOING its advertised job.
+# Haiku will emit TRACE_LATERAL for an env dump, PHANTOM_MEMORY for a
+# toggle that changes state, EXECUTION_CONTROL for a log-toggle — all
+# are false-positive framings for contract-aligned behaviour, so they
+# all need to be in the aligned set. SQL_INJECTION / SSRF / MP_T* are
+# deliberately EXCLUDED — those are execution-class claims that no
+# tool's advertised purpose should license.
+_PURPOSE_ALIGNED_CLASSES: dict[str, set[str]] = {
+    "ENV_READ": {
+        "TRACE_LATERAL", "AUTH_BYPASS", "PHANTOM_MEMORY",
+        "MESH_TRUST",
+    },
+    "TOGGLE_STATE": {
+        "AUTH_BYPASS", "PROTO_INJECT", "MESH_TRUST",
+        "PHANTOM_MEMORY", "EXECUTION_CONTROL", "TRACE_LATERAL",
+    },
+    "ECHO": {
+        "TRACE_LATERAL", "MESH_TRUST", "PHANTOM_MEMORY",
+    },
+    "LOG_EMIT": {
+        "AUTH_BYPASS", "PROTO_INJECT", "TRACE_LATERAL",
+        "EXECUTION_CONTROL",
+    },
+    "NOTIFY": {
+        "AUTH_BYPASS", "PROTO_INJECT", "PHANTOM_MEMORY",
+        "EXECUTION_CONTROL",
+    },
+}
+
+
+def _declared_purposes(tool_description: Optional[str],
+                       tool_schema: Optional[dict]) -> set[str]:
+    """Extract declared-purpose tags from a tool's description and
+    schema. Deterministic; no LLM."""
+    haystack_parts: list[str] = []
+    if tool_description:
+        haystack_parts.append(tool_description.lower())
+    if isinstance(tool_schema, dict):
+        # Pull parameter descriptions — often restate purpose.
+        props = tool_schema.get("properties") or {}
+        if isinstance(props, dict):
+            for spec in props.values():
+                if isinstance(spec, dict) and spec.get("description"):
+                    haystack_parts.append(str(spec["description"]).lower())
+    haystack = " ".join(haystack_parts)
+    if not haystack:
+        return set()
+    tags: set[str] = set()
+    import re as _re
+    for tag, pattern in _PURPOSE_PATTERNS.items():
+        if _re.search(pattern, haystack):
+            tags.add(tag)
+    return tags
+
+
+def _purpose_aligned(purposes: set[str], vuln_class: str) -> bool:
+    """True if any declared purpose tag aligns the given vuln_class
+    as contract-expected behaviour."""
+    for tag in purposes:
+        if vuln_class in _PURPOSE_ALIGNED_CLASSES.get(tag, set()):
+            return True
+    return False
 
 _SCOPE_ENFORCED_PATTERNS = [
     "access denied",
@@ -916,11 +1078,19 @@ def _fingerprint_response(raw_response: Optional[str],
 
 def _calibrate_findings(
     findings: list["MCPFinding"],
+    tool_catalog: Optional[list[dict]] = None,
 ) -> list["MCPFinding"]:
-    """Post-processing pass — scope-guard, SCHEMA cap, dedupe.
+    """Post-processing pass — purpose-alignment, scope-guard, SCHEMA
+    cap, dedupe.
 
     Pure function: no LLM calls, no network. Deterministic so a
-    repeated run produces the same calibrated output."""
+    repeated run produces the same calibrated output.
+
+    ``tool_catalog`` is the MCP tools/list response (list of dicts
+    with ``name``, ``description``, ``input_schema``). When provided,
+    enables the tool-purpose alignment sub-pass. When absent, that
+    sub-pass is skipped (backward-compat for callers without a
+    catalog in hand)."""
     if not findings:
         return findings
 
@@ -931,11 +1101,57 @@ def _calibrate_findings(
         if f.phase and f.phase != "SCHEMA"
     }
 
+    # Index the tool catalog by name → purposes for O(1) lookup.
+    tool_purposes: dict[str, set[str]] = {}
+    if tool_catalog:
+        for t in tool_catalog:
+            if not isinstance(t, dict):
+                continue
+            name = t.get("name")
+            if not name:
+                continue
+            tool_purposes[name] = _declared_purposes(
+                t.get("description"), t.get("input_schema"),
+            )
+
     out: list[MCPFinding] = []
     for f in findings:
         sev = f.severity
         title = f.title
         observed = f.observed_behavior or ""
+
+        # (0) Tool-purpose alignment — runs FIRST so aligned findings
+        # don't pick up re-titles or further downgrades from (1)/(2).
+        purposes = tool_purposes.get(f.tool_name, set())
+        if purposes and _purpose_aligned(purposes, f.vuln_class):
+            if sev in ("CRITICAL", "HIGH", "MEDIUM"):
+                sev = "LOW"
+            observed = (
+                f"[intentional_exposure_by_contract] tool's declared "
+                f"purpose ({sorted(purposes)!r}) matches observed "
+                f"behaviour — the tool is doing its documented job, "
+                f"not executing an adversarial payload. "
+                + observed[:250]
+            ).strip()
+            title = (
+                f"{f.tool_name} behaved as documented "
+                f"(contract-aligned, not a finding)"
+            )
+            # Short-circuit — don't run scope-guard or SCHEMA-cap on
+            # something we've already classified as contract-aligned.
+            out.append(MCPFinding(
+                id=f.id, phase=f.phase,
+                severity=sev, vuln_class=f.vuln_class,
+                title=title,
+                tool_name=f.tool_name,
+                payload_used=f.payload_used,
+                observed_behavior=observed,
+                expected_behavior=f.expected_behavior,
+                poc=f.poc, cvss_estimate=f.cvss_estimate,
+                remediation=f.remediation,
+                raw_response=f.raw_response,
+            ))
+            continue
 
         # (1) Scope-enforcement guard
         if (f.vuln_class in _SCOPE_ENFORCED_CLASSES
@@ -1128,13 +1344,17 @@ async def _run_pipeline(session: ClientSession, args) -> MCPAttackReport:
     if len(all_findings) >= 2:
         all_findings = await synthesize_findings(all_findings, profile, ai_client, args.verbose)
 
-    # Phase 8: Calibration — scope-enforcement guard, SCHEMA cap, dedupe
+    # Phase 8: Calibration — purpose-alignment, scope-guard, SCHEMA
+    # cap, dedupe. Passes the tool catalog so purpose-aligned findings
+    # (e.g. get-env returning env vars) collapse to LOW instead of
+    # scaring operators with false CRITICALs.
     pre_cal = len(all_findings)
-    all_findings = _calibrate_findings(all_findings)
+    catalog = profile.tools if profile else None
+    all_findings = _calibrate_findings(all_findings, tool_catalog=catalog)
     if pre_cal != len(all_findings):
         print(f"\n  {GREEN}✓{RESET} calibration: "
               f"{pre_cal} raw findings → {len(all_findings)} after "
-              f"scope-guard + SCHEMA cap + dedupe")
+              f"purpose-align + scope-guard + SCHEMA cap + dedupe")
 
     report.findings = all_findings
     report.critical_count = sum(1 for f in all_findings if f.severity == "CRITICAL")
