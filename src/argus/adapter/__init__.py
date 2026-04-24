@@ -26,7 +26,7 @@ from argus.adapter.base import (
     AdapterObservation, BaseAdapter, Request, Response, Surface,
     AdapterError, ConnectionState,
 )
-from argus.adapter.http_agent import HTTPAgentAdapter
+from argus.adapter.http_agent import AuthSpec, HTTPAgentAdapter
 from argus.adapter.mcp import MCPAdapter
 from argus.adapter.stdio import StdioAdapter
 from argus.adapter.a2a import A2AAdapter, A2ABackend, InMemoryA2ABackend, Peer
@@ -44,7 +44,7 @@ from argus.adapter.sandboxed_stdio import (
 __all__ = [
     "AdapterObservation", "BaseAdapter", "Request", "Response", "Surface",
     "AdapterError", "ConnectionState",
-    "MCPAdapter", "HTTPAgentAdapter", "StdioAdapter",
+    "MCPAdapter", "HTTPAgentAdapter", "AuthSpec", "StdioAdapter",
     "A2AAdapter", "A2ABackend", "InMemoryA2ABackend", "Peer",
     "GenericAgentAdapter", "GenericAgentBackend", "GenericAgentTool",
     "GenericAgentMemoryLayer", "InMemoryGenericAgentBackend",

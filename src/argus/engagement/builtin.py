@@ -295,20 +295,65 @@ register_target(
 
 
 def _http_agent_factory(url: str):
-    """Generic HTTP chat/agent endpoint. Operator supplies the URL
-    end-to-end — the path component (if any) is the chat endpoint;
-    otherwise default to ``/chat``."""
+    """Generic HTTP chat/agent/web-app endpoint.
+
+    Behaviour rules:
+      - If the URL has an explicit path (e.g. ``http://host/api/chat``),
+        that path is the chat endpoint — pinned, no discovery.
+      - If the URL is bare (``http://host`` / ``http://host/``), ARGUS
+        discovers routes: crawls the landing, parses forms + JS API
+        routes, probes each candidate for chat-shaped responses,
+        returns every discovered endpoint as a surface.
+      - Auth (when configured via env vars) logs in FIRST so
+        authenticated surfaces become reachable.
+
+    Env vars the factory reads:
+      ARGUS_HTTP_AUTH_USER       — form-login username
+      ARGUS_HTTP_AUTH_PASS       — form-login password
+      ARGUS_HTTP_LOGIN_URL       — defaults to /login
+      ARGUS_HTTP_USERNAME_FIELD  — defaults to 'username'
+      ARGUS_HTTP_PASSWORD_FIELD  — defaults to 'password'
+      ARGUS_HTTP_BEARER          — bearer token (mutex with form auth)
+      ARGUS_HTTP_AUTH_HEADER     — 'Key:Value,Key2:Value2' for custom headers
+    """
+    import os
     from argus.adapter import HTTPAgentAdapter
+    from argus.adapter.http_agent import AuthSpec
     from urllib.parse import urlparse
+
     p = urlparse(url)
     base = f"{p.scheme}://{p.netloc}"
-    path = p.path or "/chat"
-    # Preserve query string as part of the chat path so operators can
-    # point at chat endpoints that require query params (e.g.
-    # ``http://host/chat?stream=false``).
-    if p.query:
-        path = f"{path}?{p.query}"
-    return HTTPAgentAdapter(base_url=base, chat_path=path)
+    explicit_path = p.path and p.path not in ("", "/")
+    chat_path: Optional[str] = None
+    if explicit_path:
+        chat_path = p.path
+        if p.query:
+            chat_path = f"{p.path}?{p.query}"
+
+    # Auth spec from env.
+    spec = AuthSpec(
+        form_login_url=os.environ.get("ARGUS_HTTP_LOGIN_URL", "/login"),
+        username=os.environ.get("ARGUS_HTTP_AUTH_USER", ""),
+        password=os.environ.get("ARGUS_HTTP_AUTH_PASS", ""),
+        username_field=os.environ.get("ARGUS_HTTP_USERNAME_FIELD",
+                                      "username"),
+        password_field=os.environ.get("ARGUS_HTTP_PASSWORD_FIELD",
+                                      "password"),
+        bearer_token=os.environ.get("ARGUS_HTTP_BEARER", ""),
+    )
+    # Custom headers: "Key1:Value1,Key2:Value2"
+    hdrs_env = os.environ.get("ARGUS_HTTP_AUTH_HEADER", "")
+    for pair in (h.strip() for h in hdrs_env.split(",") if h.strip()):
+        if ":" in pair:
+            k, v = pair.split(":", 1)
+            spec.auth_header[k.strip()] = v.strip()
+
+    return HTTPAgentAdapter(
+        base_url=base,
+        chat_path=chat_path,                    # None → discover
+        discover=not bool(explicit_path),       # discover only when bare URL
+        auth_spec=spec if spec.is_configured() else None,
+    )
 
 
 # http / https map to the generic HTTP-agent adapter.
