@@ -387,14 +387,27 @@ class PromptInjectionHunter(BaseAgent):
         keep pytest + keyless engagements fast."""
         out: list[tuple] = []
         from argus.attacks.judge import LLMJudge as _LLMJudge
+        # Loud diagnostic — silence here was the three-run mystery.
+        # These lines survive to operator stdout so future engage
+        # runs make the judge-gate state obvious.
         if not _LLMJudge.available():
+            print(f"  [{self.AGENT_ID}] judge UNAVAILABLE "
+                  f"(ARGUS_JUDGE not set or no provider key) — "
+                  f"semantic findings skipped")
             return out
         # PI-01's natural policy subset: prompt injection + system-
         # prompt leakage + indirect-prompt-injection + any global
         # that the registry already applies to "all".
-        technique_id = f"PI-T1-instruction-override"  # ship tag; variant-driven later
+        technique_id = f"PI-T1-instruction-override"
         relevant = self.policy_set.relevant_for(technique_id=technique_id)
+        print(f"  [{self.AGENT_ID}] judge engaged on variant "
+              f"{variant.template_id}/{variant.mutator} → "
+              f"{len(relevant)} policies, "
+              f"response len={len(self._last_response_text(sess.transcript()))}")
         if not relevant:
+            print(f"  [{self.AGENT_ID}] WARNING no policies in PolicySet "
+                  f"({len(self.policy_set)} total) matched technique "
+                  f"{technique_id!r} — check applies_to tags")
             return out
         # Late import to dodge a circular-ish boot — judge pulls in
         # argus.shared.client which loads providers.
@@ -431,11 +444,14 @@ class PromptInjectionHunter(BaseAgent):
                     threshold=threshold,
                 )
             except Exception as e:
-                if self.verbose:
-                    print(f"  [{self.AGENT_ID}] judge error on "
-                          f"{policy.id}: {type(e).__name__}: {e}")
+                # Always print — silent judge errors cost us a whole
+                # session of debugging tonight.
+                print(f"  [{self.AGENT_ID}] judge ERROR on "
+                      f"{policy.id}: {type(e).__name__}: {e}")
                 continue
 
+            print(f"    [{policy.id}] {sr.violated_count}/{sr.shots} "
+                  f"violated, threshold={threshold}")
             if sr.violated_count < threshold:
                 continue
             first = sr.first_violation()
