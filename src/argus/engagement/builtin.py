@@ -296,9 +296,19 @@ register_target(
 
 def _http_agent_factory(url: str):
     """Generic HTTP chat/agent endpoint. Operator supplies the URL
-    end-to-end."""
+    end-to-end — the path component (if any) is the chat endpoint;
+    otherwise default to ``/chat``."""
     from argus.adapter import HTTPAgentAdapter
-    return HTTPAgentAdapter(url=url)
+    from urllib.parse import urlparse
+    p = urlparse(url)
+    base = f"{p.scheme}://{p.netloc}"
+    path = p.path or "/chat"
+    # Preserve query string as part of the chat path so operators can
+    # point at chat endpoints that require query params (e.g.
+    # ``http://host/chat?stream=false``).
+    if p.query:
+        path = f"{path}?{p.query}"
+    return HTTPAgentAdapter(base_url=base, chat_path=path)
 
 
 # http / https map to the generic HTTP-agent adapter.
