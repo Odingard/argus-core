@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -230,6 +231,10 @@ class EngagementResult:
     impact:         dict = field(default_factory=dict)
     envelope_id:    str = ""
     artifact_root:  str = ""
+    # Populated only when ARGUS_DIAGNOSTICS=1 is set. Summary of
+    # the outer-loop classification written to diagnostic_priors.json
+    # alongside the engagement artifacts. None when the flag is off.
+    diagnostic:     Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -241,6 +246,7 @@ class EngagementResult:
             "impact":        self.impact,
             "envelope_id":   self.envelope_id,
             "artifact_root": self.artifact_root,
+            "diagnostic":    self.diagnostic,
         }
 
 
@@ -430,6 +436,25 @@ class EngagementRunner:
               f"(harm_score={brm.harm_score}, data={dc}, reg={reg})")
         print()
 
+        # ── 8) Diagnostic outer loop (ARGUS_DIAGNOSTICS=1) ──────
+        # Classifies every agent in the slate that produced zero
+        # findings into a SilenceCause tag and writes a priors
+        # file for the next run. Gated by env flag so default
+        # behaviour is unchanged; any failure is non-fatal.
+        diagnostic_info: Optional[dict] = None
+        if os.environ.get("ARGUS_DIAGNOSTICS", "0") == "1":
+            try:
+                diagnostic_info = self._run_diagnostic_pass(
+                    slate=slate,
+                    by_agent=by_agent,
+                    findings=findings,
+                    target_id=target_id,
+                )
+            except Exception as e:
+                if self.config.verbose:
+                    print(f"     [diagnostic] pass failed "
+                          f"(non-fatal): {type(e).__name__}: {e}")
+
         return EngagementResult(
             target_url=target_id,
             target_scheme=spec.scheme,
@@ -439,7 +464,74 @@ class EngagementRunner:
             impact=brm.to_dict(),
             envelope_id=envelope.envelope_id,
             artifact_root=str(self.paths.root),
+            diagnostic=diagnostic_info,
         )
+
+    def _run_diagnostic_pass(
+        self,
+        *,
+        slate: tuple[str, ...],
+        by_agent: dict[str, int],  # noqa: ARG002 — symmetry for future use
+        findings: list,
+        target_id: str,
+    ) -> Optional[dict]:
+        """Build a classifier over the agent slate, feed per-agent
+        log text from findings, write priors file + corpus seeds.
+
+        This is the ACTUAL wiring point for the outer loop — the
+        engagement runner knows which agents ran, which produced
+        findings, and has all the evidence in hand. The flag-gated
+        pass here means every `argus <target>` / `argus --engage`
+        run can opt into the feedback loop with one env var."""
+        from argus.diagnostics import (
+            SilenceClassifier, dict_log_loader,
+            write_diagnostic_feedback,
+        )
+        registry = {aid: None for aid in slate}
+        # Aggregate per-agent finding text as the log blob the
+        # classifier pattern-matches on.
+        logs: dict[str, str] = {aid: "" for aid in slate}
+        for f in findings:
+            aid = getattr(f, "agent_id", None)
+            if not aid or aid not in logs:
+                continue
+            parts = [logs[aid]] if logs[aid] else []
+            parts.append(f"title: {getattr(f, 'title', '') or ''}")
+            parts.append(
+                f"observed: {getattr(f, 'observed_behavior', '') or ''}"
+            )
+            parts.append(
+                f"raw: {(getattr(f, 'raw_response', '') or '')[:500]}"
+            )
+            logs[aid] = "\n".join(parts)
+
+        # Adapter shim: classifier expects swarm_result["findings"]
+        # with agent_id-bearing records; AgentFinding already has it.
+        classifier = SilenceClassifier(registry=registry)
+        diag = classifier.classify_run(
+            swarm_result={"findings": findings},
+            log_loader=dict_log_loader(logs),
+            target=target_id,
+            run_id=self.paths.root.name,
+        )
+        # EvolveCorpus is already constructed earlier in .run(); we
+        # could thread it through, but for simplicity skip the corpus
+        # side-effect in this pass. Priors file is the primary output.
+        fb = write_diagnostic_feedback(
+            diag, str(self.paths.root), evolver=None,
+        )
+        _ok(
+            f"diagnostic: {diag.silent_count}/{diag.total_agents} "
+            f"agents silent; priors → "
+            f"{Path(fb['priors_path']).name}"
+        )
+        return {
+            "run_id":           diag.run_id,
+            "silent_count":     diag.silent_count,
+            "productive_count": diag.productive_count,
+            "aggregate_causes": dict(diag.aggregate_causes),
+            "priors_path":      fb["priors_path"],
+        }
 
     # ── Helpers ─────────────────────────────────────────────────────
 

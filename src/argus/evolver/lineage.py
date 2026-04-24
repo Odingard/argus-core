@@ -9,7 +9,6 @@ payload come from?" during report-writing.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import asdict, dataclass, field
 
 
@@ -83,10 +82,3 @@ class EvolvedPayload:
         return "ev-" + hashlib.sha256(raw).hexdigest()[:14]
 
 
-def lineage_to_json(payload: EvolvedPayload, path) -> None:
-    """Persist an evolved payload's lineage to disk for the
-    BlastRadiusMap / Wilson bundle reference."""
-    from pathlib import Path
-    Path(path).write_text(
-        json.dumps(payload.to_dict(), indent=2), encoding="utf-8",
-    )

@@ -22,7 +22,7 @@ The registry ships with every labrat ARGUS currently supports,
 plus the three real transport adapters (MCP, HTTP-agent, stdio).
 """
 from argus.engagement.registry import (
-    TargetFactory, TargetSpec, get_target, list_targets,
+    TargetFactory, TargetSpec, list_targets,
     register_target, target_for_url,
 )
 from argus.engagement.runner import (
@@ -32,7 +32,7 @@ from argus.engagement.smart import Dispatch, describe, dispatch
 
 __all__ = [
     "TargetFactory", "TargetSpec",
-    "get_target", "list_targets", "register_target", "target_for_url",
+    "list_targets", "register_target", "target_for_url",
     "EngagementConfig", "EngagementRunner", "EngagementResult",
     "run_engagement",
     "Dispatch", "describe", "dispatch",

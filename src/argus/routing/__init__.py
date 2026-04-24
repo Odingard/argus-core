@@ -8,10 +8,7 @@ the first model in the failover chain whose provider key is set.
 
 Usage:
 
-    from argus.routing import route_model, route_call
-
-    provider, model = route_model("L5_SYNTH")
-    # provider = "anthropic", model = "claude-opus-4-7"
+    from argus.routing import route_call
 
     resp = route_call("L5_SYNTH", messages=[...], max_tokens=4000)
     # picks the right client automatically; fails over to next model on
@@ -21,11 +18,9 @@ Override the defaults via ``argus/routing/policy.json`` (project root)
 or the ARGUS_ROUTING_POLICY env var pointing at a JSON file.
 """
 from argus.routing.models import (
-    JOBS, JobSpec, ModelRouter, default_router,
-    route_model, route_call,
+    JOBS, ModelRouter, default_router, route_call,
 )
 
 __all__ = [
-    "JOBS", "JobSpec", "ModelRouter", "default_router",
-    "route_model", "route_call",
+    "JOBS", "ModelRouter", "default_router", "route_call",
 ]

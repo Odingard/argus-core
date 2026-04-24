@@ -223,11 +223,3 @@ class BaseAdapter:
                 f"state={self.state.value} session={self.session_id}>")
 
 
-# ── Convenience: sync wrappers ────────────────────────────────────────────────
-
-def run_sync(coro):
-    """
-    Run a coroutine to completion. Useful for CLIs and test harnesses that
-    don't run their own event loop. Agents in Phase 1+ should stay async.
-    """
-    return asyncio.run(coro)

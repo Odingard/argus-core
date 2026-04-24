@@ -17,7 +17,6 @@ import json
 import os
 import threading
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -127,14 +126,6 @@ _DEFAULT_CHAINS: dict[str, list[tuple[str, str]]] = {
 }
 
 
-# ── Shapes ────────────────────────────────────────────────────────────────────
-
-@dataclass
-class JobSpec:
-    job:   str
-    chain: list[tuple[str, str]] = field(default_factory=list)
-
-
 JOBS = list(_DEFAULT_CHAINS.keys())
 
 
@@ -235,9 +226,6 @@ class ModelRouter:
     def chain_for(self, job: str) -> list[tuple[str, str]]:
         return list(self._chains.get(job, []))
 
-    def all_chains(self) -> dict[str, list[tuple[str, str]]]:
-        return {k: list(v) for k, v in self._chains.items()}
-
 
 # ── Singleton + convenience ───────────────────────────────────────────────────
 
@@ -252,11 +240,6 @@ def default_router() -> ModelRouter:
             if _SINGLETON is None:
                 _SINGLETON = ModelRouter()
     return _SINGLETON
-
-
-def route_model(job: str) -> tuple[str, str]:
-    """Shortcut: resolve (provider, model) via the default router."""
-    return default_router().resolve(job)
 
 
 def route_call(

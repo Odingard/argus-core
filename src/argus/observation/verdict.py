@@ -49,11 +49,3 @@ class Verdict:
         return d
 
 
-def unchanged(detector: str, evidence: str = "") -> Verdict:
-    """Convenience constructor for 'nothing here'."""
-    return Verdict(
-        delta=BehaviorDelta.UNCHANGED,
-        detector=detector,
-        evidence=evidence,
-        confidence=1.0,
-    )

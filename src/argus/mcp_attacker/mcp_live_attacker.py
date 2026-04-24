@@ -39,7 +39,6 @@ import asyncio
 import json
 import os
 import re
-import argparse
 import hashlib
 import httpx
 from pathlib import Path
@@ -1723,69 +1722,96 @@ async def _run_pipeline(session: ClientSession, args) -> MCPAttackReport:
             json.dump(asdict(report), f, indent=2, default=str)
         print(f"\n  Report saved → {out_path}")
 
+        # Diagnostic outer loop — flag-gated, non-fatal. Classifies
+        # every tool that enumerated but produced zero findings; writes
+        # a priors file so the NEXT engagement can adjust.
+        if os.environ.get("ARGUS_DIAGNOSTICS", "0") == "1":
+            try:
+                _run_live_diagnostic(report, args.output, args.verbose)
+            except Exception as e:
+                print(f"  [diagnostic] pass failed (non-fatal): {e}")
+
     return report
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+def _run_live_diagnostic(
+    report: "MCPAttackReport",
+    output_dir: str,
+    verbose: bool,
+) -> None:
+    """Post-engagement outer loop for the live MCP attacker.
 
-def main():
-    print(BANNER)
+    Reuses the classifier from argus.diagnostics but treats each
+    enumerated tool as an 'agent' — a tool that produced zero
+    findings is silent, and its why-was-it-silent classification
+    drops out of the same pattern-matching pipeline.
 
-    p = argparse.ArgumentParser(
-        description="ARGUS MCP Live Protocol Attacker",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Attack HTTP SSE endpoint
-  python mcp_live_attacker.py http://localhost:3000/sse --transport sse
-
-  # Attack with auth token
-  python mcp_live_attacker.py http://target.com/sse --transport sse --token "Bearer xyz"
-
-  # Attack local stdio server
-  python mcp_live_attacker.py --transport stdio -- python my_mcp_server.py
-
-  # Full output to results dir
-  python mcp_live_attacker.py http://localhost:3000/sse -o results/mcp/
-        """
+    Writes diagnostic_priors.json alongside the attack report."""
+    from argus.diagnostics import (
+        SilenceClassifier, write_diagnostic_feedback,
+        dict_log_loader,
     )
-    p.add_argument("target", nargs="?", default=None,
-                   help="MCP server URL (for SSE) or omit for stdio")
-    p.add_argument("--transport", choices=["sse", "stdio"], default="sse",
-                   help="Transport type (default: sse)")
-    p.add_argument("--token", default=None,
-                   help="Auth token — e.g. 'Bearer xyz' or 'ApiKey abc'")
-    p.add_argument("-o", "--output", default=None,
-                   help="Output directory for results")
-    p.add_argument("--verbose", action="store_true",
-                   help="Show detailed debug output")
-    p.add_argument("server_cmd", nargs="*",
-                   help="For stdio: server command and args after --")
 
-    args = p.parse_args()
+    profile = report.server_profile
+    if profile is None or not profile.tools:
+        return
 
-    if args.transport == "stdio" and not args.server_cmd:
-        p.error("stdio transport requires server command: -- python server.py")
-    if args.transport == "sse" and not args.target:
-        p.error("sse transport requires a target URL")
+    # Build the per-tool registry and text logs.
+    registry = {t["name"]: None for t in profile.tools if t.get("name")}
+    logs: dict[str, str] = {}
+    for t in profile.tools:
+        name = t.get("name")
+        if not name:
+            continue
+        parts = [
+            f"tool_description: {t.get('description','') or ''}",
+        ]
+        # Pull per-tool findings' raw_response + observed_behavior as
+        # the text blob the classifier pattern-matches against.
+        for f in report.findings:
+            if f.tool_name != name:
+                continue
+            parts.append(f"title: {f.title}")
+            parts.append(f"observed: {f.observed_behavior or ''}")
+            parts.append(f"raw_response: {(f.raw_response or '')[:500]}")
+        logs[name] = "\n".join(parts)
 
-    print(f"\n  Target    : {args.target or ' '.join(args.server_cmd)}")
-    print(f"  Transport : {args.transport}")
-    print(f"  Auth      : {'set' if args.token else 'none'}")
+    # Classifier needs a swarm_result shape with "findings" having an
+    # agent_id-ish attribute. We adapt by mapping tool_name → agent_id.
+    class _ToolFinding:
+        def __init__(self, tool_name): self.agent_id = tool_name
+    fake_result = {
+        "findings": [_ToolFinding(f.tool_name) for f in report.findings
+                     if f.tool_name],
+    }
 
-    try:
-        if args.transport == "sse":
-            asyncio.run(_run_sse(args))
-        else:
-            asyncio.run(_run_stdio(args))
-    except KeyboardInterrupt:
-        print(f"\n{AMBER}[!] Interrupted{RESET}")
-    except Exception as e:
-        print(f"\n{RED}[!] Fatal error: {e}{RESET}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+    classifier = SilenceClassifier(registry=registry)
+    diag = classifier.classify_run(
+        swarm_result=fake_result,
+        log_loader=dict_log_loader(logs),
+        target=report.target or "stdio",
+        run_id=Path(output_dir).name or "run_live",
+    )
+
+    # Skip EvolveCorpus for the live attacker path — refusal-hardened
+    # corpus seeds aren't a natural fit for per-tool diagnostics.
+    fb = write_diagnostic_feedback(diag, output_dir, evolver=None)
+
+    print(
+        f"  {GREEN}◎{RESET} diagnostic: "
+        f"{diag.silent_count}/{diag.total_agents} tools silent; "
+        f"top causes: "
+        f"{', '.join(f'{k}={v}' for k, v in list(diag.aggregate_causes.items())[:3])}"
+    )
+    print(f"    priors → {Path(fb['priors_path']).name}")
+    if verbose:
+        for r in diag.silent_agents[:5]:
+            print(f"      {r.agent_id:30s} → {r.cause.value} "
+                  f"(conf={r.confidence:.2f})")
 
 
-if __name__ == "__main__":
-    main()
+# Canonical CLI entry lives in argus/cli.py::_cli_entry (pyproject.toml
+# project.scripts). This module exposes the attack pipeline via
+# `_run_sse` / `_run_stdio`, not a standalone __main__ — there should
+# be ONE parser for ARGUS, not a stale duplicate that drifts out of
+# sync with the real CLI.

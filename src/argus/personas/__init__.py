@@ -108,15 +108,6 @@ def get_persona(name: str) -> Persona | None:
     return _SEEDS.get(name.lower()) if name else None
 
 
-def register_persona(persona: Persona) -> None:
-    """Add a customer-specific persona at runtime."""
-    _SEEDS[persona.name.lower()] = persona
-
-
-def list_personas() -> list[str]:
-    return sorted(_SEEDS.keys())
-
-
 def persona_prompt_prefix(persona_name: str) -> str:
     """
     Short prefix to prepend to an agent's Haiku/Opus prompt. Empty string

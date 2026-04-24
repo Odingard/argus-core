@@ -75,10 +75,6 @@ def register_target(
     return spec
 
 
-def get_target(scheme: str) -> Optional[TargetSpec]:
-    return _REGISTRY.get(scheme)
-
-
 def target_for_url(url: str) -> Optional[TargetSpec]:
     """Resolve ``url`` to a TargetSpec by its scheme."""
     parsed = urlparse(url)
