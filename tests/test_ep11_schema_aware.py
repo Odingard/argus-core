@@ -365,3 +365,128 @@ def test_uvx_scheme_shlex_splits():
     assert list(adapter.command) == [
         "uvx", "mcp-server-git", "--repository", "/path/x",
     ]
+
+
+# ── EP-T11 / schema-first surface matcher regression tests ──────────────────
+#
+# These tests lock the schema-first refactor of _is_exec_surface,
+# _is_fetch_surface, and _is_code_run_surface. Before this refactor,
+# all three matchers were name-substring lists that required a per-target
+# patch every time a new server used a different tool name. The fix:
+# ask the schema, not the name.
+#
+# Regression target: node-code-sandbox-mcp@1.2.0 (CVE-2025-53372).
+# EP-11 fired 0 probes because run_js / sandbox_exec weren't in the
+# keyword list. The schema had {"code": {"type": "string"}}. The
+# schema-first matcher catches it with zero maintenance.
+
+from argus.agents.agent_11_environment_pivot import (
+    _is_exec_surface, _is_fetch_surface, _is_code_run_surface,
+)
+
+
+def _surface(name: str, description: str = "", schema: dict | None = None) -> Surface:
+    return Surface(name=name, kind="tool", description=description,
+                   schema=schema or {})
+
+
+def _code_schema() -> dict:
+    return {"type": "object", "properties": {"code": {"type": "string"}},
+            "required": ["code"]}
+
+
+def _path_schema() -> dict:
+    return {"type": "object", "properties": {"path": {"type": "string"}},
+            "required": ["path"]}
+
+
+def _url_schema() -> dict:
+    return {"type": "object", "properties": {"url": {"type": "string"}},
+            "required": ["url"]}
+
+
+# _is_code_run_surface — schema-first ──────────────────────────────────
+
+def test_code_run_matches_schema_code_field():
+    """Any tool with a 'code' schema field matches — name irrelevant."""
+    assert _is_code_run_surface(_surface("tool:run_js", schema=_code_schema()))
+    assert _is_code_run_surface(_surface("tool:sandbox_exec", schema=_code_schema()))
+    assert _is_code_run_surface(_surface("tool:whatever_unknown", schema=_code_schema()))
+
+
+def test_code_run_matches_script_field():
+    schema = {"type": "object", "properties": {"script": {"type": "string"}}}
+    assert _is_code_run_surface(_surface("tool:anything", schema=schema))
+
+
+def test_code_run_matches_snippet_field():
+    schema = {"type": "object", "properties": {"snippet": {"type": "string"}}}
+    assert _is_code_run_surface(_surface("tool:anything", schema=schema))
+
+
+def test_code_run_no_match_path_only_schema():
+    """A tool with only a path field is NOT a code-run surface."""
+    assert not _is_code_run_surface(_surface("tool:read_file", schema=_path_schema()))
+
+
+def test_code_run_no_match_url_only_schema():
+    assert not _is_code_run_surface(_surface("tool:fetch", schema=_url_schema()))
+
+
+def test_code_run_description_fallback_sandbox():
+    """No schema but description says 'sandbox' → match."""
+    assert _is_code_run_surface(_surface("tool:mystery",
+                                         description="Run code in a sandbox"))
+
+
+def test_code_run_no_match_empty():
+    assert not _is_code_run_surface(_surface("tool:noop", schema={}))
+
+
+# _is_exec_surface — schema-first ──────────────────────────────────────
+
+def test_exec_matches_path_schema():
+    assert _is_exec_surface(_surface("tool:anything", schema=_path_schema()))
+
+
+def test_exec_matches_command_schema():
+    schema = {"type": "object", "properties": {"command": {"type": "string"}}}
+    assert _is_exec_surface(_surface("tool:anything", schema=schema))
+
+
+def test_exec_matches_code_schema():
+    assert _is_exec_surface(_surface("tool:anything", schema=_code_schema()))
+
+
+def test_exec_no_match_url_only():
+    """URL-only tools go to _is_fetch_surface, not _is_exec_surface."""
+    assert not _is_exec_surface(_surface("tool:fetch", schema=_url_schema()))
+
+
+def test_exec_description_fallback():
+    assert _is_exec_surface(_surface("tool:mystery",
+                                     description="Read file from filesystem"))
+
+
+# _is_fetch_surface — schema-first ─────────────────────────────────────
+
+def test_fetch_matches_url_schema():
+    assert _is_fetch_surface(_surface("tool:anything", schema=_url_schema()))
+
+
+def test_fetch_matches_endpoint_field():
+    schema = {"type": "object", "properties": {"endpoint": {"type": "string"}}}
+    assert _is_fetch_surface(_surface("tool:anything", schema=schema))
+
+
+def test_fetch_no_match_path_only():
+    assert not _is_fetch_surface(_surface("tool:read_file", schema=_path_schema()))
+
+
+def test_fetch_no_match_code_only():
+    assert not _is_fetch_surface(_surface("tool:run_js", schema=_code_schema()))
+
+
+def test_fetch_description_fallback():
+    assert _is_fetch_surface(_surface("tool:mystery",
+                                      description="Fetch web page via http request"))

