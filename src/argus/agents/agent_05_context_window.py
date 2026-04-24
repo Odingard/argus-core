@@ -228,11 +228,9 @@ class ContextWindowAgent(BaseAgent):
         # info, excessive agency).
         if policy_set is None:
             from argus.policy.registry import (
-                default_registry, AgentClass,
+                default_policy_set, AgentClass,
             )
-            policy_set = default_registry().resolve(
-                agent_class=AgentClass.GENERIC,
-            )
+            policy_set = default_policy_set(AgentClass.GENERIC)
         self.policy_set = policy_set
         from argus.attacks.judge import LLMJudge as _LLMJudge
         self.judge = judge if judge is not None else _LLMJudge()
@@ -392,43 +390,59 @@ class ContextWindowAgent(BaseAgent):
         if not relevant:
             return []
         from argus.attacks.judge import JudgeInput
+        from argus.attacks.stochastic import (
+            configured_shots, configured_threshold, stochastic_evaluate,
+        )
         from argus.observation import BehaviorDelta, DeltaKind
 
         post_text     = self._last_response_text(con_sess.transcript())
         baseline_text = self._last_response_text(baseline_sess.transcript())
+        shots     = configured_shots()
+        threshold = configured_threshold()
 
         out: list[tuple] = []
         for policy in relevant:
             try:
-                verdict = self.judge.evaluate(JudgeInput(
-                    policy       = policy,
-                    probe        = script.final,
-                    response     = post_text,
-                    baseline     = baseline_text,
-                    technique_id = script.technique_id,
-                    surface      = surface,
-                ))
+                sr = stochastic_evaluate(
+                    judge=self.judge,
+                    build_input=lambda p=policy: JudgeInput(
+                        policy       = p,
+                        probe        = script.final,
+                        response     = post_text,
+                        baseline     = baseline_text,
+                        technique_id = script.technique_id,
+                        surface      = surface,
+                    ),
+                    shots=shots,
+                    threshold=threshold,
+                )
             except Exception as e:
                 if self.verbose:
                     print(f"  [{self.AGENT_ID}] judge error on "
                           f"{policy.id}: {type(e).__name__}: {e}")
                 continue
-            if not verdict.is_finding():
+            if sr.violated_count < threshold:
+                continue
+            first = sr.first_violation()
+            if first is None:
                 continue
 
             obs_verdict = Verdict(
                 delta      = BehaviorDelta.DELTA,
                 kind       = DeltaKind.CONTENT_LEAK,
                 detector   = "llm_judge",
-                evidence   = verdict.evidence or verdict.reasoning,
-                confidence = verdict.confidence,
+                evidence   = first.evidence or first.reasoning,
+                confidence = first.confidence,
                 meta       = {
                     "policy_id":       policy.id,
                     "policy_name":     policy.name,
                     "owasp_llm":       policy.owasp_llm,
                     "judge_model":     getattr(self.judge, "model", ""),
-                    "judge_kind":      verdict.kind.value,
-                    "judge_reasoning": verdict.reasoning[:400],
+                    "judge_kind":      first.kind.value,
+                    "judge_reasoning": first.reasoning[:400],
+                    "shots":           sr.shots,
+                    "violated_count":  sr.violated_count,
+                    "failure_rate":    sr.failure_rate,
                 },
             )
             finding = AgentFinding.from_observation(
@@ -438,15 +452,20 @@ class ContextWindowAgent(BaseAgent):
                 title=(
                     f"Policy violation [{policy.id}] via long-con "
                     f"{script.technique_id}"
+                    + (f" (stochastic {sr.violated_count}/{sr.shots})"
+                       if sr.shots > 1 else "")
                 ),
                 description=(
                     f"Policy {policy.id!r} ({policy.name}) VIOLATED "
-                    f"by the long-con session (judge confidence "
-                    f"{verdict.confidence:.2f}). The model complied "
+                    f"by the long-con session in "
+                    f"{sr.violated_count}/{sr.shots} shots "
+                    f"(failure rate {sr.failure_rate:.1%}). First-"
+                    f"violation judge confidence "
+                    f"{first.confidence:.2f}. The model complied "
                     f"with the attack AFTER {len(script.buildup)} "
                     f"buildup turns but refused in the baseline-cold "
                     f"session — context-window compromise. "
-                    f"Evidence: {verdict.evidence[:300]!r}."
+                    f"Evidence: {first.evidence[:300]!r}."
                 ),
                 surface=surface,
                 session_id=con_sess.session_id,

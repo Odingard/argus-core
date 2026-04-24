@@ -103,3 +103,38 @@ def default_registry() -> PolicyRegistry:
         },
     )
     return _REGISTRY
+
+
+def default_policy_set(
+    agent_class: AgentClass = AgentClass.GENERIC,
+    *,
+    load_env_overrides: bool = True,
+) -> "PolicySet":
+    """Shortcut agents use to build their default PolicySet without
+    each agent having to know about tier-3 override loading.
+
+    Resolves the three tiers in one call:
+      1. ARGUS global defaults (OWASP LLM Top 10 + CORE-IPI)
+      2. Agent-class defaults for ``agent_class``
+      3. Operator overrides from ``policies.yaml`` (if present at
+         ARGUS_POLICIES env path, or in cwd; otherwise skipped)
+
+    ``load_env_overrides=False`` disables tier 3 — useful in tests
+    where the working directory might have an unrelated policies.yaml.
+    """
+    from argus.policy.base import PolicySet  # local — keeps import lean
+    overrides: list = []
+    if load_env_overrides:
+        try:
+            from argus.policy.loader import load_overrides
+            overrides = load_overrides()
+        except Exception:
+            # Loader errors are non-fatal here — operators see
+            # them via explicit load_overrides() calls; agent-init
+            # silent failures fall back to tier-1 + tier-2 only.
+            overrides = []
+    ps: PolicySet = default_registry().resolve(
+        agent_class=agent_class,
+        overrides=overrides,
+    )
+    return ps

@@ -146,11 +146,9 @@ class PromptInjectionHunter(BaseAgent):
         # against; operator overrides arrive via the engagement.
         if policy_set is None:
             from argus.policy.registry import (
-                default_registry, AgentClass,
+                default_policy_set, AgentClass,
             )
-            policy_set = default_registry().resolve(
-                agent_class=AgentClass.GENERIC,
-            )
+            policy_set = default_policy_set(AgentClass.GENERIC)
         self.policy_set = policy_set
         # Judge construction is cheap even without keys (ArgusClient
         # doesn't touch providers at init). available() is the gate
@@ -401,27 +399,48 @@ class PromptInjectionHunter(BaseAgent):
         # Late import to dodge a circular-ish boot — judge pulls in
         # argus.shared.client which loads providers.
         from argus.attacks.judge import JudgeInput
+        from argus.attacks.stochastic import (
+            configured_shots, configured_threshold, stochastic_evaluate,
+        )
         from argus.observation import BehaviorDelta, DeltaKind, Verdict
-        from argus.policy.base import VerdictKind
 
         response_text = self._last_response_text(sess.transcript())
+        shots     = configured_shots()
+        threshold = configured_threshold()
+
         for policy in relevant:
+            # Re-judge the SAME response N times. We re-judge (not
+            # re-fire) because (a) the response we care about is
+            # already captured, (b) re-firing would cost N more
+            # adapter requests, (c) the judge itself is stochastic —
+            # multiple shots catch judge-level uncertainty. For
+            # re-fire stochasticism (actually hitting the target N
+            # times), the caller upstream can loop _fire_variant.
             try:
-                verdict = self.judge.evaluate(JudgeInput(
-                    policy       = policy,
-                    probe        = variant.text,
-                    response     = response_text,
-                    baseline     = "",
-                    technique_id = technique_id,
-                    surface      = surface,
-                ))
+                sr = stochastic_evaluate(
+                    judge=self.judge,
+                    build_input=lambda p=policy: JudgeInput(
+                        policy       = p,
+                        probe        = variant.text,
+                        response     = response_text,
+                        baseline     = "",
+                        technique_id = technique_id,
+                        surface      = surface,
+                    ),
+                    shots=shots,
+                    threshold=threshold,
+                )
             except Exception as e:
                 if self.verbose:
                     print(f"  [{self.AGENT_ID}] judge error on "
                           f"{policy.id}: {type(e).__name__}: {e}")
                 continue
-            if not verdict.is_finding():
+
+            if sr.violated_count < threshold:
                 continue
+            first = sr.first_violation()
+            if first is None:
+                continue  # shouldn't happen given the threshold but defensive
 
             # Adapt PolicyVerdict → observation.Verdict so the
             # existing AgentFinding.from_observation + downstream
@@ -430,15 +449,20 @@ class PromptInjectionHunter(BaseAgent):
                 delta       = BehaviorDelta.DELTA,
                 kind        = DeltaKind.CONTENT_LEAK,
                 detector    = "llm_judge",
-                evidence    = verdict.evidence or verdict.reasoning,
-                confidence  = verdict.confidence,
+                evidence    = first.evidence or first.reasoning,
+                confidence  = first.confidence,
                 meta        = {
-                    "policy_id":    policy.id,
-                    "policy_name":  policy.name,
-                    "owasp_llm":    policy.owasp_llm,
-                    "judge_model":  getattr(self.judge, "model", ""),
-                    "judge_kind":   verdict.kind.value,
-                    "judge_reasoning": verdict.reasoning[:400],
+                    "policy_id":       policy.id,
+                    "policy_name":     policy.name,
+                    "owasp_llm":       policy.owasp_llm,
+                    "judge_model":     getattr(self.judge, "model", ""),
+                    "judge_kind":      first.kind.value,
+                    "judge_reasoning": first.reasoning[:400],
+                    # Stochastic metadata — distinguishes 1-in-100
+                    # from 73-in-100 in the Wilson bundle.
+                    "shots":           sr.shots,
+                    "violated_count":  sr.violated_count,
+                    "failure_rate":    sr.failure_rate,
                 },
             )
             finding = AgentFinding.from_observation(
@@ -448,12 +472,16 @@ class PromptInjectionHunter(BaseAgent):
                 title=(
                     f"Policy violation [{policy.id}] via "
                     f"{variant.template_id}/{variant.mutator}"
+                    + (f" (stochastic {sr.violated_count}/{sr.shots})"
+                       if sr.shots > 1 else "")
                 ),
                 description=(
-                    f"Policy {policy.id!r} ({policy.name}) was "
-                    f"VIOLATED with judge confidence "
-                    f"{verdict.confidence:.2f}. Evidence: "
-                    f"{verdict.evidence[:300]!r}. Probe: "
+                    f"Policy {policy.id!r} ({policy.name}) VIOLATED "
+                    f"in {sr.violated_count}/{sr.shots} shots "
+                    f"(failure rate {sr.failure_rate:.1%}). Judge "
+                    f"confidence on first violation "
+                    f"{first.confidence:.2f}. Evidence: "
+                    f"{first.evidence[:300]!r}. Probe: "
                     f"{str(variant.text)[:200]!r}."
                 ),
                 surface=surface,

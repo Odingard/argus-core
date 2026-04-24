@@ -27,9 +27,16 @@ from argus.attacks.adaptive import (
 from argus.attacks.judge import (
     LLMJudge, JudgeInput,
 )
+from argus.attacks.stochastic import (
+    StochasticResult, stochastic_evaluate, stochastic_evaluate_async,
+    configured_shots, configured_threshold,
+)
 
 __all__ = [
     "ConversationPlan", "ConversationTurn", "MultiTurnDriver",
     "AdaptiveAdversary", "AdversaryGoal", "AdversaryResult",
     "LLMJudge", "JudgeInput",
+    "StochasticResult", "stochastic_evaluate",
+    "stochastic_evaluate_async",
+    "configured_shots", "configured_threshold",
 ]

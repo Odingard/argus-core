@@ -35,10 +35,15 @@ from argus.policy.base import (
     Policy, PolicySet, PolicyVerdict, VerdictKind,
 )
 from argus.policy.registry import (
-    PolicyRegistry, AgentClass,
+    PolicyRegistry, AgentClass, default_policy_set, default_registry,
+)
+from argus.policy.loader import (
+    PolicyLoadError, load_overrides,
 )
 
 __all__ = [
     "Policy", "PolicySet", "PolicyVerdict", "VerdictKind",
     "PolicyRegistry", "AgentClass",
+    "default_policy_set", "default_registry",
+    "PolicyLoadError", "load_overrides",
 ]
