@@ -295,11 +295,31 @@ class ModelExtractionAgent(BaseAgent):
             session_id=f"{self.AGENT_ID}_probe_{technique_id}_"
                        f"{uuid.uuid4().hex[:8]}",
         )
+        # Multi-turn by default when the LLM judge is enabled — see
+        # agent_01 for the full rationale. Model-extraction probes
+        # that single-shot against a hardened chat endpoint hit
+        # guardrails immediately; wrapping them in a Crescendo
+        # audit-framing buildup gets past lexical filters that
+        # reject raw ''reveal your system prompt'' in one turn.
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        multiturn = _LLMJudge.available()
         async with sess:
-            await sess.interact(
-                Request(surface=surface, payload=prompt),
-                tag=f"extract:{technique_id}",
-            )
+            if multiturn:
+                from argus.attacks import MultiTurnDriver
+                from argus.corpus_attacks import crescendo_plan
+                plan = crescendo_plan(
+                    payload=prompt, surface=surface,
+                    seed=hash(technique_id) % (2**31),
+                )
+                await MultiTurnDriver(sess).run(
+                    plan,
+                    tag_prefix=f"extract:{technique_id}",
+                )
+            else:
+                await sess.interact(
+                    Request(surface=surface, payload=prompt),
+                    tag=f"extract:{technique_id}",
+                )
 
         response_text = self._concat_response_bodies(sess.transcript())
         verdicts: list[Verdict] = self._structural_disclosure_verdicts(

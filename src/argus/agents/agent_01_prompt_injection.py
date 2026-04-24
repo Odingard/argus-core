@@ -320,11 +320,39 @@ class PromptInjectionHunter(BaseAgent):
             adapter,
             session_id=f"{self.AGENT_ID}_attack_{variant.fingerprint}",
         )
+        # Multi-turn by default when the LLM judge is enabled.
+        # Single-shot firings were the biggest coverage gap against
+        # real targets tonight — real jailbreaks require conversational
+        # buildup, and the Crescendo 3-turn plan (auditor opener →
+        # compliance bridge → payload) exercises the context
+        # accumulation that single-shot cannot reach. Gate is the same
+        # ARGUS_JUDGE+provider-key pair — keyless engagements keep
+        # the existing fast single-shot path.
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        multiturn = _LLMJudge.available()
         async with sess:
-            await sess.interact(
-                Request(surface=surface, payload=variant.text),
-                tag=f"variant:{variant.template_id}:{variant.mutator}",
-            )
+            if multiturn:
+                from argus.attacks import MultiTurnDriver
+                from argus.corpus_attacks import crescendo_plan
+                plan = crescendo_plan(
+                    payload=variant.text,
+                    surface=surface,
+                    seed=int(variant.fingerprint, 16) % (2**31)
+                         if isinstance(variant.fingerprint, str)
+                         else (hash(variant.fingerprint) % (2**31)),
+                )
+                await MultiTurnDriver(sess).run(
+                    plan,
+                    tag_prefix=(
+                        f"variant:{variant.template_id}:"
+                        f"{variant.mutator}"
+                    ),
+                )
+            else:
+                await sess.interact(
+                    Request(surface=surface, payload=variant.text),
+                    tag=f"variant:{variant.template_id}:{variant.mutator}",
+                )
 
         # Structural behaviour-delta detection (existing — kept).
         verdicts = self.observer.findings(
