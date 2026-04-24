@@ -417,3 +417,80 @@ register_target(
     ),
     aliases=("a2a-labrat", "handoff"),
 )
+
+
+# ── AutoDeploy: clone repo → detect framework → launch → attack ────────────
+#
+# This is the white-box engagement bridge. The client hands us source
+# code (no deployed URL yet), or we want to attack a github MCP server
+# without manually writing its launch command. The `repo-git://`
+# scheme delegates to ``argus.autodeploy.deploy()`` which clones, runs
+# the framework detector, stands up an isolated instance, and returns
+# a live URL the standard engage pipeline attacks.
+#
+# Deployment is cached per repo URL for the lifetime of the process so
+# an engagement slate of 11 agents doesn't clone + reinstall 11 times.
+# Atexit cleanup tears the deployment down on process exit.
+#
+# Operator-facing form:
+#
+#     argus engage 'repo-git://https://github.com/<owner>/<repo>'
+#
+# The smart URL dispatcher also rewrites any bare
+# ``https://github.com/<owner>/<repo>`` to this form so operators can
+# paste GitHub URLs directly.
+
+import atexit as _atexit
+_DEPLOYMENT_CACHE: dict = {}
+
+
+def _repo_git_factory(url: str):
+    """Clone + deploy + return an adapter for the live target.
+
+    The body of ``repo-git://<body>`` is the full repo URL (e.g.,
+    ``repo-git://https://github.com/org/repo``). The deployment
+    result's live URL (``stdio-mcp://...`` or ``http://...``) is
+    then resolved through the existing registry — so every downstream
+    agent path stays unchanged."""
+    from argus.autodeploy import deploy, DeploymentError
+    from argus.engagement.registry import target_for_url
+
+    body = url.split("://", 1)[1] if "://" in url else url
+    body = body.strip()
+    if not body:
+        raise ValueError(
+            "repo-git:// requires a repo URL. "
+            "Try 'repo-git://https://github.com/org/repo'."
+        )
+
+    if body not in _DEPLOYMENT_CACHE:
+        try:
+            d = deploy(body)
+        except DeploymentError as e:
+            raise RuntimeError(
+                f"autodeploy failed for {body!r}: {e}"
+            ) from e
+        _DEPLOYMENT_CACHE[body] = d
+        _atexit.register(d.shutdown)
+
+    d = _DEPLOYMENT_CACHE[body]
+    inner_spec = target_for_url(d.url)
+    if inner_spec is None:
+        raise RuntimeError(
+            f"autodeploy produced URL {d.url!r} but no registered "
+            f"target scheme handles it"
+        )
+    return inner_spec.factory(d.url)
+
+
+register_target(
+    "repo-git",
+    factory=_repo_git_factory,
+    description=(
+        "AutoDeploy a git repo as an attack target. Clones shallow, "
+        "detects the framework (CrewAI / LangChain / AutoGen / MCP / "
+        "FastAPI / etc.), stands it up in an isolated env, and hands "
+        "the live URL to the standard engage pipeline."
+    ),
+    aliases=("repo", "git"),
+)

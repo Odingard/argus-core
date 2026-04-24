@@ -32,7 +32,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -152,53 +151,41 @@ def _dispatch_http(url: str) -> Dispatch:
 
 
 def _dispatch_github(repo: dict, *, workdir: Path) -> Dispatch:
-    """Clone shallow, detect a launch command, wrap in stdio-mcp://."""
-    dest = workdir / f"{repo['owner']}__{repo['name']}"
-    if not dest.exists():
-        try:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", repo["clone_url"],
-                 str(dest)],
-                check=True, capture_output=True, timeout=90,
-            )
-        except subprocess.CalledProcessError as e:
-            return Dispatch(
-                action="fail",
-                reason=(f"git clone failed: "
-                        f"{e.stderr.decode(errors='replace')[:200]}"),
-            )
-        except subprocess.TimeoutExpired:
-            return Dispatch(
-                action="fail",
-                reason="git clone timed out after 90s",
-            )
-    detected = _detect_launch_command(dest)
-    if detected is None:
-        hint = _framework_hint(dest)
+    """Route GitHub URLs through the ``repo-git://`` AutoDeploy
+    scheme. The autodeploy module handles cloning, framework
+    detection, isolated-env install, subprocess launch, and
+    deployment teardown — a superset of the local detect-launch-
+    command shim this function used to implement.
+
+    The operator sees a single verb:
+
+        argus engage https://github.com/owner/repo
+
+    …and gets the full deploy + attack flow end-to-end. White-box
+    agentic-AI engagements (client hands us their repo) land
+    without any pre-engagement setup on the operator's part.
+
+    ``workdir`` parameter kept in the signature so existing
+    callers don't break; autodeploy manages its own staging root
+    under ``$TMPDIR/argus-staging/``.
+    """
+    del workdir
+    clone_url = repo.get("clone_url") or repo.get("html_url") or ""
+    if not clone_url:
         return Dispatch(
             action="fail",
-            reason=(f"cloned {repo['clone_url']} but could not find "
-                    f"a runnable MCP server command.{hint}\n\n"
-                    f"    • If this is a live deployment, point ARGUS "
-                    f"at the URL:  argus https://your-app/api/sse\n"
-                    f"    • If you have a launch command, pass it "
-                    f"directly:    argus mcp <cmd> <args...>"),
+            reason=(
+                f"could not derive clone URL from GitHub repo spec: "
+                f"{repo}"
+            ),
         )
-    # If the detector picked `uvx <pkg>`, rewrite to `uvx --from
-    # git+<clone_url> <pkg>` so the server installs from the exact
-    # GitHub commit we just inspected. Otherwise uvx would reach for
-    # the name on PyPI — which may not exist, or may be a different
-    # project, or may be a stale version relative to the repo.
-    if len(detected) >= 2 and detected[0] == "uvx":
-        detected = ["uvx", "--from", f"git+{repo['clone_url']}",
-                    detected[1]]
-    encoded = "+".join(detected).replace(" ", "+")
     return Dispatch(
         action="engage",
-        target=f"stdio-mcp://{encoded}",
-        reason=(f"github:{repo['owner']}/{repo['name']} → "
-                f"detected launch: {' '.join(detected)}"),
-        command=detected,
+        target=f"repo-git://{clone_url}",
+        reason=(
+            f"github:{repo.get('owner', '?')}/{repo.get('name', '?')} "
+            f"→ autodeploy (clone + detect framework + launch)"
+        ),
     )
 
 
