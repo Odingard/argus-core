@@ -24,8 +24,12 @@ from argus.attacks.conversation import (
 from argus.attacks.adaptive import (
     AdaptiveAdversary, AdversaryGoal, AdversaryResult,
 )
+from argus.attacks.judge import (
+    LLMJudge, JudgeInput,
+)
 
 __all__ = [
     "ConversationPlan", "ConversationTurn", "MultiTurnDriver",
     "AdaptiveAdversary", "AdversaryGoal", "AdversaryResult",
+    "LLMJudge", "JudgeInput",
 ]
