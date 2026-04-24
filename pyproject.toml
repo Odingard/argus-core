@@ -41,6 +41,13 @@ webhook = [
     "pydantic>=2.6",
 ]
 
+# ── Pytest config ──────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+# `auto` mode means any `async def test_*` is treated as an asyncio
+# test without requiring a per-test `@pytest.mark.asyncio` marker.
+# Explicit markers still work and are preferred in new tests.
+asyncio_mode = "auto"
+
 # ── Ruff config ────────────────────────────────────────────────────────────
 # We keep ruff's default rule set but waive the two "multiple
 # statements on one line" rules — we use that style intentionally in

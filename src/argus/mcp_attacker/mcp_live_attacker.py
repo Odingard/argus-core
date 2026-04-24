@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import argparse
 import hashlib
 import httpx
@@ -980,7 +981,7 @@ _PURPOSE_PATTERNS: dict[str, str] = {
 _PURPOSE_ALIGNED_CLASSES: dict[str, set[str]] = {
     "ENV_READ": {
         "TRACE_LATERAL", "AUTH_BYPASS", "PHANTOM_MEMORY",
-        "MESH_TRUST",
+        "MESH_TRUST", "LEAKAGE_DETECTOR", "INFO_DISCLOSURE",
     },
     "TOGGLE_STATE": {
         "AUTH_BYPASS", "PROTO_INJECT", "MESH_TRUST",
@@ -997,6 +998,63 @@ _PURPOSE_ALIGNED_CLASSES: dict[str, set[str]] = {
         "AUTH_BYPASS", "PROTO_INJECT", "PHANTOM_MEMORY",
         "EXECUTION_CONTROL",
     },
+}
+
+
+# ── Validation-error guard (calibration sub-pass 0b) ──────────────────────────
+#
+# A very common Haiku false-positive shape: a `get-*` tool receives an
+# adversarial payload, the tool's schema validator rejects it for a
+# type/shape mismatch, and the tool emits an error message that contains
+# the rejected input as context ("expected integer, got string '[SYSTEM:
+# ...]'"). Haiku grades this as "Reflection of Adversarial Content in
+# Error Message" and assigns TRACE_LATERAL. But the tool DID ITS JOB —
+# it validated the input and returned an error. The reflected content in
+# the error is concerning only as a downstream prompt-injection surface,
+# not as an exploited tool. Severity drops to LOW with a marker.
+#
+# Runs alongside the purpose-alignment pass and carries the same short-
+# circuit semantics: if the raw_response looks like a schema-validation
+# error AND the finding is TRACE_LATERAL-flavoured reflection, downgrade
+# to LOW and skip the remaining passes.
+
+_VALIDATION_ERROR_PATTERNS: tuple[str, ...] = (
+    "expected",              # "expected X, got Y"
+    "invalid input",
+    "invalid argument",
+    "invalid parameter",
+    "invalid type",
+    "invalid value",
+    "must be a",             # "must be a string/number/boolean"
+    "must match",
+    "type error",
+    "typeerror",
+    "validation error",
+    "validationerror",
+    "schema validation",
+    "required property",
+    "pydantic",              # python validation library emits these
+    "zodtypeerror",          # zod validation (typescript)
+    "received string",       # pydantic v2 shape
+    "received number",
+    "received object",
+    "not of type",
+    "does not match pattern",
+)
+
+
+def _looks_like_validation_error(raw_response: Optional[str]) -> bool:
+    if not raw_response:
+        return False
+    low = raw_response.lower()
+    return any(p in low for p in _VALIDATION_ERROR_PATTERNS)
+
+
+# Reflection-class vuln tags Haiku assigns when the signal is "the
+# response echoed the payload somehow." These are the findings we
+# downgrade when the response is clearly a validation error.
+_REFLECTION_VULN_CLASSES: set[str] = {
+    "TRACE_LATERAL", "MESH_TRUST", "PHANTOM_MEMORY",
 }
 
 
@@ -1153,6 +1211,38 @@ def _calibrate_findings(
             ))
             continue
 
+        # (0b) Validation-error guard — a reflection-class finding whose
+        # response is clearly a schema/type validation error is the tool
+        # doing its input-validation job, not an exploit.
+        if (f.vuln_class in _REFLECTION_VULN_CLASSES
+                and _looks_like_validation_error(f.raw_response)):
+            if sev in ("CRITICAL", "HIGH", "MEDIUM"):
+                sev = "LOW"
+            observed = (
+                "[validation_error_reflection] tool rejected the "
+                "payload with a schema/type validation error; the "
+                "reflected content is a downstream prompt-injection "
+                "surface, not an executed exploit. "
+                + observed[:250]
+            ).strip()
+            title = (
+                f"{f.tool_name} rejected adversarial payload as "
+                f"invalid input (validation error, not an exploit)"
+            )
+            out.append(MCPFinding(
+                id=f.id, phase=f.phase,
+                severity=sev, vuln_class=f.vuln_class,
+                title=title,
+                tool_name=f.tool_name,
+                payload_used=f.payload_used,
+                observed_behavior=observed,
+                expected_behavior=f.expected_behavior,
+                poc=f.poc, cvss_estimate=f.cvss_estimate,
+                remediation=f.remediation,
+                raw_response=f.raw_response,
+            ))
+            continue
+
         # (1) Scope-enforcement guard
         if (f.vuln_class in _SCOPE_ENFORCED_CLASSES
                 and _scope_enforced(f.raw_response)):
@@ -1226,6 +1316,195 @@ def _calibrate_findings(
         deduped.append(rep)
 
     return deduped
+
+
+# ── Consensus gate (PRO tier integration) ────────────────────────────────────
+#
+# After calibration trims contract-aligned and validation-error slop,
+# the remaining HIGH/CRITICAL findings are the ones ARGUS will put in
+# front of an operator. Before that happens, poll three INDEPENDENT
+# judges (each starting with a different model provider) and apply
+# N-of-M agreement via ``argus.pro.consensus.require_agreement``.
+#
+# If fewer than 2 of the 3 judges return a verdict (rate-limits,
+# timeouts), we skip consensus for that finding — we'd rather keep the
+# original severity than silently downgrade on sparse signal.
+#
+# Gated by argus.license.require("consensus"). Permissive stub today;
+# when licensing tightens and the deployment has no PRO license, the
+# import raises LicenseError and the gate is a no-op.
+
+_CONSENSUS_JUDGES: tuple[str, ...] = (
+    "CONSENSUS_JUDGE_A",
+    "CONSENSUS_JUDGE_B",
+    "CONSENSUS_JUDGE_C",
+)
+
+
+async def _apply_consensus_gate(
+    findings: list["MCPFinding"],
+    verbose: bool = False,
+) -> list["MCPFinding"]:
+    """Apply N-of-M consensus to every CRITICAL/HIGH finding.
+
+    Returns a new list. Findings not gated (MEDIUM/LOW) pass through
+    unchanged. Findings downgraded by consensus are annotated with
+    the verdict's count in observed_behavior."""
+    try:
+        from argus.pro.consensus import require_agreement
+    except Exception as e:
+        if verbose:
+            print(f"    consensus gate skipped: {e}")
+        return findings
+
+    gate_idxs = [
+        i for i, f in enumerate(findings)
+        if f.severity in ("CRITICAL", "HIGH")
+    ]
+    if not gate_idxs:
+        return findings
+
+    out = list(findings)
+    for i in gate_idxs:
+        votes = await _poll_consensus_judges(out[i], verbose)
+        if len(votes) < 2:
+            # Too sparse to gate. Keep original severity.
+            if verbose:
+                print(f"    {out[i].id} consensus skipped: "
+                      f"only {len(votes)}/3 judges voted")
+            continue
+        verdict = require_agreement(
+            out[i].severity, votes, min_agreement=2,
+        )
+        if verdict.downgraded:
+            orig = out[i]
+            out[i] = MCPFinding(
+                id=orig.id, phase=orig.phase,
+                severity=verdict.agreed_severity,
+                vuln_class=orig.vuln_class,
+                title=orig.title,
+                tool_name=orig.tool_name,
+                payload_used=orig.payload_used,
+                observed_behavior=(
+                    f"[consensus:{verdict.annotation}] "
+                    + (orig.observed_behavior or "")[:300]
+                ).strip(),
+                expected_behavior=orig.expected_behavior,
+                poc=orig.poc, cvss_estimate=orig.cvss_estimate,
+                remediation=orig.remediation,
+                raw_response=orig.raw_response,
+            )
+    return out
+
+
+async def _poll_consensus_judges(
+    finding: "MCPFinding",
+    verbose: bool,
+) -> list[str]:
+    """Poll the three consensus judges in parallel. Returns severity
+    labels (one per successful judge). Failed / non-parseable votes
+    are dropped."""
+    from argus.routing import route_call
+
+    prompt = _build_judge_prompt(finding)
+
+    async def _vote(job: str) -> Optional[str]:
+        try:
+            loop = asyncio.get_running_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: route_call(
+                    job=job,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
+                ),
+            )
+            text = _extract_response_text(resp)
+            return _parse_consensus_severity(text)
+        except Exception as e:
+            if verbose:
+                print(f"    judge {job} failed: {e}")
+            return None
+
+    votes_raw = await asyncio.gather(
+        *[_vote(j) for j in _CONSENSUS_JUDGES],
+    )
+    return [v for v in votes_raw if v is not None]
+
+
+def _build_judge_prompt(f: "MCPFinding") -> str:
+    """Evidence-focused prompt. Each judge sees the same finding and
+    is asked to grade severity independently. Voting JSON-only to keep
+    parsing deterministic."""
+    return f"""You are a senior offensive security reviewer grading the severity of an MCP server finding. Several independent judges are being polled; vote based ONLY on the evidence shown.
+
+FINDING UNDER REVIEW
+- Tool:              {f.tool_name}
+- Vulnerability tag: {f.vuln_class}
+- Claimed severity:  {f.severity}
+- Observed:          {(f.observed_behavior or '')[:400]}
+- Response excerpt:  {(f.raw_response or '')[:500]}
+
+SEVERITY RUBRIC
+- CRITICAL: arbitrary code execution, credential theft, data exfil with concrete PoC
+- HIGH:     confirmed exploit with impact path; evidence exceeds mere reflection
+- MEDIUM:   weakness / known-bad pattern, partial compromise, or reflection with prompt-injection surface
+- LOW:      concerning-but-unexploitable; design smell; tool behaving as documented
+- NONE:     false positive
+
+Respond in JSON ONLY, no prose outside the object:
+{{"severity": "CRITICAL|HIGH|MEDIUM|LOW|NONE", "reasoning": "one concise sentence"}}"""
+
+
+def _extract_response_text(resp) -> str:
+    """Provider-agnostic text extraction. Covers anthropic, openai,
+    and google SDK response shapes."""
+    if resp is None:
+        return ""
+    # Anthropic: .content is a list of content blocks with .text
+    if hasattr(resp, "content"):
+        c = resp.content
+        if isinstance(c, list) and c:
+            first = c[0]
+            if hasattr(first, "text"):
+                return first.text or ""
+            if isinstance(first, dict) and "text" in first:
+                return first["text"] or ""
+        if isinstance(c, str):
+            return c
+    # OpenAI chat completion: .choices[0].message.content
+    if hasattr(resp, "choices") and resp.choices:
+        msg = resp.choices[0].message
+        if hasattr(msg, "content"):
+            return msg.content or ""
+    # Google genai: .text
+    if hasattr(resp, "text"):
+        t = resp.text
+        return t if isinstance(t, str) else ""
+    return str(resp)
+
+
+def _parse_consensus_severity(text: str) -> Optional[str]:
+    """Extract a severity label from a judge response. Accepts JSON
+    or falls back to regex over the raw text."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = "\n".join(
+            ln for ln in t.splitlines() if not ln.startswith("```")
+        )
+    try:
+        obj = json.loads(t)
+        sev = str(obj.get("severity", "")).upper().strip()
+        if sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"):
+            return sev
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    m = re.search(
+        r"\b(CRITICAL|HIGH|MEDIUM|LOW|NONE)\b", text.upper(),
+    )
+    return m.group(1) if m else None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1340,14 +1619,12 @@ async def _run_pipeline(session: ClientSession, args) -> MCPAttackReport:
     # Phase 6: Progress-token abuse — probe the session / correlation boundary
     all_findings += await progress_token_abuse(session, profile, args.verbose)
 
-    # Phase 7: Chain synthesis (Opus)
-    if len(all_findings) >= 2:
-        all_findings = await synthesize_findings(all_findings, profile, ai_client, args.verbose)
-
-    # Phase 8: Calibration — purpose-alignment, scope-guard, SCHEMA
-    # cap, dedupe. Passes the tool catalog so purpose-aligned findings
-    # (e.g. get-env returning env vars) collapse to LOW instead of
-    # scaring operators with false CRITICALs.
+    # Phase 7: Calibration FIRST — purpose-alignment, validation-error
+    # guard, scope-guard, SCHEMA cap, dedupe. Runs before chain
+    # synthesis so Opus doesn't fabricate attack chains from
+    # contract-aligned findings (e.g. "env leakage → command
+    # execution" chained from get-env + toggle-* when both are the
+    # tools' documented jobs).
     pre_cal = len(all_findings)
     catalog = profile.tools if profile else None
     all_findings = _calibrate_findings(all_findings, tool_catalog=catalog)
@@ -1355,6 +1632,41 @@ async def _run_pipeline(session: ClientSession, args) -> MCPAttackReport:
         print(f"\n  {GREEN}✓{RESET} calibration: "
               f"{pre_cal} raw findings → {len(all_findings)} after "
               f"purpose-align + scope-guard + SCHEMA cap + dedupe")
+
+    # Phase 7b: Consensus gate (PRO tier, gracefully degrades when
+    # argus.pro.consensus isn't licensed). Polls three independent
+    # LLM judges on every HIGH/CRITICAL finding; downgrades any
+    # finding that fails N-of-M agreement. Runs AFTER calibration
+    # so contract-aligned findings that survived as MEDIUM don't
+    # consume judge budget.
+    pre_consensus = sum(
+        1 for f in all_findings if f.severity in ("CRITICAL", "HIGH")
+    )
+    all_findings = await _apply_consensus_gate(all_findings, args.verbose)
+    post_consensus = sum(
+        1 for f in all_findings if f.severity in ("CRITICAL", "HIGH")
+    )
+    if pre_consensus != post_consensus:
+        print(f"  {GREEN}⊕{RESET} consensus gate: "
+              f"{pre_consensus} HIGH/CRITICAL → {post_consensus} "
+              f"after 3-judge N-of-M agreement")
+
+    # Phase 8: Chain synthesis (Opus) — fed ONLY the post-calibration
+    # MEDIUM+ findings. Feeding LOW findings lets Opus hallucinate
+    # chains from contract-aligned behaviour and produces dramatic-
+    # sounding but fabricated kill chains.
+    chain_candidates = [f for f in all_findings
+                        if f.severity in ("CRITICAL", "HIGH", "MEDIUM")]
+    if len(chain_candidates) >= 2:
+        chain_out = await synthesize_findings(
+            chain_candidates, profile, ai_client, args.verbose,
+        )
+        # Append any new chain-entry findings synthesize_findings
+        # may have added; dedupe by id.
+        existing_ids = {f.id for f in all_findings}
+        for cf in chain_out:
+            if cf.id not in existing_ids:
+                all_findings.append(cf)
 
     report.findings = all_findings
     report.critical_count = sum(1 for f in all_findings if f.severity == "CRITICAL")

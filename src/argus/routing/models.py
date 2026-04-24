@@ -101,6 +101,29 @@ _DEFAULT_CHAINS: dict[str, list[tuple[str, str]]] = {
         ("google",    "gemini-2.5-flash"),
         ("openai",    "gpt-4o-mini"),
     ],
+
+    # ── PRO consensus-gate judges (three independent votes) ─────────────
+    # Each judge starts with a DIFFERENT provider so the three votes
+    # are genuinely independent — not three calls to the same model.
+    # Failover chain kicks in only when the preferred provider is
+    # unavailable. This is how the PRO consensus gate achieves
+    # "multiple independent judges agreed" rather than "the same judge
+    # voted three times."
+    "CONSENSUS_JUDGE_A": [
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("google",    "gemini-2.5-flash"),
+        ("openai",    "gpt-4o-mini"),
+    ],
+    "CONSENSUS_JUDGE_B": [
+        ("openai",    "gpt-4o-mini"),
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("google",    "gemini-2.5-flash"),
+    ],
+    "CONSENSUS_JUDGE_C": [
+        ("google",    "gemini-2.5-flash"),
+        ("openai",    "gpt-4o-mini"),
+        ("anthropic", "claude-haiku-4-5-20251001"),
+    ],
 }
 
 

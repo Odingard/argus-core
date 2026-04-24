@@ -34,7 +34,7 @@ jobs:
       - name: Install package + test deps
         run: |
           pip install -e .
-          pip install pytest
+          pip install pytest pytest-asyncio
       - name: Run suite (offline)
         # Contract tests enforce the no-fabrication / MAAC-coverage /
         # real-library PoC invariants. All tests run offline —
