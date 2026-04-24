@@ -21,7 +21,11 @@ Future (gap #4):
 from argus.attacks.conversation import (
     ConversationPlan, ConversationTurn, MultiTurnDriver,
 )
+from argus.attacks.adaptive import (
+    AdaptiveAdversary, AdversaryGoal, AdversaryResult,
+)
 
 __all__ = [
     "ConversationPlan", "ConversationTurn", "MultiTurnDriver",
+    "AdaptiveAdversary", "AdversaryGoal", "AdversaryResult",
 ]
