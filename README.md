@@ -52,14 +52,21 @@ Engagements land in `results/`; render an offline HTML report with `argus --repo
 
 **Platform:**
 
-- **Coordinated swarm runtime** — blackboard + live correlator, phase-pair triggers, pheromone decay, Haiku/Opus budget caps
+- **Coordinated 12-agent swarm runtime** (`engagement/runner.py`) — sequential slate execution, cross-agent chain synthesis, reasoning-audit grounding check
 - **Stateful runtime harness** — deterministic multi-turn replay, 5 invariants, scenario library
 - **Real MCP engagement** — stdio / SSE / HTTP transports; wraps untrusted servers in docker with `--cap-drop ALL`
-- **Adversarial tooling** — attacker-controlled MCP server + npm/PyPI typosquat scanner
+- **Adversarial tooling** — attacker-controlled MCP server + npm/PyPI typosquat scanner + A2A handoff labrat
 - **In-process real-framework adapters** — crewAI, AutoGen, LangGraph, LlamaIndex, Parlant, Hermes
 - **Forensic Wilson bundles** — signed, reproducible evidence suitable for regulator submission
 - **Impact Optimizer / BlastRadiusMap** — harm-scoring with SOC2 / PCI-DSS / HIPAA / FedRAMP / GDPR tags
 - **Workflow integration** — GitHub Action, pre-commit hook, FastAPI webhook receiver
+
+**Calibration + signal quality:**
+
+- **5-stage post-phase calibrator** — (0) tool-purpose alignment (get-env / toggle-\* contract-aware), (0b) validation-error reflection guard, (0c) AUDITOR OOB-callback gate (CRITICAL requires deterministic receipt, per ARGUS.md Tier-3), (1) scope-enforced downgrade, (2) SCHEMA-phase severity cap + dedupe by evidence fingerprint
+- **3-judge N-of-M consensus gate** (PRO tier) — every HIGH/CRITICAL finding polled against three independent models (Anthropic-first, OpenAI-first, Google-first chains) via the routing JOB system; findings below agreement threshold auto-downgrade with `[consensus:N/M]` annotation
+- **Diagnostic outer loop** (`ARGUS_DIAGNOSTICS=1`) — classifies every silent agent into one of six causes (target-hardened / timeout / model-refused / schema-mismatch / no-signal / crashed), writes `diagnostic_priors.json` the next run's agents pick up as Haiku-prompt hints
+- **Cross-run target-class memory** (`argus.memory.target_class`) — aggregates diagnostic priors by target shape (filesystem / notes / search / database / web-api / tools / generic), emits noise baselines at ≥3 runs / class to auto-suppress class-typical patterns on future engagements
 
 ## 4. Core vs. Pro
 

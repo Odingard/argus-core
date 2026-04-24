@@ -32,6 +32,7 @@ from argus.mcp_attacker.mcp_live_attacker import (
     _declared_purposes, _purpose_aligned,
     _check_exploitation_indicators, _classify_payload,
     _looks_like_validation_error,
+    _has_oob_evidence,
 )
 
 
@@ -753,3 +754,90 @@ def test_calibrate_zettel_update_error_caught_by_validation_guard():
     out = _calibrate_findings([f])
     assert out[0].severity == "LOW"
     assert "validation_error_reflection" in out[0].observed_behavior
+
+
+# ── AUDITOR OOB-callback gate (sub-pass 2b) ──────────────────────────────────
+#
+# Enforces ARGUS.md §Tier-3 AUDITOR: "A finding is only 'Critical' if
+# it triggers an Out-of-Band (OOB) callback." Until agents wire callback
+# URLs into payloads, CRITICAL must downgrade to HIGH absent OOB receipt.
+
+
+def test_oob_evidence_recognises_callback_received():
+    f = _mk(observed_behavior="oob callback received at /cb/abc123",
+            raw_response="")
+    assert _has_oob_evidence(f) is True
+
+
+def test_oob_evidence_recognises_loopback_receipt():
+    f = _mk(observed_behavior="target reached 127.0.0.1:57345/cb/xxx",
+            raw_response="")
+    assert _has_oob_evidence(f) is True
+
+
+def test_oob_evidence_recognises_exfil_confirmation():
+    f = _mk(observed_behavior="exfiltration confirmed by listener",
+            raw_response="")
+    assert _has_oob_evidence(f) is True
+
+
+def test_oob_evidence_rejects_bland_response():
+    f = _mk(observed_behavior="server returned 200 ok",
+            raw_response="response body without any callback markers")
+    assert _has_oob_evidence(f) is False
+
+
+def test_oob_evidence_rejects_empty():
+    f = _mk(observed_behavior="", raw_response="")
+    assert _has_oob_evidence(f) is False
+
+
+def test_calibrate_critical_without_oob_downgrades_to_high():
+    """The exact shape the AUDITOR guard was written to catch:
+    Haiku-graded CRITICAL that has no deterministic OOB receipt
+    to back it up."""
+    f = _mk(
+        phase="TOOL-FUZZ",
+        severity="CRITICAL",
+        vuln_class="SQL_INJECTION",
+        title="Credential theft claim",
+        raw_response=(
+            "psycopg2.OperationalError: syntax error near 'OR'"
+        ),
+    )
+    out = _calibrate_findings([f])
+    assert out[0].severity == "HIGH"
+    assert "auditor:no_oob_callback" in out[0].observed_behavior
+
+
+def test_calibrate_critical_with_oob_survives():
+    """If the finding's evidence ALREADY shows OOB receipt, CRITICAL
+    survives through the auditor gate."""
+    f = _mk(
+        phase="TOOL-FUZZ",
+        severity="CRITICAL",
+        vuln_class="COMMAND_INJECTION",
+        title="Shell popped",
+        observed_behavior=(
+            "command executed; oob callback received at "
+            "127.0.0.1:51234/cb/abc with token=xyz"
+        ),
+        raw_response="uid=1000(alice) gid=1000 groups=1000",
+    )
+    out = _calibrate_findings([f])
+    assert out[0].severity == "CRITICAL"
+    assert "auditor:no_oob_callback" not in out[0].observed_behavior
+
+
+def test_calibrate_high_unaffected_by_auditor_gate():
+    """AUDITOR gate only caps CRITICAL. HIGH findings pass through
+    unchanged by this sub-pass."""
+    f = _mk(
+        phase="TOOL-FUZZ",
+        severity="HIGH",
+        vuln_class="SQL_INJECTION",
+        raw_response="psycopg2.OperationalError",
+    )
+    out = _calibrate_findings([f])
+    assert out[0].severity == "HIGH"
+    assert "auditor:no_oob_callback" not in out[0].observed_behavior

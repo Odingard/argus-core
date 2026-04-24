@@ -1097,6 +1097,53 @@ _REFLECTION_VULN_CLASSES: set[str] = {
 }
 
 
+# ── AUDITOR guard (sub-pass 0c) ──────────────────────────────────────────────
+#
+# Per ARGUS.md §Tier-3 AUDITOR directive: "A finding is only 'Critical'
+# if it triggers an Out-of-Band (OOB) callback." Until agents start
+# embedding OOB callback URLs in their payloads and capturing receipts,
+# the SAFE behaviour is to CAP severity at HIGH for any finding whose
+# evidence doesn't show OOB receipt. This enforces the doctrine and
+# prevents LLM-graded CRITICALs from reaching the operator without the
+# strongest deterministic signal backing them.
+#
+# Receipt markers we accept as OOB evidence:
+#   - Explicit "oob_callback" / "out-of-band callback" in observed
+#   - "callback received" / "listener captured" phrasing
+#   - A loopback 127.0.0.1 URL appearing in the RESPONSE (the target
+#     reached back to our attacker-controlled endpoint)
+#   - Common exfil-received phrasing
+#
+# Runs after purpose-align / validation-guard / scope-guard so those
+# downgrades fire first (cheaper); any CRITICAL that survives those
+# still has to clear this bar.
+
+_OOB_RECEIPT_PATTERNS: tuple[str, ...] = (
+    "oob_callback",
+    "oob callback",
+    "out-of-band callback",
+    "out-of-band receipt",
+    "callback received",
+    "callback fired",
+    "listener captured",
+    "exfil received",
+    "exfiltration confirmed",
+    "127.0.0.1:",        # target reached our loopback listener
+)
+
+
+def _has_oob_evidence(f: "MCPFinding") -> bool:
+    """True if the finding's captured evidence shows a real OOB
+    callback landed. Checks both observed_behavior (agent summary)
+    and raw_response (server bytes)."""
+    haystack = (
+        (f.observed_behavior or "") + " " + (f.raw_response or "")
+    ).lower()
+    if not haystack.strip():
+        return False
+    return any(p in haystack for p in _OOB_RECEIPT_PATTERNS)
+
+
 def _declared_purposes(tool_description: Optional[str],
                        tool_schema: Optional[dict]) -> set[str]:
     """Extract declared-purpose tags from a tool's description and
@@ -1306,6 +1353,23 @@ def _calibrate_findings(
                 "[schema_only:capped] single-judge SCHEMA verdict; "
                 "runtime corroboration required for HIGH+ — "
                 + observed[:300]
+            ).strip()
+
+        # (2b) AUDITOR OOB-callback gate (per ARGUS.md §Tier-3:
+        # "A finding is only 'Critical' if it triggers an Out-of-
+        # Band (OOB) callback."). No OOB evidence → cap at HIGH.
+        # This is the strongest deterministic signal filter in the
+        # pipeline; until agents wire callback URLs into payloads
+        # and capture receipts, CRITICAL is reserved for the rare
+        # finding whose response already shows real OOB activity.
+        if sev == "CRITICAL" and not _has_oob_evidence(f):
+            sev = "HIGH"
+            observed = (
+                "[auditor:no_oob_callback] CRITICAL severity requires "
+                "OOB callback receipt per ARGUS.md Tier-3 AUDITOR "
+                "doctrine — capped at HIGH pending deterministic "
+                "receipt evidence. "
+                + observed[:250]
             ).strip()
 
         out.append(MCPFinding(
