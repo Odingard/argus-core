@@ -26,9 +26,13 @@ from argus.diagnostics.classifier import (
     DiagnosticReport, LogLoader, SilenceClassifier,
     dict_log_loader,
 )
+from argus.diagnostics.feedback import (
+    write_diagnostic_feedback, load_prior_for_agent,
+)
 
 __all__ = [
     "SilenceCause", "SilentAgentReport", "classify_from_text",
     "DiagnosticReport", "LogLoader", "SilenceClassifier",
     "dict_log_loader",
+    "write_diagnostic_feedback", "load_prior_for_agent",
 ]
