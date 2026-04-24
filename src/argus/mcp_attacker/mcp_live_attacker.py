@@ -964,6 +964,17 @@ _PURPOSE_PATTERNS: dict[str, str] = {
     "NOTIFY":       r"\b(notif(y|ication)|alerts?|broadcasts?|"
                     r"publishes?)\b",
     "SEARCH":       r"\b(search|query|find|lookup|semantic|retriev)\b",
+    # Tools that store arbitrary user content (Zettelkasten, notes,
+    # memory, KV write). Reflecting the payload in a response or
+    # subsequent retrieval is the tool's DESIGNED behaviour.
+    # Matches a write-verb + a storage-noun within the same clause
+    # (up to 60 non-period chars apart) so descriptions like
+    # "Update fields of an existing note" also tag.
+    "WRITE_STORAGE":
+        r"\b(create|update|save|store|append|insert|add|persist|"
+        r"write|record)s?\b[^.\n]{0,60}?\b(notes?|memos?|records?|"
+        r"entries|entry|facts?|documents?|items?|fields?|"
+        r"value|values)\b",
 }
 
 # When a tool's DECLARED purpose matches one of these tags, findings
@@ -997,6 +1008,24 @@ _PURPOSE_ALIGNED_CLASSES: dict[str, set[str]] = {
     "NOTIFY": {
         "AUTH_BYPASS", "PROTO_INJECT", "PHANTOM_MEMORY",
         "EXECUTION_CONTROL",
+    },
+    # Search tools return what's stored. If the search-hit content
+    # happens to contain adversarial text (e.g. because ARGUS's own
+    # earlier write probe planted it), that's contract-aligned
+    # retrieval — not an exploit. DELIBERATELY excludes execution
+    # classes (SQL_INJECTION, COMMAND_INJECTION) so a real SQL bug
+    # in a semantic-search backend still fires.
+    "SEARCH": {
+        "TRACE_LATERAL", "MESH_TRUST", "PHANTOM_MEMORY",
+    },
+    # Write-storage tools (create_note, update_note, save, store,
+    # persist) DESIGN-STORE user content. Reflecting adversarial
+    # payloads in returned note bodies or subsequent retrieval is
+    # the tool's contracted behaviour. Same exclusion of execution
+    # classes.
+    "WRITE_STORAGE": {
+        "TRACE_LATERAL", "MESH_TRUST", "PHANTOM_MEMORY",
+        "AUTH_BYPASS",
     },
 }
 
@@ -1040,6 +1069,17 @@ _VALIDATION_ERROR_PATTERNS: tuple[str, ...] = (
     "received object",
     "not of type",
     "does not match pattern",
+    # Runtime tool-error shapes surfaced by zettel / community MCPs:
+    # these are validation / lookup failures where the tool echoes
+    # the attempted input as part of its error message.
+    "error executing tool",  # generic MCP tool-error prefix
+    "not found",             # "Note 'X' not found", "User 'X' not found"
+    "doesn't exist",
+    "does not exist",
+    "no such ",              # "no such note", "no such record"
+    "unknown ",              # "unknown note id", "unknown tool"
+    "mcp error -32602",      # JSON-RPC invalid params error code
+    "mcp error -32600",      # JSON-RPC invalid request error code
 )
 
 

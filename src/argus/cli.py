@@ -221,11 +221,42 @@ def _run_live_mcp(args) -> int:
         print(f"\n  {_color('[!] Interrupted', SEV_COLORS['HIGH'])}")
         return 130
     except Exception as e:
+        # The MCP Python SDK's stdio_client has a known async-generator
+        # cleanup bug that fires AFTER the engagement completes and the
+        # report is saved ("Attempted to exit cancel scope in a
+        # different task than it was entered in"). If the report is
+        # on disk, the exception is cleanup noise — not a failure.
+        report_path = Path(output_dir) / "mcp_attack_report.json"
+        if report_path.is_file() and _is_stdio_cleanup_noise(e):
+            if args.verbose:
+                print(f"\n  {_color('(stdio cleanup warning suppressed — report saved)', GRAY)}")
+                traceback.print_exc()
+            return 0
         print(f"\n  {_color(f'[!] Live attack failed: {e}', SEV_COLORS['CRITICAL'])}")
         if args.verbose:
             traceback.print_exc()
         return 1
     return 0
+
+
+def _is_stdio_cleanup_noise(exc: BaseException) -> bool:
+    """True if `exc` is the known MCP-SDK stdio_client task-group
+    cleanup bug — harmless if the engagement already saved its
+    report. Matches both the inner RuntimeError and the outer
+    BaseExceptionGroup wrapper."""
+    msg = str(exc).lower()
+    cleanup_markers = (
+        "cancel scope",
+        "different task than it was entered",
+        "unhandled errors in a taskgroup",
+    )
+    if any(m in msg for m in cleanup_markers):
+        return True
+    # BaseExceptionGroup (Python 3.11+) — recurse into sub-exceptions.
+    subs = getattr(exc, "exceptions", None)
+    if subs:
+        return any(_is_stdio_cleanup_noise(s) for s in subs)
+    return False
 
 
 # ── Drift modes ──────────────────────────────────────────────────────────────
