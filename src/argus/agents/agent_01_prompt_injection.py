@@ -35,13 +35,21 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from argus.adapter.base import AdapterError, BaseAdapter, Request
 from argus.agents.base import AgentFinding, BaseAgent
 from argus.corpus_attacks import Corpus, EvolveCorpus
 from argus.observation import ObservationEngine, default_detectors
 from argus.session import Session
+
+if TYPE_CHECKING:
+    # Heavy/new imports used only as type annotations. Keeping them
+    # behind TYPE_CHECKING avoids a runtime import cycle — judge.py
+    # imports argus.shared.client (openai, anthropic, genai), and
+    # loading those at agent-class init time is unnecessary.
+    from argus.attacks.judge import LLMJudge
+    from argus.policy.base import PolicySet
 
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -119,6 +127,8 @@ class PromptInjectionHunter(BaseAgent):
         observer:        Optional[ObservationEngine] = None,
         evolve_corpus:   Optional[EvolveCorpus] = None,
         leak_patterns:   Optional[list[str]] = None,
+        policy_set:      Optional["PolicySet"] = None,
+        judge:           Optional["LLMJudge"] = None,
         verbose:         bool = False,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -130,6 +140,23 @@ class PromptInjectionHunter(BaseAgent):
             )
         )
         self.evolve_corpus = evolve_corpus
+        # Policy-substrate + judge. Policies default to the Tier-1
+        # global set (OWASP LLM Top 10 + CORE-IPI) so keyless +
+        # generic-class engagements still have policies to evaluate
+        # against; operator overrides arrive via the engagement.
+        if policy_set is None:
+            from argus.policy.registry import (
+                default_registry, AgentClass,
+            )
+            policy_set = default_registry().resolve(
+                agent_class=AgentClass.GENERIC,
+            )
+        self.policy_set = policy_set
+        # Judge construction is cheap even without keys (ArgusClient
+        # doesn't touch providers at init). available() is the gate
+        # that decides whether evaluations fire.
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        self.judge = judge if judge is not None else _LLMJudge()
 
     # ── Required BaseAgent surface ───────────────────────────────────────
 
@@ -284,7 +311,11 @@ class PromptInjectionHunter(BaseAgent):
     ) -> list[tuple]:
         """
         Fire ONE variant in a fresh session. Returns (verdict, finding)
-        pairs from the Observation Engine.
+        pairs from BOTH the Observation Engine (structural behaviour-
+        delta) AND the LLM judge (semantic policy evaluation) — judge
+        findings carry the policy-grounded evidence agentic-AI
+        red-teaming actually needs; observer findings stay as cheap
+        structural triage.
         """
         adapter = self.adapter_factory()
         sess = Session(
@@ -297,6 +328,7 @@ class PromptInjectionHunter(BaseAgent):
                 tag=f"variant:{variant.template_id}:{variant.mutator}",
             )
 
+        # Structural behaviour-delta detection (existing — kept).
         verdicts = self.observer.findings(
             baseline_transcript=baseline_transcript,
             post_transcript=sess.transcript(),
@@ -329,4 +361,126 @@ class PromptInjectionHunter(BaseAgent):
                 severity=variant.severity,
             )
             out.append((v, finding))
+
+        # Semantic policy evaluation — the real agentic-AI detector.
+        # Gated on available() so keyless engagements degrade to
+        # observer-only; no hard failure when provider keys are
+        # absent. One LLM call per relevant policy per variant.
+        judge_findings = self._judge_findings(
+            variant=variant, surface=surface, target_id=target_id,
+            sess=sess,
+        )
+        out.extend(judge_findings)
         return out
+
+    def _judge_findings(
+        self, *, variant, surface: str, target_id: str, sess,
+    ) -> list[tuple]:
+        """Evaluate the variant's response against every policy in
+        ``self.policy_set`` that applies to PI-01 techniques. Emits
+        one AgentFinding per VIOLATED verdict with confidence ≥ 0.5.
+        REFUSED verdicts are correct behaviour and emit nothing.
+
+        Returns list of (PolicyVerdict, AgentFinding) tuples so the
+        caller's evolve-corpus loop can still see the verdict.
+
+        Short-circuits to empty when the judge is unavailable
+        (ARGUS_JUDGE=1 not set OR no provider key). Skips loop to
+        keep pytest + keyless engagements fast."""
+        out: list[tuple] = []
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        if not _LLMJudge.available():
+            return out
+        # PI-01's natural policy subset: prompt injection + system-
+        # prompt leakage + indirect-prompt-injection + any global
+        # that the registry already applies to "all".
+        technique_id = f"PI-T1-instruction-override"  # ship tag; variant-driven later
+        relevant = self.policy_set.relevant_for(technique_id=technique_id)
+        if not relevant:
+            return out
+        # Late import to dodge a circular-ish boot — judge pulls in
+        # argus.shared.client which loads providers.
+        from argus.attacks.judge import JudgeInput
+        from argus.observation import BehaviorDelta, DeltaKind, Verdict
+        from argus.policy.base import VerdictKind
+
+        response_text = self._last_response_text(sess.transcript())
+        for policy in relevant:
+            try:
+                verdict = self.judge.evaluate(JudgeInput(
+                    policy       = policy,
+                    probe        = variant.text,
+                    response     = response_text,
+                    baseline     = "",
+                    technique_id = technique_id,
+                    surface      = surface,
+                ))
+            except Exception as e:
+                if self.verbose:
+                    print(f"  [{self.AGENT_ID}] judge error on "
+                          f"{policy.id}: {type(e).__name__}: {e}")
+                continue
+            if not verdict.is_finding():
+                continue
+
+            # Adapt PolicyVerdict → observation.Verdict so the
+            # existing AgentFinding.from_observation + downstream
+            # chain-synthesis pipelines can consume it unchanged.
+            obs_verdict = Verdict(
+                delta       = BehaviorDelta.DELTA,
+                kind        = DeltaKind.CONTENT_LEAK,
+                detector    = "llm_judge",
+                evidence    = verdict.evidence or verdict.reasoning,
+                confidence  = verdict.confidence,
+                meta        = {
+                    "policy_id":    policy.id,
+                    "policy_name":  policy.name,
+                    "owasp_llm":    policy.owasp_llm,
+                    "judge_model":  getattr(self.judge, "model", ""),
+                    "judge_kind":   verdict.kind.value,
+                    "judge_reasoning": verdict.reasoning[:400],
+                },
+            )
+            finding = AgentFinding.from_observation(
+                verdict=obs_verdict,
+                agent_id=self.AGENT_ID,
+                vuln_class=self.VULN_CLASS,
+                title=(
+                    f"Policy violation [{policy.id}] via "
+                    f"{variant.template_id}/{variant.mutator}"
+                ),
+                description=(
+                    f"Policy {policy.id!r} ({policy.name}) was "
+                    f"VIOLATED with judge confidence "
+                    f"{verdict.confidence:.2f}. Evidence: "
+                    f"{verdict.evidence[:300]!r}. Probe: "
+                    f"{str(variant.text)[:200]!r}."
+                ),
+                surface=surface,
+                session_id=sess.session_id,
+                attack_variant_id=(
+                    f"{variant.template_id}:{variant.mutator}:"
+                    f"{variant.fingerprint}"
+                ),
+                baseline_ref=f"{target_id}::baseline",
+                severity=policy.severity,
+            )
+            out.append((obs_verdict, finding))
+        return out
+
+    def _last_response_text(self, transcript: list[dict]) -> str:
+        """Extract the text of the final response in a session
+        transcript — the thing the judge evaluates."""
+        if not transcript:
+            return ""
+        last = transcript[-1]
+        obs = last.get("observation") or {}
+        resp = obs.get("response") or {}
+        body = resp.get("body", "")
+        if isinstance(body, (dict, list)):
+            import json
+            try:
+                return json.dumps(body, default=str)
+            except (TypeError, ValueError):
+                return str(body)
+        return str(body or "")

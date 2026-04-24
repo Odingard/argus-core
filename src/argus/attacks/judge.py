@@ -105,9 +105,23 @@ class LLMJudge:
 
     @staticmethod
     def available() -> bool:
-        """True when at least one LLM provider key is set. Keyless
-        engagements still run — they get UNAVAILABLE verdicts and
-        the agent falls back to regex triage."""
+        """True when (a) the operator has opted into semantic judging
+        via ``ARGUS_JUDGE=1`` AND (b) at least one LLM provider key
+        is set. Both gates required because every judge call costs
+        real provider tokens — engagements that don't need semantic
+        judgment (CI regressions, pytest suites, quick-look blind
+        scans) stay free and fast.
+
+        Default is OFF. Operators flip it on per-engagement:
+
+            ARGUS_JUDGE=1 argus engage http://target --output /tmp/run
+
+        Without ARGUS_JUDGE=1, agents emit findings via the existing
+        regex/observer detectors and annotate them with
+        ''semantic-judgment not run'' so reports stay honest about
+        what was and wasn't evaluated."""
+        if os.environ.get("ARGUS_JUDGE", "0") != "1":
+            return False
         return any(
             os.environ.get(name)
             for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY",
