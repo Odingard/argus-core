@@ -178,6 +178,122 @@ register_target(
 )
 
 
+# ── Friendly MCP launcher aliases ────────────────────────────────────────
+#
+# The raw stdio-mcp://cmd+arg+arg form is painful to type. These
+# aliases let operators invoke real MCP servers with shell-natural
+# syntax:
+#
+#   argus engage 'npx://-y @modelcontextprotocol/server-everything'
+#   argus engage 'npx://-y @modelcontextprotocol/server-filesystem /tmp/sb'
+#   argus engage 'uvx://mcp-server-git --repository /path/to/repo'
+#   argus engage 'mcp-ref://filesystem /tmp/sb'
+#   argus engage 'mcp-ref://everything'
+#
+# Body is shlex-parsed so quoting / spaces / args-with-spaces work
+# the way an operator expects. ``mcp-ref://`` is a canonical-shortcut
+# for Anthropic's @modelcontextprotocol/server-* packages — operators
+# name the suffix only.
+
+import shlex as _shlex
+
+
+def _shell_mcp_factory(command_prefix: tuple[str, ...]):
+    """Build a factory that prepends ``command_prefix`` to the
+    shlex-parsed URL body. The resulting subprocess is launched via
+    the existing StdioAdapter path so every downstream code path
+    (sandbox, evidence, enumerate) stays identical."""
+    def _factory(url: str):
+        from argus.adapter import StdioAdapter
+        body = url.split("://", 1)[1] if "://" in url else url
+        body = body.strip()
+        args = _shlex.split(body) if body else []
+        command = list(command_prefix) + args
+        if _SANDBOX_CONFIG["enabled"]:
+            from argus.adapter import SandboxedStdioAdapter, SandboxPolicy
+            return SandboxedStdioAdapter(
+                command=command,
+                policy=SandboxPolicy(
+                    network=_SANDBOX_CONFIG["network"],
+                    image=_SANDBOX_CONFIG["image"],
+                ),
+            )
+        return StdioAdapter(command=command)
+    return _factory
+
+
+def _mcp_ref_factory(url: str):
+    """``mcp-ref://<name> [args]`` → npx -y @modelcontextprotocol/server-<name> [args].
+
+    Operator-friendly shorthand for Anthropic's reference MCP servers
+    published under @modelcontextprotocol/server-*. Examples the
+    operator types verbatim:
+
+        argus engage 'mcp-ref://filesystem /tmp/sandbox'
+        argus engage 'mcp-ref://everything'
+        argus engage 'mcp-ref://memory'
+        argus engage 'mcp-ref://git --repository /path/to/repo'
+    """
+    from argus.adapter import StdioAdapter
+    body = url.split("://", 1)[1] if "://" in url else url
+    body = body.strip()
+    if not body:
+        raise ValueError(
+            "mcp-ref:// requires a server name. "
+            "Try 'mcp-ref://filesystem /tmp/sandbox' or "
+            "'mcp-ref://everything'."
+        )
+    parts = _shlex.split(body)
+    server_name = parts[0]
+    extra_args  = parts[1:]
+    command = [
+        "npx", "-y",
+        f"@modelcontextprotocol/server-{server_name}",
+    ] + extra_args
+    if _SANDBOX_CONFIG["enabled"]:
+        from argus.adapter import SandboxedStdioAdapter, SandboxPolicy
+        return SandboxedStdioAdapter(
+            command=command,
+            policy=SandboxPolicy(
+                network=_SANDBOX_CONFIG["network"],
+                image=_SANDBOX_CONFIG["image"],
+            ),
+        )
+    return StdioAdapter(command=command)
+
+
+register_target(
+    "npx",
+    factory=_shell_mcp_factory(("npx",)),
+    description="Launch a Node-hosted MCP server via `npx <args>` "
+                "(shlex-parsed body: 'npx://-y @pkg/server-x /arg').",
+    agent_selection=("SC-09", "TP-02", "ME-10", "PI-01",
+                     "PE-07", "EP-11"),
+    aliases=("mcp-npx",),
+)
+
+register_target(
+    "uvx",
+    factory=_shell_mcp_factory(("uvx",)),
+    description="Launch a PyPI-hosted MCP server via `uvx <args>` "
+                "(shlex-parsed body: 'uvx://mcp-server-git --arg ...').",
+    agent_selection=("SC-09", "TP-02", "ME-10", "PI-01",
+                     "PE-07", "EP-11"),
+    aliases=("mcp-uvx",),
+)
+
+register_target(
+    "mcp-ref",
+    factory=_mcp_ref_factory,
+    description="Anthropic reference MCP server shortcut. "
+                "'mcp-ref://filesystem /tmp/sb' → "
+                "'npx -y @modelcontextprotocol/server-filesystem /tmp/sb'.",
+    agent_selection=("SC-09", "TP-02", "ME-10", "PI-01",
+                     "PE-07", "EP-11"),
+    aliases=("mcpref",),
+)
+
+
 def _http_agent_factory(url: str):
     """Generic HTTP chat/agent endpoint. Operator supplies the URL
     end-to-end."""
