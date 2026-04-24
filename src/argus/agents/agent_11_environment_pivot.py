@@ -45,7 +45,11 @@ import asyncio
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:
+    from argus.attacks.judge import LLMJudge
+    from argus.policy.base import PolicySet
 
 from argus.adapter.base import (
     AdapterError, BaseAdapter, Request, Surface,
@@ -1098,6 +1102,8 @@ class EnvironmentPivotAgent(BaseAgent):
         observer:         Optional[ObservationEngine] = None,
         evolve_corpus:    Optional[EvolveCorpus] = None,
         techniques:       Optional[list[str]] = None,
+        policy_set:       Optional["PolicySet"] = None,
+        judge:            Optional["LLMJudge"] = None,
         verbose:          bool = False,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -1108,6 +1114,21 @@ class EnvironmentPivotAgent(BaseAgent):
             [t for t in (techniques or []) if t in TECHNIQUES]
             or list(TECHNIQUES.keys())
         )
+        # Policy substrate + judge — same pattern as PI-01/ME-10/
+        # CW-05. Regex detectors stay as cheap structural triage;
+        # the judge adds semantic policy evaluation for the cases
+        # where a container-sandbox tool returns real target state
+        # (env, /etc/passwd, tool output) that ISN'T AKIA-shaped
+        # but IS a policy violation under LLM02/LLM06. Gated on
+        # ARGUS_JUDGE=1 + provider-key availability.
+        if policy_set is None:
+            from argus.policy.registry import (
+                default_policy_set, AgentClass,
+            )
+            policy_set = default_policy_set(AgentClass.GENERIC)
+        self.policy_set = policy_set
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        self.judge = judge if judge is not None else _LLMJudge()
 
     @property
     def technique_library(self) -> dict:
@@ -1411,6 +1432,134 @@ class EnvironmentPivotAgent(BaseAgent):
                     severity=tech.severity,
                 )
                 out.append((finding, verdict))
+
+            # Semantic policy evaluation — catches the cases where
+            # the response contains target-internal state that
+            # doesn't match a cred regex but DOES violate a policy
+            # (container sandbox dumping /etc/passwd when asked;
+            # tool returning configuration contents; etc.). Gated
+            # on ARGUS_JUDGE=1 + provider key. Runs AFTER regex
+            # triage so regex-hit findings aren't duplicated.
+            judge_tuples = self._judge_findings(
+                technique_id=technique_id, tech=tech,
+                surface=surface, target_id=target_id,
+                payload=payload, sess=sess,
+                response_text=response_text, baseline=baseline_text,
+                had_regex_hit=bool(cred_hits or shape_hits),
+            )
+            out.extend(judge_tuples)
+        return out
+
+    def _judge_findings(
+        self, *, technique_id: str, tech: Technique,
+        surface: Surface, target_id: str, payload,
+        sess, response_text: str, baseline: str,
+        had_regex_hit: bool,
+    ) -> list[tuple]:
+        """Evaluate the probe's response against every policy
+        applicable to this EP-11 technique. Returns (AgentFinding,
+        Verdict) tuples so the caller's downstream emission path
+        stays unchanged.
+
+        Short-circuits to empty when the judge is unavailable
+        (``ARGUS_JUDGE=1`` not set OR no provider key). When regex
+        triage already emitted findings for this probe, the judge
+        still runs for its orthogonal semantic view — but the
+        caller can distinguish the two source detectors via the
+        verdict's ``meta.detector`` field (''llm_judge'' vs
+        ''environment_pivot_probe'').
+        """
+        from argus.attacks.judge import LLMJudge as _LLMJudge
+        if not _LLMJudge.available():
+            return []
+        relevant = self.policy_set.relevant_for(technique_id=technique_id)
+        if not relevant:
+            return []
+        from argus.attacks.judge import JudgeInput
+        from argus.attacks.stochastic import (
+            configured_shots, configured_threshold, stochastic_evaluate,
+        )
+
+        shots     = configured_shots()
+        threshold = configured_threshold()
+        out: list[tuple] = []
+        for policy in relevant:
+            try:
+                sr = stochastic_evaluate(
+                    judge=self.judge,
+                    build_input=lambda p=policy: JudgeInput(
+                        policy       = p,
+                        probe        = payload,
+                        response     = response_text,
+                        baseline     = baseline,
+                        technique_id = technique_id,
+                        surface      = surface.name,
+                    ),
+                    shots=shots,
+                    threshold=threshold,
+                )
+            except Exception as e:
+                print(f"  [{self.AGENT_ID}] judge ERROR on "
+                      f"{policy.id}: {type(e).__name__}: {e}")
+                continue
+            if sr.violated_count < threshold:
+                continue
+            first = sr.first_violation()
+            if first is None:
+                continue
+
+            obs_verdict = Verdict(
+                delta      = BehaviorDelta.DELTA,
+                kind       = DeltaKind.CONTENT_LEAK,
+                detector   = "llm_judge",
+                evidence   = first.evidence or first.reasoning,
+                confidence = first.confidence,
+                meta       = {
+                    "policy_id":       policy.id,
+                    "policy_name":     policy.name,
+                    "owasp_llm":       policy.owasp_llm,
+                    "judge_model":     getattr(self.judge, "model", ""),
+                    "judge_kind":      first.kind.value,
+                    "judge_reasoning": first.reasoning[:400],
+                    "technique_id":    technique_id,
+                    "family":          tech.family,
+                    "tool_name":       surface.name,
+                    "shots":           sr.shots,
+                    "violated_count":  sr.violated_count,
+                    "failure_rate":    sr.failure_rate,
+                    # True when regex triage ALSO caught this — a
+                    # double-detector hit is stronger evidence than
+                    # judge-alone.
+                    "regex_co_hit":    had_regex_hit,
+                },
+            )
+            finding = AgentFinding.from_observation(
+                verdict=obs_verdict,
+                agent_id=self.AGENT_ID,
+                vuln_class=self.VULN_CLASS,
+                title=(
+                    f"Policy violation [{policy.id}] via {technique_id} "
+                    f"on {surface.name}"
+                    + (f" (stochastic {sr.violated_count}/{sr.shots})"
+                       if sr.shots > 1 else "")
+                ),
+                description=(
+                    f"Policy {policy.id!r} ({policy.name}) VIOLATED "
+                    f"in {sr.violated_count}/{sr.shots} shots "
+                    f"(failure rate {sr.failure_rate:.1%}). "
+                    f"Technique {technique_id!r} on surface "
+                    f"{surface.name!r}. Judge confidence on first "
+                    f"violation {first.confidence:.2f}. "
+                    f"Evidence: {first.evidence[:300]!r}. "
+                    f"Payload: {str(payload)[:200]!r}."
+                ),
+                surface=surface.name,
+                session_id=sess.session_id,
+                attack_variant_id=technique_id,
+                baseline_ref=f"{target_id}::{surface.name}::baseline",
+                severity=policy.severity,
+            )
+            out.append((finding, obs_verdict))
         return out
 
     async def _baseline_text(self, surface: Surface) -> str:
