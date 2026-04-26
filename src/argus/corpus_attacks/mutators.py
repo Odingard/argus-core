@@ -156,7 +156,18 @@ class CommandFloodingMutator:
 # ── Default bundle ──────────────────────────────────────────────────────────
 
 def default_mutators() -> list[Mutator]:
-    return [
+    """Return the default mutator stack.
+
+    Static mutators always included — zero LLM cost, good coverage
+    of encoding-based bypasses.
+
+    LLMMutator included when a provider key is present — generates
+    semantically novel rephrasings that defeat adversarial training
+    on the static transform set. Targets hardened against base64
+    and leet speak won't be hardened against a contextually
+    reworded variant the LLM produces on each run.
+    """
+    static = [
         IdentityMutator(),
         Base64Mutator(),
         HexMutator(),
@@ -166,3 +177,38 @@ def default_mutators() -> list[Mutator]:
         ToyVerboseMutator(),
         PolitenessWrapMutator(),
     ]
+    # Sentry mutators — semantic misdirection, always included
+    # (pure Python, zero LLM cost).
+    try:
+        from argus.corpus_attacks.sentry import (
+            CrescendoMutator, CognitiveCamouflageMutator,
+        )
+        static.extend([
+            CrescendoMutator(),
+            CognitiveCamouflageMutator(),
+        ])
+    except Exception:
+        pass
+    # LLM mutators — only added when a provider key exists.
+    # Gracefully omitted in keyless / CI environments.
+    try:
+        import os
+        has_key = any(
+            os.environ.get(k)
+            for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY")
+        )
+        if has_key:
+            from argus.corpus_attacks.dynamic import LLMMutator
+            # seed_index drives which variant the LLM generates —
+            # fresh per call so each engagement gets a different
+            # rephrasal. Use os.urandom for true per-run entropy.
+            import os as _os
+            _seed = int.from_bytes(_os.urandom(3), "big")
+            static.extend([
+                LLMMutator(seed_index=_seed,     job="rephrase_adversarial"),
+                LLMMutator(seed_index=_seed + 1, job="authority_framing"),
+                LLMMutator(seed_index=_seed + 2, job="indirect_reference"),
+            ])
+    except Exception:
+        pass
+    return static

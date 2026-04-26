@@ -229,6 +229,21 @@ def optimize_impact(
 
     # 4) Harm score.
     score = _SEVERITY_BASE.get(chain.severity or "HIGH", 10)
+
+    # RCE floor — if any confirmed finding is ENVIRONMENT_PIVOT,
+    # the blast radius is at minimum HIGH regardless of what data
+    # classes were captured. Shell execution on the host IS the
+    # impact. The operator doesn't need /etc/passwd in the evidence
+    # to know that arbitrary code execution on the host is severe.
+    rce_confirmed = any(
+        getattr(f, "vuln_class", "") == "ENVIRONMENT_PIVOT"
+        and getattr(f, "exploitability_confirmed", False)
+        for f in (findings or [])
+    )
+    if rce_confirmed:
+        score = max(score, _SEVERITY_BASE["HIGH"])  # floor at HIGH(25)
+        if chain.severity in ("CRITICAL", "HIGH"):
+            score = max(score, _SEVERITY_BASE["CRITICAL"])  # CRITICAL floor
     for cls_name in class_union:
         score += _DATA_WEIGHT.get(cls_name, 0)
     score += _REG_WEIGHT * len(reg_union)

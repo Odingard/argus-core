@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -197,5 +198,5 @@ class Corpus:
             return []
         if n >= len(all_v):
             return all_v
-        rng = random.Random(seed if seed is not None else 1337)
+        rng = random.Random(seed if seed is not None else int.from_bytes(os.urandom(4), "big"))
         return rng.sample(all_v, n)

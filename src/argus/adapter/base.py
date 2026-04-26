@@ -4,6 +4,7 @@ argus/adapter/base.py — common contract every Target Adapter implements.
 from __future__ import annotations
 
 import asyncio
+import os
 import enum
 import time
 import uuid
@@ -123,10 +124,17 @@ class BaseAdapter:
         self,
         *,
         target_id:       str = "",
-        connect_timeout: float = 15.0,
+        connect_timeout: float = -1.0,  # -1 = read from env at instantiation
         request_timeout: float = 30.0,
     ) -> None:
         self.target_id       = target_id
+        # Read env var at instantiation time, not at class definition time.
+        # This fixes the Python default-parameter gotcha where the env var
+        # isn't set yet when the module is first imported.
+        if connect_timeout < 0:
+            connect_timeout = float(
+                os.environ.get("ARGUS_CONNECT_TIMEOUT", "30")
+            )
         self.connect_timeout = connect_timeout
         self.request_timeout = request_timeout
         self.state           = ConnectionState.DISCONNECTED
@@ -138,13 +146,39 @@ class BaseAdapter:
         if self.state == ConnectionState.CONNECTED:
             return
         self.state = ConnectionState.CONNECTING
-        try:
-            await asyncio.wait_for(self._connect(),
-                                   timeout=self.connect_timeout)
-            self.state = ConnectionState.CONNECTED
-        except Exception as e:
-            self.state = ConnectionState.ERRORED
-            raise AdapterError(f"{type(self).__name__}: connect failed: {e}") from e
+        # Retry with backoff — cold-start failures (npx cache miss,
+        # process spawn race) are transient. 3 attempts covers them
+        # without a visible pause to the operator.
+        max_attempts = 3
+        last_err: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await asyncio.wait_for(
+                    self._connect(), timeout=self.connect_timeout
+                )
+                self.state = ConnectionState.CONNECTED
+                return
+            except Exception as e:
+                last_err = e
+                self.state = ConnectionState.ERRORED
+                if attempt < max_attempts:
+                    wait = attempt * 2.0  # 2s, 4s
+                    print(f"  [adapter] connect attempt {attempt} failed "
+                          f"({type(e).__name__}) — retrying in {wait:.0f}s")
+                    # Reset state for retry
+                    try:
+                        await self._disconnect()
+                    except Exception:
+                        pass
+                    self._session = None
+                    self._exit_stack = None
+                    await asyncio.sleep(wait)
+                    self.state = ConnectionState.CONNECTING
+        self.state = ConnectionState.ERRORED
+        raise AdapterError(
+            f"{type(self).__name__}: connect failed after "
+            f"{max_attempts} attempts: {last_err}"
+        ) from last_err
 
     async def disconnect(self) -> None:
         if self.state == ConnectionState.CLOSED:

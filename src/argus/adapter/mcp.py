@@ -177,15 +177,28 @@ class MCPAdapter(BaseAdapter):
             try:
                 raw = await self._session.call_tool(tool_name, arguments=payload)
             except Exception as e:
+                # Extract FULL exception text — git-mcp-server and others
+                # embed exploitation evidence (passwd contents, command output)
+                # in the exception message. Truncating loses the proof.
+                full_err = str(e)
+                # Also check args for more detail
+                if hasattr(e, 'args') and e.args:
+                    full_err = " ".join(str(a) for a in e.args)
                 return AdapterObservation(
                     request_id=request.id, surface=surface,
-                    response=Response(status="error",
-                                      body=f"{type(e).__name__}: {e}"),
+                    response=Response(status="error", body=full_err),
                 )
             body = _concat_text_content(raw)
+            # If the result has isError=True, include the error content
+            # alongside any text content — the error message may contain
+            # exploitation evidence that detectors need to see.
+            is_err = getattr(raw, "isError", False)
+            if is_err and not body:
+                body = _concat_text_content(raw) or str(raw)
             return AdapterObservation(
                 request_id=request.id, surface=surface,
-                response=Response(status="ok", body=body, raw=raw),
+                response=Response(status="ok" if not is_err else "error",
+                                  body=body, raw=raw),
             )
 
         if surface.startswith("resource:"):

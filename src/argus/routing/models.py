@@ -123,6 +123,23 @@ _DEFAULT_CHAINS: dict[str, list[tuple[str, str]]] = {
         ("openai",    "gpt-4o-mini"),
         ("anthropic", "claude-haiku-4-5-20251001"),
     ],
+    # ── Corpus mutation jobs ──────────────────────────────────────────
+    # LLMMutator uses fast/cheap models — called per-variant per-run.
+    "rephrase_adversarial": [
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("google",    "gemini-2.5-flash"),
+        ("openai",    "gpt-4o-mini"),
+    ],
+    "authority_framing": [
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("google",    "gemini-2.5-flash"),
+        ("openai",    "gpt-4o-mini"),
+    ],
+    "indirect_reference": [
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("google",    "gemini-2.5-flash"),
+        ("openai",    "gpt-4o-mini"),
+    ],
 }
 
 

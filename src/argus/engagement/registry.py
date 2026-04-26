@@ -35,7 +35,7 @@ TargetFactory = Callable[[str], BaseAdapter]
 # Full Phase-1..Pillar roster. Individual target schemes can narrow.
 DEFAULT_AGENT_SLATE: tuple[str, ...] = (
     "SC-09", "TP-02", "ME-10", "PI-01", "MP-03",
-    "IS-04", "XE-06", "PE-07", "EP-11",
+    "IS-04", "XE-06", "PE-07", "EP-11", "CW-05", "RC-08",
 )
 
 

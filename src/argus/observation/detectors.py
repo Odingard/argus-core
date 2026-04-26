@@ -120,10 +120,14 @@ class SecretLeakDetector:
 
     DEFAULT_PATTERNS: tuple[str, ...] = (
         r"sk-(?:ant-|proj-|svcacct-)?[A-Za-z0-9_\-]{16,}",
-        r"AKIA[0-9A-Z]{16}",                                 # AWS access key
+        r"AKIA[0-9A-Z]{16}",                                  # AWS access key
         r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----",
-        r"root:[^:]*:0:0:",                                   # /etc/passwd row
-        r"uid=\d+\([^)]+\)\s+gid=\d+",                       # `id` output
+        r"root:[^:]*:0:0:",                                    # /etc/passwd (Linux+macOS)
+        r"uid=\d+\([^)]+\)\s+gid=\d+",                        # `id` output
+        r"## User Database",                                   # macOS /etc/passwd header
+        r"invalid reference format.*ARGUS_INJECT_BEACON",     # docker shell injection proof
+        r"ARGUS_INJECT_BEACON_\d+",                           # process-ID beacon
+        r"docker: invalid reference",                          # shell injection via docker
     )
 
     def inspect(

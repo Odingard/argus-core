@@ -366,6 +366,19 @@ def main() -> int:
     p.add_argument("--engage-clean", action="store_true",
                    help="Wipe the engagement output directory first.")
 
+    p.add_argument("--agents", metavar="AGENT_ID[,AGENT_ID...]",
+                   default=None,
+                   help=("Comma-separated list of agent IDs to run. "
+                         "Overrides the default full slate. "
+                         "Example: --agents EP-11 or --agents EP-11,SC-09"))
+
+    p.add_argument("--plugins", metavar="FILE[,FILE...]",
+                   default=None,
+                   help=("Comma-separated paths to plugin files containing "
+                         "custom BaseAgent subclasses. Each file's agents "
+                         "are registered and added to the engagement slate. "
+                         "Example: --plugins ./my_agent.py"))
+
     p.add_argument("--mcp", nargs=argparse.REMAINDER,
                    help=("Engage a real MCP server by command. "
                          "Everything after --mcp is passed to the "
@@ -484,6 +497,13 @@ def main() -> int:
 
     if args.engage:
         from argus.engagement import run_engagement
+        # Load plugins before engagement so custom agents are in slate.
+        if getattr(args, "plugins", None):
+            from argus.plugins import load_plugins
+            plugin_files = [p.strip() for p in args.plugins.split(",")]
+            registered = load_plugins(plugin_files)
+            if registered:
+                print(f"  [plugins] loaded: {', '.join(registered)}")
         out = args.output
         if out == "results/":
             out = "results/engagements"
@@ -491,6 +511,8 @@ def main() -> int:
             target_url=args.engage,
             output_dir=out, clean=args.engage_clean,
             verbose=args.verbose,
+            agent_slate=([a.strip().upper() for a in args.agents.split(",")]
+                         if getattr(args, "agents", None) else None),
         )
         # Auto-render report.html on success.
         if result.findings:
@@ -672,14 +694,14 @@ def main() -> int:
             target_url=d.target,
             output_dir=out, clean=args.engage_clean,
             verbose=args.verbose,
+            agent_slate=([a.strip().upper() for a in args.agents.split(",")]
+                         if getattr(args, "agents", None) else None),
         )
         if result.findings:
             from argus.report import render_html_from_dir
             rr = render_html_from_dir(result.artifact_root)
             print(f"  {GREEN}✓{RESET} report.html → {rr.output_path}")
         return 0 if result.findings else 2
-
-    # No positional → welcome / usage landing.
     print(WELCOME)
     return 0
 

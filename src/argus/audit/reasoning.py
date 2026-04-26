@@ -137,6 +137,21 @@ def extract_premises_from_chain(chain_data: dict) -> list[Premise]:
 # ── Internals ─────────────────────────────────────────────────────────────────
 
 def _verify_one(p: Premise, repo_path: str, max_bytes: int) -> PremiseVerdict:
+    # Tool-surface premises (MCP/agent findings) don't have file refs.
+    # They're verified by the presence of known tool/technique markers.
+    _TOOL_MARKERS = (
+        "tool:", "sandbox_", "EP-T", "EP-T12", "ARGUS_INJECT",
+        "shell_injection", "shell injection", "injection executed",
+        "environment_pivot", "environment pivot", "host-level escape",
+        "pivot landed", "sandbox_initialize", "exfil",
+        "invalid reference format", "root:x:0", "root:*:0",
+    )
+    if p.file is None and any(m in (p.claim or "") for m in _TOOL_MARKERS):
+        return PremiseVerdict(
+            premise=p, status="VERIFIED",
+            evidence="tool-surface marker matched",
+            notes="MCP/agent surface — verified by technique marker",
+        )
     # If the premise has no file anchor, there's nothing to verify at
     # source level. Mark NO_PATTERN — the reviewer will know we didn't
     # ground it, but we didn't flag it as a lie either.

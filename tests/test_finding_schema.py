@@ -86,8 +86,12 @@ def test_from_observation_wires_full_provenance_chain():
     assert "delete_account" in f.delta_evidence
     assert f.attack_vector == "unauthorized_tool"
     assert f.evidence_kind == "behavior_delta"
-    # Severity passed through
-    assert f.severity == "CRITICAL"
+    # Severity: this finding lacks structural proof markers and has
+    # short evidence, so the gate caps it at MEDIUM. The test verifies
+    # the gate is working, not that CRITICAL passes through.
+    assert f.severity == "MEDIUM"
+    assert f.confidence_capped == True
+    assert f.confidence_cap_reason != ""
     # Auto-generated id is stable for the same inputs
     f2 = AgentFinding.from_observation(
         verdict=v,

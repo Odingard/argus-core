@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -513,6 +514,44 @@ class SupplyChainAgent(BaseAgent):
         # 3) Write a fresh snapshot for the next engagement to diff against.
         if snapshot_out is not None:
             self._write_snapshot(surfaces, Path(snapshot_out))
+
+        # 4) Typosquat scan — check npm/PyPI for squatted versions of
+        # every package name found in tool metadata. Runs network-bound
+        # so gated by ARGUS_TYPOSQUAT=1 to avoid slow CI runs.
+        # Findings are LOW severity since presence ≠ exploitation.
+        if os.environ.get("ARGUS_TYPOSQUAT", "0") == "1":
+            try:
+                from argus.adversarial.typosquat import scan as _typosquat_scan
+                pkg_names = [
+                    s.name.replace("tool:", "").replace("_", "-")
+                    for s in surfaces
+                    if s.name.startswith("tool:")
+                ]
+                if pkg_names:
+                    result_npm = _typosquat_scan(pkg_names, registry="npm")
+                    for squat in result_npm.squats:
+                        finding = AgentFinding(
+                            id=self._fid(f"typosquat:{squat.candidate}"),
+                            agent_id=self.AGENT_ID,
+                            vuln_class=self.VULN_CLASS,
+                            severity="LOW",
+                            title=(
+                                f"Typosquat candidate: {squat.candidate} "
+                                f"(targets {squat.legit_name})"
+                            ),
+                            description=(
+                                f"Package {squat.candidate!r} exists on npm "
+                                f"and resembles {squat.legit_name!r}. "
+                                f"Potential supply chain squatting vector."
+                            ),
+                            technique="SC-T9-typosquat",
+                        )
+                        self._add_finding(finding)
+                        result.origin_findings += 1
+            except Exception as e:
+                if self.verbose:
+                    print(f"  [{self.AGENT_ID}] typosquat scan failed "
+                          f"(non-fatal): {type(e).__name__}: {e}")
 
         out_path = self.save_findings(output_dir)
         self.save_history(target_id, output_dir)

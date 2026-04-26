@@ -150,6 +150,10 @@ class CompoundChain:
     advisory_draft:  str
     cve_draft_id:    str
     finding_ids:     list[str] = field(default_factory=list)
+    # True when ≥1 step has exploitability_confirmed=True — meaning
+    # structural proof exists that the exploit actually landed.
+    # layer6 and the CVE pipeline skip chains where this is False.
+    is_validated:    bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -164,6 +168,7 @@ class CompoundChain:
             "advisory_draft":   self.advisory_draft,
             "cve_draft_id":     self.cve_draft_id,
             "finding_ids":      list(self.finding_ids),
+            "is_validated":     self.is_validated,
         }
 
 
@@ -249,10 +254,67 @@ def synthesize_compound_chain(
         advisory_draft=advisory,
         cve_draft_id=cve_id,
         finding_ids=[s.finding_id for s in steps],
+        # Chain is validated when at least one step has structural
+        # proof of exploitation. Unvalidated chains are observations
+        # not exploits — layer6 and CVE pipeline skip them.
+        is_validated=any(
+            getattr(f, "exploitability_confirmed", False)
+            for f in ordered
+        ),
     )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def compound_chain_to_l5(
+    chain: "CompoundChain",
+    target_id: str,
+) -> "L5Chains":
+    """Convert a CompoundChain to the L5Chains shape that run_layer6()
+    expects. Only validated chains produce ExploitChains — unvalidated
+    chains return an empty L5Chains so layer6 exits cleanly.
+
+    This is the bridge between the runner's chain synthesis output and
+    the CVE pipeline + intelligence flywheel."""
+    from argus.shared.models import L5Chains, ExploitChain, ExploitStep
+
+    if not chain.is_validated:
+        return L5Chains(target=target_id)
+
+    # Build one ExploitStep per chain step.
+    steps = []
+    for i, s in enumerate(chain.steps):
+        steps.append(ExploitStep(
+            step=i + 1,
+            action=f"[{s.agent_id}] {s.vuln_class}: {s.achieves}",
+            payload=s.achieves[:200] if s.achieves else None,
+            achieves=s.achieves,
+        ))
+
+    exploit = ExploitChain(
+        chain_id=chain.chain_id,
+        title=chain.title,
+        component_deviations=chain.finding_ids,
+        steps=steps,
+        poc_code=None,
+        cvss_estimate=None,
+        mitre_atlas_ttps=chain.owasp_categories,
+        preconditions=[],
+        blast_radius=chain.blast_radius,
+        entry_point="network",
+        combined_score={"CRITICAL": 9.5, "HIGH": 7.5, "MEDIUM": 5.0,
+                        "LOW": 2.5}.get(chain.severity, 5.0),
+        owasp_llm_categories=chain.owasp_categories,
+        is_validated=True,
+        validation_output=chain.advisory_draft[:200],
+    )
+    l5 = L5Chains(
+        target=target_id,
+        chains=[exploit],
+        critical_count=1 if chain.severity == "CRITICAL" else 0,
+        high_count=1 if chain.severity == "HIGH" else 0,
+    )
+    return l5
 
 def _stable_chain_id(findings: list[AgentFinding], target_id: str) -> str:
     import hashlib
@@ -273,6 +335,7 @@ def _step_achievement_phrase(f: AgentFinding) -> str:
         "RACE_CONDITION":       "parallel burst out-succeeded sequential baseline",
         "SUPPLY_CHAIN":         "untrusted-origin signal in tool catalog",
         "MODEL_EXTRACTION":     "model surfaced structural / config data",
+        "ENVIRONMENT_PIVOT":    "shell injection executed — host-level escape confirmed",
     }
     return achievements.get(f.vuln_class,
                             f.title or "behaviour delta confirmed")

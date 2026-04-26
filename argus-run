@@ -1,0 +1,29 @@
+#!/bin/bash
+# argus-run — drop-in replacement for `argus` that always runs inside
+# the locked container regardless of host Python/Node state.
+#
+# Usage:  ./argus-run engage "npx://-y target" --output /tmp/out
+#         ./argus-run --help
+#
+# Env vars are loaded from .env automatically.
+# Docker socket is mounted so target containers spin up on the host daemon.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IMAGE="argus:latest"
+
+# Auto-build if image doesn't exist or source is newer than image
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+    echo "[argus-run] Building ARGUS container (first run)..."
+    docker build -t "$IMAGE" "$SCRIPT_DIR"
+fi
+
+exec docker run --rm -it \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$SCRIPT_DIR":/app \
+    -v /tmp:/tmp \
+    --env-file "$SCRIPT_DIR/.env" \
+    --network host \
+    "$IMAGE" \
+    "$@"

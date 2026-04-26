@@ -1,9 +1,9 @@
 """
-argus/report/render.py — engagement-dir → report.html renderer.
+argus/report/render.py - engagement-dir → report.html renderer.
 
 Pure-Python, zero deps. Reads the artifact package an engagement
 wrote and emits a single self-contained HTML file with inline CSS.
-The HTML is safe to email, attach to a ticket, or open offline —
+The HTML is safe to email, attach to a ticket, or open offline -
 no external CDN, no JS runtime.
 """
 from __future__ import annotations
@@ -143,15 +143,16 @@ def render_html(
     summary_txt: str,
     by_agent:    Optional[dict] = None,
     target_url:  str = "",
+    findings:    Optional[list] = None,
 ) -> str:
     """Compose the report HTML from already-parsed artifact dicts."""
     severity     = (impact or {}).get("severity_label", "UNKNOWN")
     harm         = (impact or {}).get("harm_score", 0)
     sev_color    = _SEVERITY_COLORS.get(severity,
                                         _SEVERITY_COLORS["UNKNOWN"])
-    target_id    = (chain or {}).get("target_id") or target_url or "—"
-    chain_id     = (chain or {}).get("chain_id", "—")
-    cve_id       = (chain or {}).get("cve_draft_id", "—")
+    target_id    = (chain or {}).get("target_id") or target_url or "-"
+    chain_id     = (chain or {}).get("chain_id", "-")
+    cve_id       = (chain or {}).get("cve_draft_id", "-")
     steps        = (chain or {}).get("steps", [])
     owasp_cats   = sorted(set((chain or {}).get("owasp_categories", [])))
     data_classes = sorted((impact or {}).get("data_classes_exposed", {}))
@@ -159,8 +160,8 @@ def render_html(
     direct       = (impact or {}).get("directly_reached", [])
     transit      = (impact or {}).get("transitively_reachable", [])
     scenario     = ((impact or {}).get("max_harm_scenario", "")
-                    or "—")
-    envelope_id  = (envelope or {}).get("envelope_id", "—")
+                    or "-")
+    envelope_id  = (envelope or {}).get("envelope_id", "-")
     integrity    = (envelope or {}).get("integrity", "")
     generated    = datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S UTC")
@@ -184,7 +185,7 @@ def render_html(
             f"<td><b>{html.escape(s.get('vuln_class',''))}</b></td>"
             f"<td>{html.escape(s.get('technique',''))}</td>"
             f"<td><span class=\"tag surface\">"
-            f"{html.escape(s.get('surface','—'))}</span></td>"
+            f"{html.escape(s.get('surface','-'))}</span></td>"
             f"</tr>"
         )
     if len(steps) > 30:
@@ -194,23 +195,187 @@ def render_html(
         )
 
     reg_tags = "".join(f'<span class="tag reg">{html.escape(r)}</span>'
-                       for r in regulatory) or "—"
+                       for r in regulatory) or "-"
     data_tags = "".join(f'<span class="tag data">{html.escape(c)}</span>'
-                        for c in data_classes) or "—"
+                        for c in data_classes) or "-"
     direct_tags = "".join(
         f'<span class="tag surface">{html.escape(s)}</span>'
         for s in direct
-    ) or "—"
+    ) or "-"
     transit_tags = "".join(
         f'<span class="tag surface">{html.escape(s)}</span>'
         for s in transit
-    ) or "—"
+    ) or "-"
+
+    # ── Findings table ────────────────────────────────────────────
+    findings_html = ""
+    if findings:
+        _SEV_BADGE = {
+            "CRITICAL": "background:#b91c1c;color:#fff",
+            "HIGH":     "background:#c2410c;color:#fff",
+            "MEDIUM":   "background:#d97706;color:#fff",
+            "LOW":      "background:#15803d;color:#fff",
+            "INFO":     "background:#374151;color:#fff",
+        }
+        rows = ""
+        for f in sorted(findings,
+                        key=lambda x: ["CRITICAL","HIGH","MEDIUM","LOW","INFO"]
+                        .index(x.get("severity","INFO"))
+                        if x.get("severity","INFO") in
+                        ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] else 5):
+            sev = f.get("severity", "INFO")
+            confirmed = f.get("exploitability_confirmed", False)
+            capped    = f.get("confidence_capped", False)
+            badge_style = _SEV_BADGE.get(sev, _SEV_BADGE["INFO"])
+            confirm_icon = "✓" if confirmed else ("~" if not capped else "⚑")
+            confirm_title = ("Confirmed" if confirmed
+                             else ("Capped - needs structural proof" if capped
+                                   else "Unconfirmed"))
+            evidence_short = html.escape(
+                (f.get("delta_evidence") or "")[:120]
+            )
+            rows += (
+                f"<tr>"
+                f"<td><span style='{badge_style};"
+                f"padding:2px 6px;border-radius:3px;font-size:11px;"
+                f"font-weight:700'>{html.escape(sev)}</span></td>"
+                f"<td title='{confirm_title}' style='text-align:center;"
+                f"font-size:14px'>{'🟢' if confirmed else '🟡' if not capped else '🔴'}"
+                f"</td>"
+                f"<td><b>{html.escape(f.get('agent_id',''))}</b></td>"
+                f"<td>{html.escape(f.get('vuln_class',''))}</td>"
+                f"<td>{html.escape(f.get('surface','') or '-')}</td>"
+                f"<td style='font-size:11px;color:#6b7280'>{evidence_short}</td>"
+                f"</tr>"
+            )
+        findings_html = f"""
+<h2 style="margin-top:2rem">Findings ({len(findings)})</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px">
+<thead><tr style="background:#1f2937;color:#fff">
+  <th style="padding:6px 8px;text-align:left">Severity</th>
+  <th style="padding:6px 8px">✓</th>
+  <th style="padding:6px 8px;text-align:left">Agent</th>
+  <th style="padding:6px 8px;text-align:left">Vuln Class</th>
+  <th style="padding:6px 8px;text-align:left">Surface</th>
+  <th style="padding:6px 8px;text-align:left">Evidence</th>
+</tr></thead>
+<tbody style="border:1px solid #e5e7eb">{rows}</tbody>
+</table>
+<p style="font-size:11px;color:#6b7280;margin-top:4px">
+  🟢 Confirmed exploitation &nbsp; | &nbsp;
+  🟡 Unconfirmed &nbsp; | &nbsp;
+  🔴 Capped (needs structural proof)
+</p>"""
+
+    # ── Dual-axis consent bypass visualization ────────────────────
+    # Scatter plot: X = human approval probability, Y = impact score
+    # Quadrant IV (high approval, high impact) = bypass zone
+    consent_viz_html = ""
+    try:
+        from argus.consent.bypass_scorer import score_consent_bypass
+        probe_data = []
+        for f in (findings or []):
+            surface = f.get("surface", "") or ""
+            tool = surface.split(":")[-1] if ":" in surface else surface
+            params = {"path": f.get("delta_evidence", "")[:80] or ""}
+            score = score_consent_bypass(tool or "unknown", params)
+            probe_data.append((
+                f.get("title", "")[:40],
+                score.approval_score,
+                score.impact_score,
+                score.category,
+                score.bypass_score,
+            ))
+
+        if probe_data:
+            # Build SVG scatter plot
+            W, H = 480, 360
+            PAD = 60
+            plot_w = W - PAD * 2
+            plot_h = H - PAD * 2
+
+            def _px(ax): return int(PAD + ax * plot_w)
+            def _py(ay): return int(H - PAD - ay * plot_h)
+
+            _COLORS = {
+                "BYPASS": "#b91c1c",
+                "BORDERLINE": "#d97706",
+                "FLAGGED": "#1d4ed8",
+                "BENIGN": "#15803d",
+            }
+
+            dots = ""
+            for label, appr, imp, cat, bypass in probe_data:
+                cx = _px(appr)
+                cy = _py(imp)
+                color = _COLORS.get(cat, "#6b7280")
+                safe_label = html.escape(label)
+                dots += (
+                    f'<circle cx="{cx}" cy="{cy}" r="8" fill="{color}" '
+                    f'opacity="0.85" stroke="#fff" stroke-width="1">'
+                    f'<title>{safe_label}\nApproval: {appr:.0%} | '
+                    f'Impact: {imp:.0%} | Score: {bypass:.2f} ({cat})</title>'
+                    f'</circle>'
+                )
+
+            # Bypass zone rectangle (Q4: high approval, high impact)
+            zone_x = _px(0.6)
+            zone_w = _px(1.0) - zone_x
+            zone_y = PAD
+            zone_h = _py(0.6) - PAD
+
+            # Build SVG scatter plot using concatenation (avoids f-string unicode issues)
+            x_ticks = "".join(
+                f'<text x="{_px(v/10)}" y="{H-PAD+14}" text-anchor="middle"'
+                f' font-size="9" fill="#9ca3af">{v*10:.0f}%</text>'
+                for v in range(0, 11, 2))
+            y_ticks = "".join(
+                f'<text x="{PAD-8}" y="{_py(v/10)+4}" text-anchor="end"'
+                f' font-size="9" fill="#9ca3af">{v*10:.0f}%</text>'
+                for v in range(0, 11, 2))
+            legend_items = "".join(
+                f'<circle cx="{W-PAD-78}" cy="{PAD+14+i*17}" r="5" fill="{c}"/>'
+                f'<text x="{W-PAD-68}" y="{PAD+18+i*17}" font-size="9" fill="#374151">{k}</text>'
+                for i, (k, c) in enumerate(_COLORS.items()))
+            svg_parts = [
+                f'<svg viewBox="0 0 {W} {H}" width="{W}" height="{H}"',
+                ' style="border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"',
+                ' xmlns="http://www.w3.org/2000/svg">',
+                f'<rect x="{zone_x}" y="{zone_y}" width="{zone_w}" height="{zone_h}"',
+                ' fill="#fef2f2" stroke="#fca5a5" stroke-width="1" stroke-dasharray="4"/>',
+                f'<text x="{zone_x+6}" y="{zone_y+14}" font-size="10" fill="#b91c1c"',
+                ' font-weight="bold">BYPASS ZONE</text>',
+                f'<line x1="{PAD}" y1="{PAD}" x2="{PAD}" y2="{H-PAD}"',
+                ' stroke="#9ca3af" stroke-width="1"/>',
+                f'<line x1="{PAD}" y1="{H-PAD}" x2="{W-PAD}" y2="{H-PAD}"',
+                ' stroke="#9ca3af" stroke-width="1"/>',
+                f'<text x="{W//2}" y="{H-10}" text-anchor="middle"',
+                ' font-size="11" fill="#374151">Human Approval Probability</text>',
+                f'<text x="14" y="{H//2}" text-anchor="middle"',
+                f' font-size="11" fill="#374151" transform="rotate(-90,14,{H//2})">',
+                'Attack Impact</text>',
+                x_ticks, y_ticks, dots,
+                f'<rect x="{W-PAD-90}" y="{PAD}" width="84" height="80"',
+                ' fill="white" stroke="#e5e7eb" rx="3"/>',
+                legend_items, '</svg>',
+            ]
+            svg_str = "".join(svg_parts)
+            consent_viz_html = (
+                '<h2 style="margin-top:2rem">Consent UI Bypass Analysis</h2>'
+                '<p style="font-size:12px;color:#6b7280;margin-bottom:8px">'
+                'Dual-axis scoring: X = human approval probability, Y = attack impact. '
+                'Findings in the <span style="color:#b91c1c;font-weight:700">red zone</span> '
+                '(upper-right) are consent bypass candidates - a human would approve them '
+                'without recognizing the malicious effect.</p>' + svg_str
+            )
+    except Exception:
+        consent_viz_html = ""
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ARGUS Report — {html.escape(target_id)}</title>
+<title>ARGUS Report - {html.escape(target_id)}</title>
 <style>{_CSS}</style>
 </head><body><div class="wrap">
 
@@ -218,7 +383,7 @@ def render_html(
   <div>
     <h1>ARGUS engagement report</h1>
     <div class="sub">Target: <b>{html.escape(target_id)}</b></div>
-    <div class="sub">Chain: {html.escape(chain_id)} · CVE-draft: {html.escape(cve_id)}</div>
+    <div class="sub">Chain: {html.escape(chain_id)}  |  CVE-draft: {html.escape(cve_id)}</div>
   </div>
   <div style="text-align:right">
     <span class="badge" style="background:{sev_color}">
@@ -241,11 +406,11 @@ def render_html(
 <h2>OWASP Agentic AI Top-10 coverage</h2>
 <div>
 {''.join(f'<span class="tag owasp" style="font-size:13px">{html.escape(c)}</span> '
-         for c in owasp_cats) or '—'}
+         for c in owasp_cats) or '-'}
 </div>
 
 <h2>Per-agent landings</h2>
-<div class="agents">{agent_cards or "—"}</div>
+<div class="agents">{agent_cards or "-"}</div>
 
 <h2>Kill-chain steps (MAAC-ordered)</h2>
 <table class="step-table"><thead><tr>
@@ -273,11 +438,13 @@ def render_html(
 {html.escape(summary_txt)}</pre>
 
 <footer>
-  Generated by ARGUS · {html.escape(generated)} ·
+  Generated by ARGUS  |  {html.escape(generated)}  | 
   <a href="https://github.com/crewAIInc/crewAI">
     Autonomous AI Red Team Platform</a>
 </footer>
 
+{findings_html}
+{consent_viz_html}
 </div></body></html>
 """
 
@@ -293,23 +460,34 @@ def render_html_from_dir(
     impact   = _read_json(engagement_dir / "impact.json") or {}
     envelope = _read_json(engagement_dir / "alec_envelope.json")
     summary  = _read_text(engagement_dir / "SUMMARY.txt")
+    ledger   = _read_json(engagement_dir / "seed_ledger.json") or {}
 
-    # Reconstruct by_agent from finding subdirs.
+    # Append pin command to summary so it's visible in the report.
+    if ledger.get("pin_command") and summary:
+        summary = (summary or "") + (
+            f"\n\nReplay: {ledger['pin_command']}"
+        )
+
+    # Collect all findings for the findings table.
+    all_findings: list[dict] = []
     by_agent: dict[str, int] = {}
     findings_root = engagement_dir / "findings"
     if findings_root.exists():
-        for agent_dir in findings_root.iterdir():
+        for agent_dir in sorted(findings_root.iterdir()):
             if not agent_dir.is_dir():
                 continue
             for json_file in agent_dir.glob("*_findings.json"):
                 data = _read_json(json_file) or {}
                 aid = data.get("agent_id") or agent_dir.name.upper()
+                flist = data.get("findings", [])
                 by_agent[aid] = by_agent.get(aid, 0) + int(
                     data.get("total_findings", 0))
+                all_findings.extend(flist)
 
     html_out = render_html(
         chain=chain, impact=impact, envelope=envelope,
         summary_txt=summary, by_agent=by_agent,
+        findings=all_findings,
     )
 
     out_path = (Path(output).resolve() if output

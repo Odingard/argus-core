@@ -5,21 +5,22 @@ Model routing: Haiku for L2/L3 generation, Opus for L5 synthesis only.
 """
 
 # ── Model routing ─────────────────────────────────────────────────────────────
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
-OPUS_MODEL  = "claude-opus-4-7"
-GPT_PRO_MODEL = "gpt-5.4-pro"
-GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
+HAIKU_MODEL   = "claude-haiku-4-5-20251001"
+OPUS_MODEL    = "claude-opus-4-5"
+SONNET_MODEL  = "claude-sonnet-4-20250514"
+GPT_PRO_MODEL = "gpt-4o"           # alias — route via ArgusClient
+GEMINI_PRO_MODEL = "gemini-1.5-pro"
 
-# L2 Graph Surface Analyzer uses GPT-5.4-Pro natively for large context structured reasoning
-L2_MODEL    = GPT_PRO_MODEL
-# L3 Weaponization uses Gemini-3.1-Pro for abstract code evaluation
-L3_MODEL    = GEMINI_PRO_MODEL
-# L4 Live Swarm uses Haiku for rapid volume testing
-L4_MODEL    = HAIKU_MODEL
-# L5 Exploit Synthesis uses Opus-4-7 for maximum precision intelligence synthesis
-L5_MODEL    = OPUS_MODEL
-# L6 Advisory Generation uses Haiku
-L6_MODEL    = HAIKU_MODEL
+# L2 Graph Surface Analyzer — large context structured reasoning
+L2_MODEL = SONNET_MODEL
+# L3 Weaponization — abstract code evaluation
+L3_MODEL = GEMINI_PRO_MODEL
+# L4 Live Swarm — rapid volume testing
+L4_MODEL = HAIKU_MODEL
+# L5 Exploit Synthesis — maximum precision intelligence synthesis
+L5_MODEL = OPUS_MODEL
+# L6 Advisory Generation
+L6_MODEL = HAIKU_MODEL
 
 
 # ── Layer 2 Prompts ───────────────────────────────────────────────────────────

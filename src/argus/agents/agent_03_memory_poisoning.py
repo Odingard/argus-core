@@ -186,19 +186,21 @@ class MemoryPoisoningAgent(BaseAgent):
         output_dir:    str,
         surface:       str = "chat",
         sample_n:      int = 6,
-        sample_seed:   int = 2029,
+        sample_seed:   int = 0,  # 0 = entropy
         max_failures:  int = 5,
     ) -> list[AgentFinding]:
         self._print_header(target_id)
         result = MemoryAttackResult(target_id=target_id)
 
-        # 1) Sample poisoning variants.
+        # 1) Sample poisoning variants — entropy seed so each run
+        # draws a different poisoning template set.
+        import os as _os
+        effective_seed = sample_seed if sample_seed != 0 else int.from_bytes(_os.urandom(4), "big")
         variants = self.corpus.sample(
-            sample_n, category="memory_poisoning", seed=sample_seed,
+            sample_n, category="memory_poisoning", seed=effective_seed,
         )
         if not variants:
-            print(f"  [{self.AGENT_ID}] corpus has no memory_poisoning "
-                  f"variants at seed={sample_seed}")
+            print(f"  [{self.AGENT_ID}] corpus has no memory_poisoning variants")
             self.save_findings(output_dir)
             return self.findings
 
