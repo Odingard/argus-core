@@ -79,6 +79,12 @@ class LLMMutator:
             self.cache_dir = _default_cache_dir()
 
     def apply(self, text: str) -> str:
+        # Offline gate: when no responder is injected and we're in
+        # offline mode, return the seed unchanged so the static corpus
+        # still ships without making real network calls. Tests that
+        # inject a mock responder are unaffected.
+        if self.responder is None and os.environ.get("ARGUS_OFFLINE") == "1":
+            return text
         key = _cache_key(self.seed_index, text, self.job)
         cached = self._cache_get(key)
         if cached is not None:
