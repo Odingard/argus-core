@@ -61,6 +61,16 @@ from argus.observation import (
     BehaviorDelta, DeltaKind, ObservationEngine, Verdict, default_detectors,
 )
 from argus.session import Session
+from argus.swarm import (
+    ProbeResult as SwarmProbeResult,
+    ProbeStatus as SwarmProbeStatus,
+    Surface as SwarmSurface,
+    SwarmAgentMixin,
+    SwarmConfig,
+    Technique as SwarmTechnique,
+    TunerConfig,
+    swarm_mode_enabled,
+)
 
 
 # ── Credential / secret pattern library ─────────────────────────────────────
@@ -1242,7 +1252,7 @@ class PivotRunResult:
     findings:         list[AgentFinding] = field(default_factory=list)
 
 
-class EnvironmentPivotAgent(BaseAgent):
+class EnvironmentPivotAgent(SwarmAgentMixin, BaseAgent):
     """
     Phase 8 Agent 11.
 
@@ -1262,9 +1272,20 @@ class EnvironmentPivotAgent(BaseAgent):
     the response for credential patterns or pivot-signature shapes,
     emit a finding if something landed that wasn't in the baseline
     response. No LLM in the validation path — the spec rule holds.
+
+    Swarm mode (2026-04-26): set ARGUS_SWARM_MODE=1 to dispatch the
+    probe phase through SwarmProbeEngine via SwarmAgentMixin. The
+    catalog-audit phase still runs synchronously (it has no I/O).
+    Probes serialize on the shared adapter via an asyncio.Lock to
+    keep stdio framing intact; the win is timeout isolation, exception
+    isolation, kill propagation across the Gang-of-Thirty, and a
+    single source of truth for concurrency tuning. Real concurrency
+    speedup arrives when the adapter supports concurrent in-flight
+    requests (multi-tenant HTTP / k8s MCP fleets).
     """
 
     AGENT_ID    = "EP-11"
+    agent_id    = "EP-11"   # SwarmAgentMixin contract
     AGENT_NAME  = "Environment Pivoting Agent"
     VULN_CLASS  = "ENVIRONMENT_PIVOT"
     TECHNIQUES  = list(TECHNIQUES.keys())
@@ -1327,6 +1348,15 @@ class EnvironmentPivotAgent(BaseAgent):
         output_dir:   str,
         max_failures: int = 5,
     ) -> list[AgentFinding]:
+        # Swarm-mode dispatch (additive — gated by ARGUS_SWARM_MODE=1).
+        # Falls through to the legacy sequential path when disabled.
+        if swarm_mode_enabled():
+            return await self._run_async_swarm(
+                target_id=target_id,
+                output_dir=output_dir,
+                max_failures=max_failures,
+            )
+
         self._print_header(target_id)
         result = PivotRunResult(target_id=target_id)
 
@@ -1440,9 +1470,11 @@ class EnvironmentPivotAgent(BaseAgent):
             # BrokenResourceError, ConnectionResetError, or any transport
             # teardown failure — findings confirmed in memory MUST be
             # persisted before this propagates. Never lose a CRITICAL.
+            import traceback as _tb
             print(f"  [{self.AGENT_ID}] adapter error during probe loop "
-                  f"({type(e).__name__}) — persisting {len(self.findings)} "
+                  f"({type(e).__name__}: {e}) — persisting {len(self.findings)} "
                   f"in-flight finding(s) before raising")
+            _tb.print_exc()
         finally:
             # Final stderr drain — catch evidence that arrived after
             # per-probe reads due to node process write timing.
@@ -1478,6 +1510,235 @@ class EnvironmentPivotAgent(BaseAgent):
         return self.findings
 
     # ── Steps ────────────────────────────────────────────────────────────
+
+    # ── Swarm path (additive — gated by ARGUS_SWARM_MODE=1) ───────────────
+
+    async def _run_async_swarm(
+        self,
+        *,
+        target_id:    str,
+        output_dir:   str,
+        max_failures: int = 5,
+    ) -> list[AgentFinding]:
+        """SwarmProbeEngine-driven variant of run_async.
+
+        Catalog-audit techniques run synchronously (no I/O). Probe
+        techniques are dispatched through SwarmAgentMixin.run_swarm,
+        which handles concurrency, kill propagation, max_confirms
+        early-stop, and per-probe timeout isolation.
+        """
+        self._print_header(target_id)
+        self._swarm_print_mode_banner()
+        result = PivotRunResult(target_id=target_id)
+
+        try:
+            surfaces = await self._enumerate_surfaces()
+        except AdapterError as e:
+            print(f"  [{self.AGENT_ID}] enumerate failed: {e}")
+            self.save_findings(output_dir)
+            return self.findings
+
+        result.surfaces_audited = len(surfaces)
+
+        try:
+            allowed_roots = await self._discover_roots(surfaces)
+        except Exception:
+            allowed_roots = ()
+        ctx = ProbeContext(allowed_roots=allowed_roots)
+
+        # 1) Catalog audits — same as legacy path (no I/O).
+        for technique_id in self.techniques_to_fire:
+            tech = TECHNIQUES[technique_id]
+            if tech.kind != "catalog_audit":
+                continue
+            for surface in surfaces:
+                if tech.surface_pred and tech.surface_pred(surface):
+                    finding = self._catalog_finding(
+                        technique_id=technique_id, tech=tech,
+                        surface=surface, target_id=target_id,
+                    )
+                    self._add_finding(finding)
+                    result.findings.append(finding)
+                    result.pivots_landed += 1
+
+        # 2) Probe techniques — dispatched through the swarm engine.
+        self.max_confirms = int(os.environ.get("ARGUS_EP11_MAX_CONFIRMS", "3"))
+        shared_adapter = self.adapter_factory()
+        try:
+            async with shared_adapter:
+                # TIP — auto-initialize before probing
+                try:
+                    from argus.engagement.target_init import run_target_init
+                    tip = await run_target_init(shared_adapter)
+                    if not tip.skipped and tip.success:
+                        print(f"  [EP-11/TIP] {tip.tool_called!r} → ready")
+                except Exception:
+                    pass
+
+                # Stash the per-run state the swarm probe-fn needs.
+                self._swarm_target_id     = target_id
+                self._swarm_ctx           = ctx
+                self._swarm_shared_adapter = shared_adapter
+                self._swarm_adapter_lock  = asyncio.Lock()
+                self._swarm_run_result    = result
+                self._swarm_max_failures  = max_failures
+                self._swarm_consecutive_failures = 0
+
+                async for _ in self.run_swarm(surfaces):
+                    pass  # all recording happens in on_confirm + run_probe
+
+        except Exception as e:
+            import traceback as _tb
+            print(f"  [{self.AGENT_ID}] adapter error during swarm probe loop "
+                  f"({type(e).__name__}: {e}) — persisting "
+                  f"{len(self.findings)} in-flight finding(s) before raising")
+            _tb.print_exc()
+        finally:
+            try:
+                if hasattr(shared_adapter, "read_stderr_all"):
+                    final_stderr = shared_adapter.read_stderr_all()
+                    if final_stderr:
+                        from argus.evidence.extractor import (
+                            extract_evidence, format_for_report
+                        )
+                        final_ev = extract_evidence("", final_stderr)
+                        if final_ev.proof_grade in ("IRREFUTABLE", "STRONG"):
+                            for f in self.findings:
+                                if getattr(f, "exploitability_confirmed", False):
+                                    if getattr(f, "proof_grade", "") != "IRREFUTABLE":
+                                        upgraded = format_for_report(final_ev)
+                                        if upgraded and "No exploitable" not in upgraded:
+                                            existing = getattr(f, "delta_evidence", "") or ""
+                                            f.delta_evidence = (
+                                                existing + "\n[FINAL DRAIN]\n" + upgraded
+                                            )[:1500]
+                                            f.proof_grade = final_ev.proof_grade
+            except Exception:
+                pass
+            out_path = self.save_findings(output_dir)
+            self.save_history(target_id, output_dir)
+            summary = self.last_swarm_summary
+            print(f"\n  [{self.AGENT_ID}/SWARM] complete — "
+                  f"{result.surfaces_audited} surfaces, "
+                  f"{summary.completed if summary else 0} probes completed, "
+                  f"{summary.confirmed if summary else 0} confirmed, "
+                  f"{summary.errored if summary else 0} errored, "
+                  f"elapsed={summary.elapsed_s if summary else 0:.2f}s")
+            if self.findings:
+                print(f"  [{self.AGENT_ID}/SWARM] findings → {out_path}")
+        return self.findings
+
+    def _swarm_print_mode_banner(self) -> None:
+        print(f"  [{self.AGENT_ID}/SWARM] ARGUS_SWARM_MODE=1 — "
+              f"dispatching probe phase through SwarmProbeEngine")
+
+    # ── SwarmAgentMixin contract ─────────────────────────────────────────
+
+    def list_techniques(self):
+        """Probe-only techniques — catalog audits run before swarm dispatch."""
+        out: list[SwarmTechnique] = []
+        for technique_id in self.techniques_to_fire:
+            tech = TECHNIQUES[technique_id]
+            if tech.kind != "probe":
+                continue
+            out.append(SwarmTechnique(
+                id=technique_id, family=tech.family,
+                metadata={"ep11_tech": tech},
+            ))
+        return out
+
+    def list_surfaces(self, all_surfaces):
+        """Sort surfaces by injectability priority and wrap them for the swarm."""
+        sorted_surfaces = sorted(all_surfaces, key=self._surface_priority)
+        return [
+            SwarmSurface(
+                id=getattr(s, "name", f"surface-{i}"),
+                target=self._swarm_target_id,
+                metadata={"ep11_surface": s, "priority_index": i},
+            )
+            for i, s in enumerate(sorted_surfaces)
+        ]
+
+    def swarm_config(self) -> SwarmConfig:
+        """Tuned for stdio MCP targets — low concurrency, longer timeout."""
+        return SwarmConfig(
+            tuner=TunerConfig(
+                initial=int(os.environ.get("ARGUS_SWARM_CONCURRENCY", "8")),
+                target_p95_ms=2000,
+            ),
+            stop_on_first_confirm=False,  # max_confirms drives the stop
+            per_probe_timeout_s=float(
+                os.environ.get("ARGUS_CONNECT_TIMEOUT", "60")
+            ),
+        )
+
+    async def run_probe(
+        self, technique: SwarmTechnique, surface: SwarmSurface,
+    ) -> SwarmProbeResult:
+        """Adapt EP-11's _fire_probe into the swarm's ProbeFn contract."""
+        tech = technique.metadata["ep11_tech"]
+        ep11_surface = surface.metadata["ep11_surface"]
+
+        if tech.surface_match and not tech.surface_match(ep11_surface):
+            return SwarmProbeResult(
+                technique_id=technique.id, surface_id=surface.id,
+                status=SwarmProbeStatus.NEGATIVE,
+                metadata={"reason": "surface_match_filter"},
+            )
+
+        # Serialize on the shared stdio adapter — concurrent writes would
+        # interleave JSON-RPC framing. Multi-tenant adapters can override
+        # by passing a no-op lock via _swarm_adapter_lock injection.
+        async with self._swarm_adapter_lock:
+            try:
+                fired = await self._fire_probe(
+                    technique_id=technique.id, tech=tech,
+                    surface=ep11_surface, target_id=self._swarm_target_id,
+                    ctx=self._swarm_ctx,
+                    shared_adapter=self._swarm_shared_adapter,
+                )
+            except AdapterError as e:
+                self._swarm_consecutive_failures += 1
+                self._swarm_run_result.skipped_errors += 1
+                return SwarmProbeResult(
+                    technique_id=technique.id, surface_id=surface.id,
+                    status=SwarmProbeStatus.ERROR,
+                    error=f"AdapterError: {e}",
+                )
+
+        self._swarm_consecutive_failures = 0
+        self._swarm_run_result.probes_fired += 1
+        confirmed = any(
+            getattr(f, "exploitability_confirmed", False)
+            for (f, _v) in fired
+        )
+        return SwarmProbeResult(
+            technique_id=technique.id, surface_id=surface.id,
+            status=(
+                SwarmProbeStatus.CONFIRMED if confirmed
+                else SwarmProbeStatus.NEGATIVE
+            ),
+            confirmed=confirmed,
+            metadata={"ep11_findings": fired},
+        )
+
+    async def on_confirm(self, result: SwarmProbeResult) -> None:
+        """Record findings + run evolve hooks for confirmed probes."""
+        fired = result.metadata.get("ep11_findings", [])
+        ep11_surface = None
+        for (finding, verdict) in fired:
+            self._add_finding(finding)
+            self._swarm_run_result.findings.append(finding)
+            self._swarm_run_result.pivots_landed += 1
+            try:
+                self._maybe_evolve(
+                    finding, verdict, result.technique_id,
+                    ep11_surface, self._swarm_target_id,
+                )
+            except Exception:
+                pass
+
+    # ── Legacy steps (sequential path) ───────────────────────────────────
 
     async def _enumerate_surfaces(self) -> list[Surface]:
         adapter = self.adapter_factory()
@@ -1761,7 +2022,14 @@ class EnvironmentPivotAgent(BaseAgent):
     )
 
     def _surface_priority(self, surface) -> int:
-        """Lower number = higher priority = probed first."""
+        """Lower number = higher priority = probed first.
+
+        Returns 0 for high-injectability surfaces (init/exec/run/...),
+        2 for low-injectability (status/log/show/...), and 1 (medium)
+        for everything else. The medium default is critical: returning
+        None here breaks `sorted()` with TypeError when surfaces don't
+        match either keyword group (e.g. prompt surfaces, custom tools).
+        """
         name = (surface.name or "").lower()
         for kw in self._HIGH_PRIORITY_KEYWORDS:
             if kw in name:
@@ -1769,8 +2037,20 @@ class EnvironmentPivotAgent(BaseAgent):
         for kw in self._LOW_PRIORITY_KEYWORDS:
             if kw in name:
                 return 2
+        return 1
 
     def _judge_findings(
+        self,
+        *,
+        technique_id: str,
+        tech,
+        surface,
+        target_id: str,
+        payload,
+        sess,
+        response_text: str,
+        baseline: str,
+        had_regex_hit: bool,
     ) -> list[tuple]:
         """Evaluate the probe's response against every policy
         applicable to this EP-11 technique. Returns (AgentFinding,

@@ -43,6 +43,16 @@ from argus.agents.base import AgentFinding, BaseAgent
 from argus.corpus_attacks import Corpus, EvolveCorpus
 from argus.observation import ObservationEngine, default_detectors
 from argus.session import Session
+from argus.swarm import (
+    ProbeResult as SwarmProbeResult,
+    ProbeStatus as SwarmProbeStatus,
+    Surface as SwarmSurface,
+    SwarmAgentMixin,
+    SwarmConfig,
+    Technique as SwarmTechnique,
+    TunerConfig,
+    swarm_mode_enabled,
+)
 
 if TYPE_CHECKING:
     # Heavy/new imports used only as type annotations. Keeping them
@@ -87,7 +97,7 @@ class HunterRunResult:
     skipped_errors:      int = 0
 
 
-class PromptInjectionHunter(BaseAgent):
+class PromptInjectionHunter(SwarmAgentMixin, BaseAgent):
     """
     Phase 1 Agent 1.
 
@@ -110,9 +120,16 @@ class PromptInjectionHunter(BaseAgent):
     The agent_factory is a callable rather than an adapter instance so
     each variant gets a fresh connection — important because some
     attacks mutate session state and we need isolation between attempts.
+
+    Swarm mode (2026-04-26): set ARGUS_SWARM_MODE=1 to dispatch the
+    variant fan-out through the SwarmProbeEngine via SwarmAgentMixin.
+    Each variant becomes a Technique; the surface is wrapped as a
+    Surface; variants fire concurrently up to swarm_config().tuner.initial.
+    The legacy sequential path is preserved as the fall-through.
     """
 
     AGENT_ID    = "PI-01"
+    agent_id    = "PI-01"   # SwarmAgentMixin contract
     AGENT_NAME  = "Prompt Injection Hunter"
     VULN_CLASS  = "PROMPT_INJECTION"
     TECHNIQUES  = ["PI-T1-direct", "PI-T2-encoded", "PI-T3-extraction",
@@ -196,6 +213,20 @@ class PromptInjectionHunter(BaseAgent):
         Run the hunter against a single target surface. Returns
         AgentFindings; also writes them to disk via save_findings.
         """
+        # Swarm-mode dispatch (additive — gated by ARGUS_SWARM_MODE=1).
+        # Falls through to the legacy sequential path when disabled.
+        if swarm_mode_enabled():
+            return await self._run_async_swarm(
+                target_id=target_id,
+                output_dir=output_dir,
+                category=category,
+                tag=tag,
+                surface=surface,
+                sample_n=sample_n,
+                sample_seed=sample_seed,
+                max_failures=max_failures,
+            )
+
         self._print_header(target_id)
 
         # 1) Baseline — benign probes against a fresh adapter session.
@@ -283,6 +314,227 @@ class PromptInjectionHunter(BaseAgent):
               f"{result.skipped_errors} adapter errors")
         print(f"  [{self.AGENT_ID}] findings → {out_path}")
         return self.findings
+
+    # ── Swarm path (additive — gated by ARGUS_SWARM_MODE=1) ──────────────
+
+    async def _run_async_swarm(
+        self,
+        *,
+        target_id:    str,
+        output_dir:   str,
+        category:     str = "instruction_override",
+        tag:          Optional[str] = None,
+        surface:      str = "chat",
+        sample_n:     int = 30,
+        sample_seed:  int = 0,
+        max_failures: int = 5,
+    ) -> list[AgentFinding]:
+        """SwarmProbeEngine-driven variant of run_async.
+
+        Each variant becomes a Technique; the user-supplied surface is
+        wrapped as a Surface; variants fire concurrently up to
+        swarm_config().tuner.initial. Baseline collection still runs
+        sequentially first (it's the reference for the observation
+        engine's behaviour-delta detector and must complete before
+        any attack fires).
+
+        Confirmed findings drive on_confirm(), which both records the
+        finding and (Pillar-2 Raptor Cycle) calls
+        evolve_corpus.add_template so the next engagement starts with
+        a richer corpus.
+        """
+        self._print_header(target_id)
+        self._swarm_print_mode_banner()
+
+        # 1) Baseline — same as legacy, must run before any attack.
+        baseline_transcript = await self._collect_baseline(surface=surface)
+
+        # 2) Sample variants — same logic as legacy.
+        if hasattr(self, "eng_seed") and self.eng_seed is not None:
+            effective_seed = self.eng_seed.interaction_seed(self.AGENT_ID, 0)
+        elif sample_seed != 0:
+            effective_seed = sample_seed
+        else:
+            effective_seed = int.from_bytes(os.urandom(4), "big")
+        variants = self.corpus.sample(
+            sample_n,
+            category=category,
+            tag=tag,
+            surface=surface if not (surface or "").startswith("chat") else None,
+            seed=effective_seed,
+        )
+        if not variants:
+            print(f"  [{self.AGENT_ID}] no variants for filter "
+                  f"category={category} tag={tag} surface={surface}")
+            self.save_findings(output_dir)
+            return self.findings
+
+        # 3) Stash per-run state the swarm probe-fn needs. Variants are
+        # the unit of parallel work; the surface is fixed for this run.
+        self._swarm_target_id           = target_id
+        self._swarm_surface_name        = surface
+        self._swarm_baseline_transcript = baseline_transcript
+        self._swarm_variants_by_id      = {
+            self._variant_technique_id(v): v for v in variants
+        }
+        self._swarm_run_result          = HunterRunResult(
+            target_id=target_id, surface=surface,
+        )
+        self._swarm_consecutive_failures = 0
+        self._swarm_max_failures         = max_failures
+
+        # 4) Drain the swarm. on_confirm() handles per-finding evolve
+        # and finding registration. We only iterate to keep the engine
+        # producing.
+        try:
+            async for _ in self.run_swarm([surface]):
+                pass
+        except Exception as e:
+            import traceback as _tb
+            print(f"  [{self.AGENT_ID}] swarm probe loop error "
+                  f"({type(e).__name__}: {e}) — persisting "
+                  f"{len(self.findings)} finding(s) before raising")
+            _tb.print_exc()
+
+        # 5) Persist + summarise.
+        out_path = self.save_findings(output_dir)
+        self.save_history(target_id, output_dir)
+        summary = self.last_swarm_summary
+        print(f"\n  [{self.AGENT_ID}/SWARM] complete — "
+              f"{self._swarm_run_result.variants_fired} variants fired, "
+              f"{self._swarm_run_result.variants_validated} validated, "
+              f"{self._swarm_run_result.skipped_errors} adapter errors, "
+              f"elapsed={summary.elapsed_s if summary else 0:.2f}s")
+        if self.findings:
+            print(f"  [{self.AGENT_ID}/SWARM] findings → {out_path}")
+        return self.findings
+
+    def _swarm_print_mode_banner(self) -> None:
+        print(f"  [{self.AGENT_ID}/SWARM] ARGUS_SWARM_MODE=1 — "
+              f"dispatching variant fan-out through SwarmProbeEngine")
+
+    @staticmethod
+    def _variant_technique_id(variant) -> str:
+        """Stable, unique technique id for a sampled variant."""
+        return f"{variant.template_id}:{variant.mutator}:{variant.fingerprint}"
+
+    # ── SwarmAgentMixin contract ─────────────────────────────────────────
+
+    def list_techniques(self):
+        """Each sampled variant becomes one Technique — the unit of parallel work."""
+        out: list[SwarmTechnique] = []
+        for tech_id, variant in self._swarm_variants_by_id.items():
+            out.append(SwarmTechnique(
+                id=tech_id,
+                family="prompt-injection",
+                metadata={"pi01_variant": variant},
+            ))
+        return out
+
+    def list_surfaces(self, all_surfaces):
+        """PI-01 fires every variant against the same single surface (default 'chat')."""
+        # all_surfaces is just [self._swarm_surface_name] from the caller.
+        return [
+            SwarmSurface(
+                id=name,
+                target=self._swarm_target_id,
+                metadata={"surface_name": name},
+            )
+            for name in all_surfaces
+        ]
+
+    def swarm_config(self) -> SwarmConfig:
+        """Tuned for LLM-heavy variant work — moderate concurrency, longer timeout.
+
+        Each variant can fire up to ARGUS_ADAPTIVE_TURNS (default 6) LLM
+        calls in Tier-1 adaptive mode, plus N judge shots per policy.
+        Concurrency above ~8 will saturate the attacker provider's rate
+        limits and drown the target in concurrent sessions.
+        """
+        return SwarmConfig(
+            tuner=TunerConfig(
+                initial=int(os.environ.get("ARGUS_SWARM_CONCURRENCY", "4")),
+                target_p95_ms=8000,  # adaptive turns + judge shots are slow
+            ),
+            stop_on_first_confirm=False,  # PI-01 wants breadth, not speed
+            per_probe_timeout_s=float(
+                os.environ.get("ARGUS_PI01_PROBE_TIMEOUT", "180")
+            ),
+        )
+
+    async def run_probe(
+        self, technique: SwarmTechnique, surface: SwarmSurface,
+    ) -> SwarmProbeResult:
+        """Adapt PI-01's _fire_variant into the swarm's ProbeFn contract."""
+        variant = technique.metadata["pi01_variant"]
+        surface_name = surface.metadata["surface_name"]
+
+        try:
+            obs_finding_pairs = await self._fire_variant(
+                variant=variant,
+                surface=surface_name,
+                baseline_transcript=self._swarm_baseline_transcript,
+                target_id=self._swarm_target_id,
+            )
+        except AdapterError as e:
+            self._swarm_consecutive_failures += 1
+            self._swarm_run_result.skipped_errors += 1
+            if self.verbose:
+                print(f"  [{self.AGENT_ID}] adapter failed on variant "
+                      f"{variant.template_id}/{variant.mutator}: {e}")
+            return SwarmProbeResult(
+                technique_id=technique.id, surface_id=surface.id,
+                status=SwarmProbeStatus.ERROR,
+                error=f"AdapterError: {e}",
+            )
+
+        self._swarm_consecutive_failures = 0
+        self._swarm_run_result.variants_fired += 1
+        confirmed = bool(obs_finding_pairs)
+        return SwarmProbeResult(
+            technique_id=technique.id, surface_id=surface.id,
+            status=(
+                SwarmProbeStatus.CONFIRMED if confirmed
+                else SwarmProbeStatus.NEGATIVE
+            ),
+            confirmed=confirmed,
+            metadata={
+                "pi01_obs_finding_pairs": obs_finding_pairs,
+                "pi01_variant_id": technique.id,
+            },
+        )
+
+    async def on_confirm(self, result: SwarmProbeResult) -> None:
+        """Record findings + Pillar-2 evolve_corpus side-effect."""
+        obs_finding_pairs = result.metadata.get("pi01_obs_finding_pairs", [])
+        variant = self._swarm_variants_by_id.get(
+            result.metadata.get("pi01_variant_id", "")
+        )
+        for verdict, finding in obs_finding_pairs:
+            self._add_finding(finding)
+            self._swarm_run_result.findings.append(finding)
+            self._swarm_run_result.variants_validated += 1
+
+            # Pillar-2 Raptor Cycle: every landing attack becomes a
+            # corpus seed for the next engagement.
+            if self.evolve_corpus is not None and variant is not None:
+                try:
+                    self.evolve_corpus.add_template(
+                        text=variant.text,
+                        category="discovered",
+                        tags=list(variant.tags) + [
+                            "confirmed_landing",
+                            verdict.kind.value if verdict.kind else "ambiguous",
+                        ],
+                        surfaces=list(variant.surfaces) or [self._swarm_surface_name],
+                        severity=variant.severity,
+                        target_id=self._swarm_target_id,
+                        finding_id=finding.id,
+                    )
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [{self.AGENT_ID}] evolve_corpus.add_template "
+                              f"failed (non-fatal): {e}")
 
     # ── Internals ────────────────────────────────────────────────────────
 
