@@ -414,9 +414,20 @@ def _build_real_crew(config: CrewAIConfig):
 
 
 def _resolve_llm(llm_cfg: dict):       # pragma: no cover
-    """Stub LLM resolver. Real path creates a LiteLLM / OpenAI /
-    Anthropic client from env. Delegates to crewai's default LLM
-    chooser when no provider is specified."""
+    """Build the crewAI ``LLM`` instance the crew uses for its internal
+    agent calls, with failover propagated into litellm's runtime.
+
+    The construction goes through ``ArgusClient.build_litellm_kwargs(...)``
+    so that the chain ARGUS would use for its own LLM calls (judge, etc.)
+    is the same chain crewai's agents use internally. ``is_litellm=True``
+    is set explicitly to force the litellm dispatch path — without it,
+    crewai routes through native provider classes (anthropic.Anthropic,
+    openai.OpenAI) which do not honour ``fallbacks=[...]`` kwargs.
+
+    The chain is read from ``ARGUS_LLM_CHAIN`` (or the per-call override
+    in the YAML config). With no chain set, behaviour is identical to
+    pre-failover: a single primary model, single attempt.
+    """
     if not llm_cfg:
         return None
     provider = (llm_cfg.get("provider") or "openai").lower()
@@ -424,6 +435,7 @@ def _resolve_llm(llm_cfg: dict):       # pragma: no cover
         "openai":    "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "azure":     "AZURE_OPENAI_API_KEY",
+        "gemini":    "GEMINI_API_KEY",
     }.get(provider, "OPENAI_API_KEY")
     if not os.environ.get(key_env):
         raise AdapterError(
@@ -431,11 +443,27 @@ def _resolve_llm(llm_cfg: dict):       # pragma: no cover
             f"Export it or switch providers in the config."
         )
     model = llm_cfg.get("model") or "gpt-4o-mini"
+    # Per-call chain override in YAML, if provided. Falls through to
+    # ARGUS_LLM_CHAIN env var if absent (handled inside build_litellm_kwargs).
+    yaml_chain = llm_cfg.get("chain")
     try:
+        from argus.shared.client import ArgusClient
         from crewai import LLM    # type: ignore
-        return LLM(model=model)
+        litellm_kw = ArgusClient.build_litellm_kwargs(
+            provider, model, chain=yaml_chain,
+        )
+        # is_litellm=True forces crewai through litellm so fallbacks
+        # are honoured. Without this flag native providers handle the
+        # call directly and silently ignore the fallbacks list.
+        return LLM(is_litellm=True, **litellm_kw)
     except Exception:
-        # Fall through — let crewai pick a default.
+        # Fall through — let crewai pick a default. Logged via warnings
+        # so a misconfigured chain doesn't silently kill the engagement.
+        import warnings
+        warnings.warn(
+            "real-crewai: failed to construct LLM with failover chain, "
+            "falling back to crewai default", RuntimeWarning,
+        )
         return None
 
 
