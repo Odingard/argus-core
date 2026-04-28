@@ -147,7 +147,7 @@ def detect_traversal_success(response_text: str) -> tuple[bool, str]:
 def is_traversal_sanitized(path: str, allowed_base: str) -> bool:
     """Check if a path is properly sanitized (for defensive validation testing)."""
     try:
-        resolved = str(PurePosixPath(path).resolve())
+        _resolved = str(PurePosixPath(path).resolve())
         decoded = urllib.parse.unquote(path)
         normalized = str(PurePosixPath(decoded))
         return (
@@ -229,7 +229,7 @@ def build_double_norm_probe_matrix(
     ]
     matrix = []
     base = allowed_base.rstrip("/")
-    depth = len([p for p in base.split("/") if p]) + 2
+    _depth = len([p for p in base.split("/") if p]) + 2
     for target in targets:
         matrix.extend([
             # Layer 1: host decodes, passes to server raw

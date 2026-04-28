@@ -109,7 +109,12 @@ def _run_agent(agent_id: str, *, factory, output_dir: Path,
     try:
         from argus.plugins import get_plugin, run_plugin_agent
         if get_plugin(agent_id) is not None:
-            return run_plugin_agent(agent_id, **kwargs)
+            return run_plugin_agent(
+                agent_id,
+                factory=factory, output_dir=output_dir,
+                target_id=target_id, ev_corpus=ev_corpus,
+                eng_seed=eng_seed,
+            )
     except Exception:
         pass
 

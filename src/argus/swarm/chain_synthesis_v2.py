@@ -276,7 +276,7 @@ def synthesize_compound_chain(
 def compound_chain_to_l5(
     chain: "CompoundChain",
     target_id: str,
-) -> "L5Chains":
+) -> "L5Chains":  # noqa: F821
     """Convert a CompoundChain to the L5Chains shape that run_layer6()
     expects. Only validated chains produce ExploitChains — unvalidated
     chains return an empty L5Chains so layer6 exits cleanly.

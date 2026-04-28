@@ -227,7 +227,7 @@ def render_html(
             confirmed = f.get("exploitability_confirmed", False)
             capped    = f.get("confidence_capped", False)
             badge_style = _SEV_BADGE.get(sev, _SEV_BADGE["INFO"])
-            confirm_icon = "✓" if confirmed else ("~" if not capped else "⚑")
+            confirm_icon = "✓" if confirmed else ("~" if not capped else "⚑")  # noqa: F841
             confirm_title = ("Confirmed" if confirmed
                              else ("Capped - needs structural proof" if capped
                                    else "Unconfirmed"))

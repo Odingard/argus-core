@@ -90,7 +90,7 @@ def test_from_observation_wires_full_provenance_chain():
     # short evidence, so the gate caps it at MEDIUM. The test verifies
     # the gate is working, not that CRITICAL passes through.
     assert f.severity == "MEDIUM"
-    assert f.confidence_capped == True
+    assert f.confidence_capped is True
     assert f.confidence_cap_reason != ""
     # Auto-generated id is stable for the same inputs
     f2 = AgentFinding.from_observation(

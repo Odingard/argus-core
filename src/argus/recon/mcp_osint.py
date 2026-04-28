@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field

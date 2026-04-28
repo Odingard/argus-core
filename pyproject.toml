@@ -56,9 +56,11 @@ asyncio_mode = "auto"
 # strict.
 [tool.ruff]
 line-length = 120
+target-version = "py312"
 
 [tool.ruff.lint]
 ignore = [
+    "E402",   # module-level import not at top — intentional late/conditional imports
     "E501",   # line too long — enforced at 120 via line-length above
     "E701",   # multiple statements on one line (colon)
     "E702",   # multiple statements on one line (semicolon)

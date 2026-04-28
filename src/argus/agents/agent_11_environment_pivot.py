@@ -275,15 +275,15 @@ def _fill_required(schema: dict, already_set: dict) -> dict:
     props    = (schema or {}).get("properties") or {}
     if not isinstance(required, list):
         return out
-    for field in required:
-        if field in already_set:
+    for fname in required:
+        if fname in already_set:
             continue
-        kind = ((props.get(field, {}) or {}).get("type") or "string")
-        if   kind == "array":    out[field] = []
-        elif kind == "object":   out[field] = {}
-        elif kind in ("integer", "number"): out[field] = 0
-        elif kind == "boolean":  out[field] = False
-        else:                    out[field] = ""
+        kind = ((props.get(fname, {}) or {}).get("type") or "string")
+        if   kind == "array":    out[fname] = []
+        elif kind == "object":   out[fname] = {}
+        elif kind in ("integer", "number"): out[fname] = 0
+        elif kind == "boolean":  out[fname] = False
+        else:                    out[fname] = ""
     return out
 
 
@@ -920,9 +920,9 @@ def _shell_injection_payloads(
         return []
 
     out: list[dict] = []
-    for field in target_fields:
+    for fname in target_fields:
         for inj in _INJECTION_PAYLOADS:
-            out.append(_schema_payload(surface, field, inj))
+            out.append(_schema_payload(surface, fname, inj))
     return out
 
 
