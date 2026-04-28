@@ -13,11 +13,7 @@ full pipeline runs — seed ledger, CERBERUS rules, HTML report,
 ALEC envelope, layer6 advisory.
 """
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from argus.agents.base import AgentFinding
 from argus.swarm.chain_synthesis_v2 import (

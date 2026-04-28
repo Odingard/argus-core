@@ -6,9 +6,7 @@ before crashing, the runner must recover those findings from disk rather than
 treating the agent as zero-finding.
 """
 import json
-import os
 import tempfile
-import pytest
 from pathlib import Path
 from argus.agents.base import AgentFinding
 

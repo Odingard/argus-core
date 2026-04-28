@@ -69,7 +69,7 @@ class PackageOSINT:
 def _fetch_json(url: str, timeout: int = 8) -> Optional[dict]:
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosemgrep: dynamic-urllib-use-detected
             return json.loads(r.read().decode())
     except Exception:
         return None
@@ -126,8 +126,7 @@ def _osv_query(package: str, ecosystem: str) -> list[dict]:
             return result
     except Exception:
         pass
-    return []    except Exception:
-        return []
+    return []
 
 
 def _score_npm(meta: PackageOSINT) -> None:

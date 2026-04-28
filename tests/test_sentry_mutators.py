@@ -10,7 +10,6 @@ variants where ordering matters and assert shape invariants elsewhere.
 """
 from __future__ import annotations
 
-import pytest
 
 from argus.corpus_attacks import (
     CrescendoMutator,

@@ -10,8 +10,6 @@ Covers:
   - Each mutator has a unique name
   - LLMMutator job-specific routing table entries exist
 """
-import os
-import pytest
 
 
 def _mutator_names(mutators: list) -> list[str]:
@@ -24,7 +22,8 @@ def test_static_mutators_always_present(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     # Need to reimport after env change
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     mutators = mod.default_mutators()
     names = _mutator_names(mutators)
@@ -37,7 +36,8 @@ def test_sentry_mutators_always_present(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     mutators = mod.default_mutators()
     names = _mutator_names(mutators)
@@ -49,7 +49,8 @@ def test_keyless_count(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     mutators = mod.default_mutators()
     # 8 static + crescendo + cognitive_camouflage = 10
@@ -58,7 +59,8 @@ def test_keyless_count(monkeypatch):
 
 def test_llm_mutators_added_with_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     mutators = mod.default_mutators()
     names = _mutator_names(mutators)
@@ -68,7 +70,8 @@ def test_llm_mutators_added_with_key(monkeypatch):
 
 def test_with_key_count(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     mutators = mod.default_mutators()
     # 8 static + 2 sentry + 3 llm = 13
@@ -77,7 +80,8 @@ def test_with_key_count(monkeypatch):
 
 def test_llm_seed_indices_unique_per_call(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     # Two calls should produce different seed indices
     m1 = mod.default_mutators()
@@ -92,7 +96,8 @@ def test_llm_seed_indices_unique_per_call(monkeypatch):
 
 def test_all_mutator_names_unique(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    import importlib, argus.corpus_attacks.mutators as mod
+    import importlib
+    import argus.corpus_attacks.mutators as mod
     importlib.reload(mod)
     names = _mutator_names(mod.default_mutators())
     assert len(names) == len(set(names)), f"Duplicate names: {names}"

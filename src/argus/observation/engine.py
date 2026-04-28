@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from argus.observation.verdict import BehaviorDelta, DetectionMethod, Verdict
+from argus.observation.verdict import BehaviorDelta, Verdict
 
 
 class Detector(Protocol):

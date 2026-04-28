@@ -19,10 +19,8 @@ file contents, the actual error, the actual shell output.
 """
 from __future__ import annotations
 
-import base64
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 # ── Extraction patterns — BOTH Linux and macOS ────────────────────────────────

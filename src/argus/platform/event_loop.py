@@ -23,7 +23,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import threading
 from typing import Any, Coroutine, TypeVar
 
 T = TypeVar("T")

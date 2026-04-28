@@ -122,7 +122,6 @@ def default_policy_set(
     ``load_env_overrides=False`` disables tier 3 — useful in tests
     where the working directory might have an unrelated policies.yaml.
     """
-    from argus.policy.base import PolicySet  # local — keeps import lean
     overrides: list = []
     if load_env_overrides:
         try:

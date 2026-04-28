@@ -9,8 +9,6 @@ Covers:
   - Single-finding chain: no abort, full pipeline continues
   - Runner recovery of disk-persisted findings after agent error
 """
-import pytest
-from unittest.mock import MagicMock
 from argus.agents.base import AgentFinding
 from argus.observation.verdict import (
     Verdict, BehaviorDelta, DeltaKind, DetectionMethod,

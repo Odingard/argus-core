@@ -641,7 +641,7 @@ def main() -> int:
                 generations=args.demo_generations,
             )
         print(f"unknown --demo: {args.demo}")
-        print(f"  available demos: evolver")
+        print("  available demos: evolver")
         return 2
 
     # --sandbox: toggle the stdio-mcp factory to wrap subprocesses

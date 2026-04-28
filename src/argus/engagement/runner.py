@@ -21,7 +21,6 @@ thin wrappers around this now):
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -40,7 +39,6 @@ from argus.entropy import EngagementSeed, SeedLedger
 from argus.evidence import EvidenceCollector, attach_evidence
 from argus.evidence.oob import OOBListener
 from argus.impact import optimize_impact
-from argus.memory.target_class import TargetClassMemory, TargetClass
 from argus.swarm.chain_synthesis_v2 import synthesize_compound_chain
 
 
@@ -81,7 +79,7 @@ def _run_agent(agent_id: str, *, factory, output_dir: Path,
             # No chat surface on the target — PI-01's injection probes
             # have nothing to attach to. Skip cleanly rather than
             # firing a malformed request that breaks the transport.
-            print(f"  [PI-01] no chat surface on target; skipping")
+            print("  [PI-01] no chat surface on target; skipping")
             return []
         from argus.agents.agent_01_prompt_injection import (
             PromptInjectionHunter,
@@ -197,7 +195,7 @@ def _sequential_slate(slate, kwargs):
     a truly fresh event loop per agent with no anyio state bleed.
     This fixes the Python 3.14 cancel-scope crash when running
     ARGUS_SEQUENTIAL=1 from the main thread."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
     for agent_id in slate:
         with ThreadPoolExecutor(max_workers=1) as pool:
             fut = pool.submit(_run_agent, agent_id, **kwargs)
@@ -550,7 +548,8 @@ class EngagementRunner:
                 # after CRITICAL confirmed). Load them so they aren't lost.
                 recovered: list = []
                 try:
-                    import glob as _glob, json as _json
+                    import glob as _glob
+                    import json as _json
                     pattern = str(
                         self.paths.findings / agent_id.lower().replace("-","") /
                         f"{agent_id.upper()}_findings.json"
@@ -849,9 +848,8 @@ class EngagementRunner:
             )
             from argus.swarm.chain_synthesis_v2 import (
                 CompoundChain, ChainStep, _owasp_entry_for,
-                _stable_chain_id, OWASP_AGENTIC_TOP10,
+                _stable_chain_id,
             )
-            import hashlib as _hl
             top = findings[0]
             owasp = _owasp_entry_for(top.vuln_class)
             step = ChainStep(

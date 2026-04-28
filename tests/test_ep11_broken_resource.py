@@ -6,11 +6,8 @@ findings were confirmed in memory but before save_findings() was called.
 This test verifies findings are persisted even when the adapter raises
 on __aexit__.
 """
-import asyncio
 import os
 import tempfile
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class _BrokenAdapter:

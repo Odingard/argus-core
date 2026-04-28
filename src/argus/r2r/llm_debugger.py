@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
 
 
 @dataclass
@@ -109,7 +108,7 @@ def analyze(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:  # nosemgrep: dynamic-urllib-use-detected
             data = json.loads(r.read().decode())
         text = ""
         for block in data.get("content", []):
@@ -125,7 +124,7 @@ def analyze(
             confidence=float(result.get("confidence", 0.5)),
             env_vars_needed=result.get("env_vars_needed", []),
         )
-    except Exception as e:
+    except Exception:
         return _heuristic_fallback(tool_names, working_dir)
 
 

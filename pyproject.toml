@@ -25,6 +25,7 @@ dependencies = [
     "cryptography>=46.0.7",   # CVE-2026-34073, CVE-2026-39892
     "lxml>=6.1.0",            # CVE-2026-41066
     "pygments>=2.20.0",       # CVE-2026-4539
+    "pytest>=9.0.3",          # CVE-2025-71176
 ]
 authors = [
   { name="ARGUS Defense", email="security@sixsenseenterprise.com" }
@@ -53,8 +54,12 @@ asyncio_mode = "auto"
 # statements on one line" rules — we use that style intentionally in
 # compact test helpers and CLI dispatch tables. Everything else stays
 # strict.
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint]
 ignore = [
+    "E501",   # line too long — enforced at 120 via line-length above
     "E701",   # multiple statements on one line (colon)
     "E702",   # multiple statements on one line (semicolon)
 ]

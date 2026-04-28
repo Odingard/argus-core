@@ -727,7 +727,7 @@ class PromptInjectionHunter(SwarmAgentMixin, BaseAgent):
         # PI-01's natural policy subset: prompt injection + system-
         # prompt leakage + indirect-prompt-injection + any global
         # that the registry already applies to "all".
-        technique_id = f"PI-T1-instruction-override"
+        technique_id = "PI-T1-instruction-override"
         relevant = self.policy_set.relevant_for(technique_id=technique_id)
         print(f"  [{self.AGENT_ID}] judge engaged on variant "
               f"{variant.template_id}/{variant.mutator} → "

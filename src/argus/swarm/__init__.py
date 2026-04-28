@@ -29,11 +29,6 @@ from argus.swarm.agent_mixin import (
     SwarmRunSummary,
     swarm_mode_enabled,
 )
-from argus.swarm.agent_mixin import (
-    SwarmAgentMixin,
-    SwarmRunSummary,
-    swarm_mode_enabled,
-)
 from argus.swarm.chain_synthesis_v2 import synthesize_compound_chain
 from argus.swarm.concurrency import (
     AdaptiveConcurrencyTuner,

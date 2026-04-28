@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Optional
 
 from argus.r2r.target_resolver import TargetContext, resolve
 
@@ -77,7 +76,8 @@ async def run(target_url: str, adapter) -> R2RResult:
         # Collect stderr from adapter if available
         stderr = ""
         try:
-            import glob, os
+            import glob
+            import os
             files = glob.glob("/var/folders/**/*.argus_stderr",
                               recursive=True)
             if files:
@@ -156,7 +156,6 @@ def _save_requirement_signature(
     """Persist what initialization this target class needs.
     Next run: TIP checks here first, no LLM call needed."""
     try:
-        from argus.evolve.cross_pollination import CrossPollinationRegistry
         from pathlib import Path
         import json
 

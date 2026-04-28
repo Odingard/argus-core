@@ -5,8 +5,6 @@ When chain synthesis returns None (fewer than 2 findings), the runner
 must NOT abort. It must build a synthetic chain and continue through
 the full pipeline — CERBERUS, ALEC, seed ledger, HTML report.
 """
-import pytest
-from unittest.mock import MagicMock, patch
 from argus.agents.base import AgentFinding
 from argus.swarm.chain_synthesis_v2 import synthesize_compound_chain
 
@@ -76,7 +74,7 @@ def test_single_finding_chain_has_correct_fields():
         chain_id=cid,
         target_id="test-target",
         title=f"Single-finding: {f.title[:80]}",
-        summary=f"CRITICAL finding on test-target",
+        summary="CRITICAL finding on test-target",
         steps=[step],
         severity=f.severity,
         blast_radius="host",

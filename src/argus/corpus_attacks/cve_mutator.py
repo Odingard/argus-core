@@ -134,7 +134,6 @@ class CVEMutator:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=400,
         )
-        import anthropic as _anth
         if hasattr(resp, "content"):
             for block in resp.content:
                 if hasattr(block, "text"):
