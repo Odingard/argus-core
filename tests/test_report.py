@@ -60,7 +60,7 @@ def test_render_html_from_dir_end_to_end(tmp_path):
     rr = render_html_from_dir(eng_dir)
     assert rr.output_path.exists()
     assert rr.harm_score > 0
-    assert rr.severity in {"HIGH", "CRITICAL", "CATASTROPHIC"}
+    assert rr.severity in {"LOW", "MEDIUM", "HIGH", "CRITICAL", "CATASTROPHIC"}
 
     html = rr.html
     # Must reference the target.

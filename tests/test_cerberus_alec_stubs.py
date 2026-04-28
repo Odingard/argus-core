@@ -99,7 +99,7 @@ def test_write_rules_persists_payload(tmp_path):
     assert out.exists()
     data = json.loads(out.read_text())
     assert data["rule_count"] == 1
-    assert data["format_version"] == "argus.cerberus.v0-stub"
+    assert data["format_version"] == "argus.cerberus.v1"
     assert data["rules"][0]["rule_id"] == rules[0].rule_id
 
 

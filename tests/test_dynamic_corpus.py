@@ -44,10 +44,9 @@ def test_llm_mutator_caches_so_repeated_calls_cost_nothing(tmp_path):
 def test_llm_mutator_bulk_creates_n_distinct_variants(tmp_path):
     """Acceptance: ≥3 distinct variants per template."""
     def stub(prompt: str) -> str:
-        # Different seed indices appear in the prompt body.
-        # Use them to vary the output.
+        # _prompt() embeds "SEED: {seed_index}" — use it to vary output.
         for i in range(10):
-            if f"VARIANT INDEX (use as a phrasing seed): {i}" in prompt:
+            if f"SEED: {i}" in prompt:
                 return f"variant {i}: rephrased attack"
         return "default"
 

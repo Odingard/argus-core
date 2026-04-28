@@ -117,21 +117,21 @@ def test_sentry_mutators_bundle_shape():
     assert names == {"crescendo", "cognitive_camouflage"}
 
 
-def test_sentry_mutators_not_in_default_bundle():
-    """Sentry mutators are opt-in (3-5x token cost); must NOT leak into
-    ``default_mutators()``."""
+def test_sentry_mutators_in_default_bundle():
+    """Crescendo and cognitive_camouflage were promoted to default_mutators()
+    (zero LLM cost, pure Python). Verify they are present."""
     default_names = {m.name for m in default_mutators()}
-    assert "crescendo" not in default_names
-    assert "cognitive_camouflage" not in default_names
+    assert "crescendo" in default_names
+    assert "cognitive_camouflage" in default_names
 
 
 def test_sentry_mutators_integrate_with_corpus():
-    """Corpus accepts sentry mutators alongside defaults and the corpus
-    still yields unique variant fingerprints."""
+    """Corpus accepts sentry mutators alongside defaults and produces
+    unique variant fingerprints — no duplicate fps regardless of overlap."""
     c = Corpus(mutators=default_mutators() + sentry_mutators())
     variants = list(c.iter_variants())
     fps = [v.fingerprint for v in variants]
     assert len(fps) == len(set(fps)), "sentry mutators leaked duplicate fps"
-    # Sentry-bundled corpus must strictly exceed the default corpus count.
+    # Corpus must produce at least as many variants as defaults alone.
     default_count = len(list(Corpus(mutators=default_mutators()).iter_variants()))
-    assert len(variants) > default_count
+    assert len(variants) >= default_count

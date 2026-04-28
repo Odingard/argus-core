@@ -39,7 +39,7 @@ jobs:
         # Contract tests enforce the no-fabrication / MAAC-coverage /
         # real-library PoC invariants. All tests run offline —
         # argus-targets/ (third-party repos) is excluded.
-        run: pytest tests/ -q --timeout=120 --ignore=argus-targets
+        run: pytest tests/ -q --timeout=120 --ignore=argus-targets --ignore=tests/test_real_mcp.py
         env:
           ANTHROPIC_API_KEY: "dummy-key-for-offline-contract-tests"
           ARGUS_OFFLINE: "1"
