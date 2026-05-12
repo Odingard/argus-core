@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-core"
-version = "0.6.3"
-description = "Autonomous AI Red Team Platform — Core (OSS tier)"
+version = "1.0.0"
+description = "Autonomous AI Red Team Platform — Core (OSS tier, substrate-included)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
-    "pydantic",
+    "pydantic>=2.6",
     "google-generativeai",
     "anthropic",
     "openai",
@@ -18,7 +18,18 @@ dependencies = [
     "networkx",
     "mcp",
     "docker",
-    "pyyaml",
+    "pyyaml>=6.0",
+    # Substrate dependencies — folded in via Φ_Ω of the integration arc
+    # (previous home: github.com/Odingard/ARGUS-ENGINE, archived). Trimmed
+    # to what substrate actually imports (audit at fold time): the
+    # substrate's standalone pyproject also listed sentence-transformers,
+    # pillow, and a redundant pyyaml pin, but no module under
+    # ``argus.engine.*`` imports them — they are dropped to keep
+    # ``pip install argus-core`` lean (~3 GB of torch wheels not pulled).
+    "httpx>=0.27",          # argus.engine.recon + transports
+    "click>=8.1",           # argus.engine.cli
+    "rich>=13.7",           # argus.engine.reporting (HUD cockpit + narrator)
+    "pyfiglet>=1.0",        # argus.engine.cli BREACH banner
     # Security floor pins — block the known-vulnerable transitive
     # versions surfaced by pip-audit 2026-04-21 from reappearing on a
     # fresh install.
@@ -34,6 +45,7 @@ authors = [
 [project.scripts]
 argus            = "argus.cli:_cli_entry"
 argus-pre-commit = "argus.integrations.pre_commit:run_pre_commit"
+argus-engine     = "argus.engine.cli:main"
 
 [project.optional-dependencies]
 webhook = [
@@ -41,6 +53,14 @@ webhook = [
     "uvicorn[standard]>=0.29",
     "pydantic>=2.6",
 ]
+
+# ── Package discovery ──────────────────────────────────────────────────────
+# After Φ_Ω substrate fold, src/ ships two top-level packages: ``argus``
+# (canonical) and ``argus_engine`` (back-compat shim). Auto-discovery is
+# explicit so both reach the wheel.
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["argus*", "argus_engine*"]
 
 # ── Pytest config ──────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
@@ -56,7 +76,9 @@ asyncio_mode = "auto"
 # strict.
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+# Φ_Ω: requires-python is 3.11; lint against the floor so we don't accept
+# 3.12-only syntax that would fail on the minimum supported interpreter.
+target-version = "py311"
 
 [tool.ruff.lint]
 ignore = [
