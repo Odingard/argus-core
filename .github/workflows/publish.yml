@@ -3,6 +3,16 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  # Manual fallback — used when a release's ``published`` event misses
+  # the workflow trigger (e.g. when a long-lived draft is promoted, or
+  # when the PyPI trusted-publisher config has to be repaired and the
+  # publish has to be re-fired without recreating the GitHub release).
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag, branch, or SHA to build and publish (e.g. v1.0.0)."
+        required: true
+        type: string
 
 # OIDC trusted publishing — no API token needed. PyPI project config
 # must list this repo + workflow + environment as a trusted publisher:
@@ -18,6 +28,8 @@ jobs:
     environment: pypi
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
