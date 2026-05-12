@@ -10,7 +10,8 @@ them where they belong, not where it feels easy.
 | Path | What | Owned by |
 |---|---|---|
 | `src/argus/` | The platform. All production code. | Engineering |
-| `tests/` | Pytest suite. Mirrors `src/argus/` structure where it makes sense. | Engineering |
+| `src/argus_engine/` | Back-compat shim — re-exports `argus.engine.*` for callers that still import `argus_engine.*` (substrate's pre-fold name). Meta-path finder; no double-registration. Retained through the 1.x line. | Engineering |
+| `tests/` | Pytest suite. Mirrors `src/argus/` structure where it makes sense. `tests/substrate/` holds the substrate test suite folded in from ARGUS-ENGINE in 1.0. | Engineering |
 | `legacy/` | Pre-2026-04-21 implementation. Reference only — not imported. | Archive |
 | `packages/argus-redteam/` | PyPI compat shim, redirects to `argus-core`. | Distribution |
 | `benchmark/` | Performance benchmarks (e.g. swarm vs legacy probe orchestration). | Engineering |
@@ -73,6 +74,7 @@ find it.
 | `mcp_attacker/` | MCP-specific attack module. `mcp_live_attacker.py` is the entry. |
 | `shadow_mcp/` | Shadow-MCP attacker for stealthy MCP probing. |
 | `adversarial/` | Adversarial mutation strategies layered on the corpus. |
+| `engine/` | **Substrate** — Kali-grade structural exploit framework folded in from ARGUS-ENGINE in 1.0. Five attack layers (`layer1_tool_poisoning/` through `layer5_orchestration/`) plus Phase K MCP-depth + Phase S structurally-different classes (52 classes, ~16,550 deterministic variants). `runtime/` holds the autonomous Supervisor + StrategyNavigator FSM; `grading/` ships deterministic matchers (canary anchor, structural regex, credential-shape, behavioural drift, signal strength); `transports/` ships OpenAI/Anthropic/Ollama/MCP/OOB providers. Determinism (rule #7) and no-silent-failure (rule #9) guarantees from ARGUS-ENGINE AGENTS.md hold end-to-end. Driven by the `argus-engine` console script. |
 
 ### Detection / scoring
 
